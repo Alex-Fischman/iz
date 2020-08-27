@@ -1,14 +1,7 @@
-JS = iz.js
-
+CPP = iz.cpp
 IZ = test.iz
-ASM = $(IZ:.iz=.S)
-OUT = $(IZ:.iz=.out)
+LL = test.ll
 
-all: $(OUT)
-	./$<
-
-$(OUT): $(ASM)
-	gcc $< -o $@
-
-$(ASM): $(JS) $(IZ)
-	node $(JS) $(IZ) $(ASM)
+all:
+	g++ $(CPP) -o iz -Wall -std=c++2a
+	./iz $(IZ) $(LL)
