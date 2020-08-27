@@ -1,0 +1,19 @@
+#brackets ( ) roundBrackets
+#brackets { } curlyBrackets
+#brackets [ ] blockBrackets
+
+#operator . dot 4 l 2 1
+#operator : type 0 r 2 1
+#operator := init 0 r 2 1
+#operator -> func 1 r 2 1
+
+#operator + add 2 l 2 1
+#operator - sub 2 l 2 1
+#operator * mul 3 l 2 1
+#operator / div 3 l 2 1
+
+cross := (a : Vector3, b : Vector3) -> (
+	a.1 * b.2 - a.2 * b.1
+	a.2 * b.0 - a.0 * b.2
+	a.0 * b.1 - a.1 * b.0
+)

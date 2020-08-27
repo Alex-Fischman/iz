@@ -1,0 +1,25 @@
+Types
+	Signify constraints of some kind
+	Functions are polymorphic
+	Interfaces are like interfaces in Go or typeclasses in Haskell
+	Structurally typed
+Functions/Procedures/Methods
+	Takes one input and returns one output
+	Either can be a tuple
+	Either can be another function
+Structs/Tuples/Classes/Objects
+	Holds any number of values of any type
+	Can optionally have names for its values
+	A struct of one element can be cast to that element and vice versa
+Lists/Arrays
+	Holds any number of values of the same type
+
+TODO:
+
+Cleanup
+
+Typing
+
+Sizing
+
+Generation
