@@ -2,7 +2,40 @@
 #include <iostream>
 #include <vector>
 
-#include "tree.cpp"
+template <class V>
+struct Tree {
+	V value;
+	std::vector<Tree<V>> children;
+};
+
+template <class V>
+Tree<V> preorder(Tree<V>(*f)(const Tree<V>&), const Tree<V>& in) {
+	Tree<V> out = f(in);
+	for (uint i = 0; i < out.children.size(); ++i) 
+		out.children[i] = postorder(f, out.children[i]);
+	return out;
+}
+
+template <class V>
+Tree<V> postorder(Tree<V>(*f)(const Tree<V>&), const Tree<V>& in) {
+	Tree<V> out = in;
+	for (uint i = 0; i < out.children.size(); ++i) 
+		out.children[i] = postorder(f, out.children[i]);
+	return f(out);
+}
+
+template <class T>
+std::ostream& printTree(std::ostream& os, const Tree<T>& tree, int depth) {
+	os << std::string(depth, '-') << '|' << tree.value << '\n';
+	for (uint i = 0; i < tree.children.size(); i++) 
+		printTree(os, tree.children[i], depth + 1);
+	return os;
+}
+
+template <class T>
+std::ostream& std::operator<<(std::ostream& os, Tree<T>& tree) {
+	return printTree(os, tree, 0);
+}
 
 struct Token {
 	enum { TODO, Ignored, String, Operator, Identifier } type;
@@ -109,18 +142,16 @@ std::vector<Token> groupOperators(const std::vector<Token>& in) {
 		return a.size() > b.size();
 	});
 
-	// CLEAN
 	std::vector<Token> out = in;
 	for (uint i = 0; i < out.size(); i++) {
 		for (std::string n : names) {
-			uint matched = 0;
-			for (uint k = 0; k < n.size(); k++) 
-				if (out[i + k].str[0] == n[k]) matched++;
-			if (matched == n.size()) {
+			std::string slice = "";
+			for (uint k = 0; k < n.size(); k++) slice += out[i + k].str;
+			if (n == slice) {
 				out[i].type = Token::Operator;
 				out[i].str = n;
 				out.erase(out.begin() + i + 1, out.begin() + i + n.size());
-				break;
+				break; // CLEAN
 			}
 		}
 	}
@@ -182,7 +213,6 @@ AST parseOperators(const AST& in) {
 			if (in.children[i].value.str == operators[j].name) 
 				opsInAST.push_back({i, operators[j]});
 
-	// TODO: figure out why using std::sort fatally errors INSIDE THE SORT
 	std::stable_sort(opsInAST.begin(), opsInAST.end(), [] (auto a, auto b) {
 		return a.second.prec > b.second.prec || 
 			(a.second.prec == b.second.prec && a.second.left);
@@ -199,6 +229,21 @@ AST parseOperators(const AST& in) {
 				if (opsInAST[k].first > j) --opsInAST[k].first;
 		}
 	}
+	return out;
+}
+
+AST parseCalls(const AST& in) {
+	if (in.value.str == "root") return in;
+	if (in.value.str == "$") return {{Token::Identifier, "call"}, in.children};
+	
+	std::string func = "";
+	for (Operator o : operators) if (o.name == in.value.str) func = o.func;
+	for (Brackets b : brackets)  if (b.open == in.value.str) func = b.func;
+	if (func == "") return in;
+
+	AST out = {{Token::Identifier, "call"}};
+	out.children.push_back({{Token::Identifier, func}});
+	for (AST c : in.children) out.children.push_back(c);
 	return out;
 }
 
@@ -226,6 +271,7 @@ int main(int argc, char const *argv[]) {
 	for (Token t : tokens) ast.children.push_back({t});
 	ast = parseBrackets(ast);
 	ast = postorder(parseOperators, ast);
+	ast = postorder(parseCalls, ast);
 
 	std::cout << ast;
 
