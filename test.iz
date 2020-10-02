@@ -1,11 +1,7 @@
-#brackets ( ) roundBrackets ~~ intrinsic
-#brackets { } curlyBrackets ~~ intrinsic
-#brackets [ ] blockBrackets ~~ intrinsic
+#match ( ) parentheses
+#affix + add 2 1 1 l
+#affix * mul 2 1 2 l
+#affix - sub 2 1 1 l
+#affix / div 2 1 2 l
 
-#operator := init 0 r 2 1
-#operator -> func 1 r 2 1
-#operator $ call 2 l 2 1 ~~ intrinsic
-
-add := (a, b) -> emit$()
-
-main := (argc, argv) -> add$(1 2)
+1 + 2 * (3-4/5)

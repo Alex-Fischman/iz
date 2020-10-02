@@ -1,0 +1,16 @@
+before ~~ after
+start ~ middle ~ end
+#affix + add 2 1 1 l
+#match ( ) parentheses
+"string with whitespace and escapes \"\\\t"
+"source code
+#affix + add 2 1 1 l
+source code"
+whitespace	separated
+tokens
+operator+separated+tokens
+"string+not+separated"
+#affix if if_ 2 0 0 r
+token_that_keeps_if
+#affix ++ add2 1 1 1 l
+a ++ b
