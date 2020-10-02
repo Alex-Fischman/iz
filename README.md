@@ -1,2 +1,2 @@
 # iz
-Simple programming language.
+Parser designed for a future programming language.
