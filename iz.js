@@ -109,11 +109,16 @@ function parse(tokens, affixes, matches) {
 					}
 				}
 			}
-			opsInAST.sort((a, b) => {
+			opsInAST = opsInAST.map((x, i) => [x, i]).sort(([a, i], [b, j]) => {
 				let precs = b.affix.prec - a.affix.prec;
 				if (precs) return precs;
-				return a.affix.assoc == "l";
+				else if (a.affix.assoc == "l") {
+					return i - j;
+				} else {
+					return j - i;
+				}
 			});
+			opsInAST = opsInAST.map(([x, _]) => x);
 			let out = ast;
 			for (let i = 0; i < opsInAST.length; i++) {
 				let start = opsInAST[i].index - opsInAST[i].affix.pos;
