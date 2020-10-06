@@ -112,7 +112,7 @@ function parse(tokens, affixes, matches) {
 			opsInAST.sort((a, b) => {
 				let precs = b.affix.prec - a.affix.prec;
 				if (precs) return precs;
-				return -1 * (a.affix.assoc == "l");
+				return a.affix.assoc == "l";
 			});
 			let out = ast;
 			for (let i = 0; i < opsInAST.length; i++) {
