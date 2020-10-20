@@ -109,27 +109,26 @@ function parse(tokens, affixes, matches) {
 					}
 				}
 			}
-			opsInAST = opsInAST.map((x, i) => [x, i]).sort(([a, i], [b, j]) => {
+			opsInAST = opsInAST.sort((a, b) => {
 				let precs = b.affix.prec - a.affix.prec;
 				if (precs) return precs;
-				else if (a.affix.assoc == "l") {
-					return i - j;
-				} else {
-					return j - i;
-				}
+				else return (a.index - b.index) * (a.affix.assoc == "l"? 1: -1);
 			});
-			opsInAST = opsInAST.map(([x, _]) => x);
 			let out = ast;
 			for (let i = 0; i < opsInAST.length; i++) {
 				let start = opsInAST[i].index - opsInAST[i].affix.pos;
 				let end = start + opsInAST[i].affix.arity;
-				for (let j = start; j < end; j++) {
-					out.cs[opsInAST[i].index].cs.push(out.cs[j]);
-					out.cs.splice(j, 1);
-					for (let k = 0; k < opsInAST.length; k++) {
-						if (opsInAST[k].index > j) {
-							opsInAST[k].index--;
+				for (let j = start; j <= end; j++) {
+					if (opsInAST[i].index != j) {
+						out.cs[opsInAST[i].index].cs.push(out.cs[j]);
+						out.cs.splice(j, 1);
+						for (let k = 0; k < opsInAST.length; k++) {
+							if (opsInAST[k].index >= j) {
+								opsInAST[k].index--;
+							}
 						}
+						end--;
+						j--;
 					}
 				}
 			}
