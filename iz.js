@@ -8,14 +8,6 @@ function tokenize(string, affixes, matches) {
 	let escaped = false;
 	return Array.from(string)
 		.map((c, i) => new lib.Token(c, i + 1))
-		// Line comments
-		.split((t, i, ts) => t.str == "~" && i + 1 < ts.length && ts[i + 1].str == "~")
-		.map((ts, i) => i == 0? ts: ts.slice(ts.findIndex(t => t.str == "\n")))
-		.flat()
-		// Block comments
-		.split(t => t.str == "~")
-		.filter((_, i) => i % 2 == 0)
-		.flat()
 		// Strings
 		.reduce((acc, t) => {
 			if (acc.last() && acc.last().str.startsWith("\"")) {
@@ -57,6 +49,10 @@ function tokenize(string, affixes, matches) {
 			return ts.slice(j);
 		})
 		.flat()
+		// Comments
+		.split(t => t.str == "#")
+		.map((ts, i) => i == 0? ts: ts.slice(ts.findIndex(t => t.str == "\n")))
+		.flat()
 		// Whitespace separation
 		.split(t => t.str.isWhitespace())
 		.filter(ts => ts.length != 0)
@@ -88,7 +84,7 @@ function tokenize(string, affixes, matches) {
 }
 
 function parse(tokens, affixes, matches) {
-	let ast = new lib.Tree(new lib.Token("ROOT", 0));
+	let ast = new lib.Tree(new lib.Token("const", 0));
 	let stack = [{closer: "", tree: ast}];
 	for (let t of tokens) {
 		let match = matches.find(m => t.str == m.opener);
@@ -135,18 +131,11 @@ function parse(tokens, affixes, matches) {
 			return out;
 		})
 		.map(ast => {
-			if (ast.v.str == "ROOT") return ast;
-			if (ast.v.str == "$") return new lib.Tree(new lib.Token("call", 0), ast.cs);
-
 			let func = "";
 			for (let a of affixes) if (a.name == ast.v.str) func = a.func;
 			for (let m of matches) if (m.opener == ast.v.str) func = m.func;
-			if (func == "") return ast;
-
-			let out = new lib.Tree(new lib.Token("call", 0));
-			out.cs.push(new lib.Tree(new lib.Token(func)));
-			for (let c of ast.cs) out.cs.push(c);
-			return out;
+			if (func != "") ast.v.str = func;
+			return ast;
 		});
 	return ast;
 }
