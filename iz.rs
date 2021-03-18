@@ -1,9 +1,6 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 fn main() {
     let tokens: Vec<Token> = std::fs::read_to_string("scratch.iz")
-        .expect("file")
+        .unwrap()
         .chars()
         .enumerate()
         .map(|(i, c)| Token(c.to_string(), i))
@@ -77,22 +74,35 @@ fn main() {
                 arity: args[3].parse().unwrap(),
                 pos: args[4].parse().unwrap(),
                 prec: args[5].parse().unwrap(),
-                assoc: if args[6].to_string() == "l" { Assoc::Left} else if args[6].to_string() == "r" {Assoc::Right} else {panic!("invalid assoc: {}", args[6].to_string())},
+                assoc: if args[6].to_string() == "l" {
+                    Assoc::Left
+                } else if args[6].to_string() == "r" {
+                    Assoc::Right
+                } else {
+                    panic!("invalid assoc: {}", args[6].to_string())
+                },
             });
         }
     }
-    affixes.sort_unstable_by_key(|a| a.prec);
+
     let tokens: Vec<Token> = tokens
         .split(|t| t.0.chars().next().unwrap().is_whitespace())
         .filter(|v| !v.is_empty())
-        .map(|v| {
-            Token(
-                v.iter()
-                    .map(|t| t.0.clone())
-                    .collect::<Vec<String>>()
-                    .join(""),
-                v[0].1,
-            )
+        .flat_map(|v| {
+            let mut out = Vec::new();
+            let mut append = true;
+            for t in v {
+                if t.0.starts_with("\"") {
+                    out.push(t.clone());
+                    append = true;
+                } else if append {
+                    out.push(t.clone());
+                    append = false;
+                } else {
+                    out.last_mut().unwrap().0.push_str(t.0.as_str());
+                }
+            }
+            out
         })
         .collect();
 
@@ -101,7 +111,8 @@ fn main() {
         .flat_map(|m| vec![m.opener.as_str(), m.closer.as_str()])
         .chain(affixes.iter().map(|a| a.name.as_str()))
         .collect();
-    names.sort_unstable_by_key(|s| s.len() as isize * -1);
+    names.sort_unstable_by_key(|s| s.len());
+    names.reverse();
     let tokens: Vec<Token> = tokens
         .iter()
         .flat_map(|t| {
@@ -117,32 +128,38 @@ fn main() {
                         } else {
                             let mut i = 0;
                             for (j, m) in t.0.match_indices(n) {
-                                ts.push(Token(t.0[i..j].to_string(), t.1 + i));
+                                if i < j {
+                                    ts.push(Token(t.0[i..j].to_string(), t.1 + i));
+                                }
                                 ts.push(Token(m.to_string(), t.1 + j));
                                 i = j + n.len();
                             }
-                            ts.push(Token(t.0[i..].to_string(), i));
+                            if i < t.0.len() {
+                                ts.push(Token(t.0[i..].to_string(), i));
+                            }
                         }
-                        return ts;
+                        ts
                     })
                     .collect()
             })
         })
-        .filter(|t| !t.0.is_empty())
         .collect();
 
-    let ast = new_tree(Token("ROOT".to_string(), 0));
+    let mut ast = Tree::new(Token("ROOT".to_string(), 0));
     let mut stack: Vec<&str> = vec![];
     for t in tokens {
         if &t.0 == stack.last().unwrap_or(&"") {
             stack.pop();
         } else {
-            let mut tree = ast.clone();
-            for _ in &stack {
-                let child = Rc::clone(tree.borrow().children.last().unwrap());
-                tree = child;
+            fn insert_last(t: &mut Tree<Token>, child: Tree<Token>, depth: usize) {
+                if depth == 0 {
+                    t.children.push(child);
+                } else {
+                    insert_last(t.children.last_mut().unwrap(), child, depth - 1);
+                }
             }
-            tree.borrow_mut().children.push(new_tree(t.clone()));
+
+            insert_last(&mut ast, Tree::new(t.clone()), stack.len());
 
             if let Some(m) = matches.iter().find(|m| m.opener == t.0) {
                 stack.push(&m.closer);
@@ -150,52 +167,46 @@ fn main() {
         }
     }
 
-    let ast = ast.map(|ast| {
-        let ops = RefCell::new(Vec::new());
-        for (i, c) in ast.children.iter().enumerate() {
+    let ast = ast.map(|mut t| {
+        let mut ops = Vec::new();
+        for (i, c) in t.children.iter().enumerate() {
             for a in &affixes {
-                if c.borrow().value.0 == a.name {
-                    ops.borrow_mut().push((i, a));
+                if c.value.0 == a.name {
+                    ops.push((i, a));
                 }
             }
         }
-        ops.borrow_mut().sort_by(|(i, a), (j, b)| {
+        ops.sort_by(|(i, a), (j, b)| {
             if a.prec == b.prec {
                 if j < i && a.assoc == Assoc::Left {
                     std::cmp::Ordering::Greater
                 } else {
                     std::cmp::Ordering::Less
                 }
-            } else if a.prec < b.prec {
-                std::cmp::Ordering::Greater
             } else {
-                std::cmp::Ordering::Less
+                b.prec.cmp(&a.prec)
             }
         });
-        let mut out = ast;
-        let mut i = 0;
-        while i < ops.borrow().len() {
-            let start = ops.borrow()[i].0 - ops.borrow()[i].1.pos;
-            let mut end = start + ops.borrow()[i].1.arity;
-
+        for i in 0..ops.len() {
+            let start = ops[i].0 - ops[i].1.pos;
+            let mut end = start + ops[i].1.arity;
             let mut j = start;
             while j <= end {
-                if ops.borrow()[i].0 != j {
-                    let child = out.children.remove(j);
-                    for (k, p) in ops.borrow_mut().iter_mut().enumerate() {
+                if ops[i].0 != j {
+                    let child = t.children.remove(j);
+                    for (k, p) in ops.iter_mut().enumerate() {
                         if k >= i && p.0 >= j {
                             p.0 -= 1;
                         }
                     }
-                    out.children[ops.borrow()[i].0].borrow_mut().children.push(child);
+                    t.children[ops[i].0].children.push(child);
                     end -= 1;
                 } else {
                     j += 1;
                 }
             }
-            i += 1;
         }
-        out
+        t
     });
 
     let ast = ast.map(|mut t| {
@@ -212,7 +223,7 @@ fn main() {
         t
     });
 
-    print_tree(ast, 0);
+    println!("{:?}", ast);
 }
 
 #[derive(Clone, Debug)]
@@ -235,7 +246,10 @@ struct Affix {
 }
 
 #[derive(Debug, PartialEq)]
-enum Assoc {Left, Right}
+enum Assoc {
+    Left,
+    Right,
+}
 
 #[derive(Debug)]
 struct Match {
@@ -244,44 +258,50 @@ struct Match {
     func: String,
 }
 
-#[derive(Debug)]
-struct Node<T> {
+struct Tree<T> {
     value: T,
     children: Vec<Tree<T>>,
 }
 
-type Tree<T> = Rc<RefCell<Node<T>>>;
-
-fn new_tree<T>(v: T) -> Tree<T> {
-    Rc::new(RefCell::new(Node {
-        value: v,
-        children: Vec::new()
-    }))
-}
-
-fn print_tree<T>(t: Tree<T>, depth: usize)
-where
-    T: std::fmt::Display,
-{
-    println!("{}|{}", "-".repeat(depth), t.borrow().value.to_string());
-    for c in &t.borrow().children {
-        print_tree(Rc::clone(c), depth + 1);
+impl<T> Tree<T> {
+    fn new(value: T) -> Tree<T> {
+        Tree {
+            value: value,
+            children: Vec::new(),
+        }
     }
 }
 
-trait MappableTree<T> {
-    fn map<F>(&self, f: F) -> Tree<T> where F: FnMut(Node<T>) -> Node<T> + Copy;
+impl<T: Clone> Tree<T> {
+    fn map<F>(&self, mut f: F) -> Tree<T>
+    where
+        F: FnMut(Tree<T>) -> Tree<T> + Clone,
+    {
+        let mut new = Tree {
+            value: self.value.clone(),
+            children: Vec::new(),
+        };
+        for c in &self.children {
+            new.children.push(c.map(f.clone()));
+        }
+        f(new)
+    }
 }
 
-impl<T: Clone> MappableTree<T> for Tree<T> {
-    fn map<F>(&self, mut f: F) -> Tree<T> where F: FnMut(Node<T>) -> Node<T> + Copy {
-        let mut new = Node {
-            value: self.borrow().value.clone(),
-            children: Vec::new()
-        };
-        for c in &self.borrow().children {
-            new.children.push(c.map(f));
+impl<T: std::fmt::Display> std::fmt::Debug for Tree<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fn internal<T: std::fmt::Display>(
+            f: &mut std::fmt::Formatter,
+            t: &Tree<T>,
+            depth: usize,
+        ) -> std::fmt::Result {
+            writeln!(f, "{}|{}", "-".repeat(depth), t.value)?;
+            for c in &t.children {
+                internal(f, &c, depth + 1)?
+            }
+            Ok(())
         }
-        Rc::new(RefCell::new(f(new)))
+
+        internal(f, self, 0)
     }
 }
