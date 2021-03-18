@@ -1,6 +1,6 @@
 #match ( ) id
 #match { } const
-#match [ ] list_or_smth
+#match [ ] iter
 
 #affix ;  seq  2 1 0 l
 #affix ,  pair 2 1 1 r
@@ -31,12 +31,6 @@
 #affix $ call 2 1 13 l
 
 add : a -> a -> a;
-neg : a -> a;
-sub = a -> b -> a + neg$b;
-
-mul : a -> a -> a;
-inv : a -> a;
-div = a -> b -> a * inv$b;
 
 id = a -> a;
 dot = x -> f -> f$x;
@@ -47,14 +41,17 @@ if : Bool -> a -> a -> a;
 
 out = a?b
       c?d
-      e
+      e;
 
-(1+2*(3+4)/5-6)
+(1+2*(3+4)/5-6);
 
-"basic string"
-"multiline #asdfjlk
-string"
-"string\twith\n\"escapes\r\\"
+strings = [
+	"basic string",
+	"multiline #asdfjlk
+	string",
+	"string\twith\n\"escapes\r\\"
+]
+
 
 # 1-of-1: values
 # n-of-1: iters, lists, arrays
