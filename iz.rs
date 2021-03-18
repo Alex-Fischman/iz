@@ -295,7 +295,7 @@ impl<T: std::fmt::Display> std::fmt::Debug for Tree<T> {
             t: &Tree<T>,
             depth: usize,
         ) -> std::fmt::Result {
-            writeln!(f, "{}|{}", "-".repeat(depth), t.value)?;
+            writeln!(f, "{}{}", "\t".repeat(depth), t.value)?;
             for c in &t.children {
                 internal(f, &c, depth + 1)?
             }
