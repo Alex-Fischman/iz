@@ -1,5 +1,5 @@
 [package]
-name = "iz_"
+name = "iz"
 version = "0.1.0"
 authors = ["Alex Fischman <alex@fischman.org>"]
 edition = "2018"
