@@ -30,30 +30,5 @@
 #affix . dot  2 1 12 l
 #affix $ call 2 1 13 l
 
-add : a -> a -> a;
-
 id = a -> a;
-dot = x -> f -> f$x;
-const = a -> _ -> a;
-seq   = _ -> b -> b;
-
-if : Bool -> a -> a -> a;
-
-out = a?b
-      c?d
-      e;
-
-(1+2*(3+4)/5-6);
-
-strings = [
-	"basic string",
-	"multiline #asdfjlk
-	string",
-	"string\twith\n\"escapes\r\\"
-]
-
-
-# 1-of-1: values
-# n-of-1: iters, lists, arrays
-# 1-of-n: unions, tagged unions, sum types
-# n-of-n: tuples, structs, product types
+id$3
