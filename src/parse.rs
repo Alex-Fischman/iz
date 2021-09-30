@@ -168,7 +168,7 @@ pub fn parse(s: &str) -> Tree<Token> {
         }
     }
 
-    ast.for_each(&mut |mut t| {
+    ast.for_each(&mut |t| {
         let mut ops = Vec::new();
         for (i, c) in t.children.iter().enumerate() {
             for a in &affixes {
@@ -219,6 +219,13 @@ pub fn parse(s: &str) -> Tree<Token> {
             if m.opener == t.value.0 {
                 t.value.0 = m.func.clone();
             }
+        }
+    });
+
+    ast.for_each(&mut |t| {
+        if t.value.0 == "call" {
+            let f = t.children.remove(0);
+            t.value = f.value;
         }
     });
 

@@ -18,6 +18,16 @@ impl<T> Tree<T> {
         self.children.iter_mut().for_each(|c| c.for_each(f));
         f(self);
     }
+
+    pub fn for_each_with_index<F>(&mut self, f: &mut F, depth: u64)
+    where
+        F: FnMut(&mut Tree<T>, u64),
+    {
+        self.children
+            .iter_mut()
+            .for_each(|c| c.for_each_with_index(f, depth + 1));
+        f(self, depth);
+    }
 }
 
 impl<T: Clone> Tree<T> {
@@ -28,6 +38,15 @@ impl<T: Clone> Tree<T> {
         Tree {
             value: f(self.value.clone()),
             children: self.children.iter().map(|t| t.map(f)).collect(),
+        }
+    }
+}
+
+impl<T: Clone> Clone for Tree<T> {
+    fn clone(&self) -> Self {
+        Tree {
+            value: self.value.clone(),
+            children: self.children.clone(),
         }
     }
 }

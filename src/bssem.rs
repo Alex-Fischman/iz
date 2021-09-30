@@ -10,6 +10,15 @@ struct Registers {
     data: [Data; REG_SIZE],
 }
 
+/*
+Registers:
+0:  zero
+1:  program counter
+2:  stack pointer
+3:  general 0
+4:  general 1
+*/
+
 impl Registers {
     fn new() -> Registers {
         Registers {
@@ -39,6 +48,7 @@ impl std::ops::IndexMut<Register> for Registers {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum I {
     LBL(Label),
@@ -62,6 +72,7 @@ pub enum I {
     ANI(Register, Data, Register),
 }
 
+#[allow(dead_code)]
 pub fn execute(program: Vec<I>) -> Memory {
     let mut memory = [0; MEM_SIZE];
     let mut registers = Registers::new();
@@ -76,7 +87,7 @@ pub fn execute(program: Vec<I>) -> Memory {
 
     while (*registers.pc() as usize) < program.len() {
         match &program[*registers.pc() as usize] {
-            I::LBL(l) => {}
+            I::LBL(_) => {}
             I::JMP(s, o) => *registers.pc() = registers[*s] + o - 1,
             I::BEQ(a, b, l) => {
                 if a == b {
@@ -106,7 +117,7 @@ pub fn execute(program: Vec<I>) -> Memory {
             I::ORR(a, b, r) => registers[*r] = registers[*a] | registers[*b],
             I::ORI(a, b, r) => registers[*r] = registers[*a] | b,
             I::AND(a, b, r) => registers[*r] = registers[*a] & registers[*b],
-            I::ANI(a, b, r) => registers[*r] = registers[*a] * b,
+            I::ANI(a, b, r) => registers[*r] = registers[*a] & b,
         }
         *registers.pc() += 1;
     }
