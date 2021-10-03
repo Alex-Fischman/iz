@@ -1,156 +1,13 @@
-use crate::tree::*;
+use crate::token::Token;
+use crate::token::TokenType;
 
-pub fn parse(s: &str) -> Tree<Token> {
-    let tokens: Vec<Token> = s
-        .chars()
-        .enumerate()
-        .map(|(i, c)| Token(c.to_string(), i))
-        .collect();
+pub fn parse(tokens: &Vec<Token>) -> Tree<Token> {
+    let mut ast = Tree::new(Token("".to_string(), 0, TokenType::Other));
 
-    let mut temp: Vec<Token> = Vec::new();
-    let mut in_string = false;
-    let mut in_escape = false;
+    let mut depth = 0;
     for t in tokens {
-        if in_string {
-            if in_escape {
-                in_escape = false;
-                if t.0 == "n" {
-                    temp.last_mut().unwrap().0.push_str("\n");
-                } else if t.0 == "t" {
-                    temp.last_mut().unwrap().0.push_str("\t");
-                } else if t.0 == "r" {
-                    temp.last_mut().unwrap().0.push_str("\r");
-                } else {
-                    temp.last_mut().unwrap().0.push_str(&t.0);
-                }
-            } else if t.0 == "\\" {
-                in_escape = true;
-            } else {
-                temp.last_mut().unwrap().0.push_str(&t.0);
-                if t.0 == "\"" {
-                    in_string = false;
-                }
-            }
-        } else if t.0 == "\"" {
-            in_string = true;
-            temp.push(t);
-        } else {
-            temp.push(t.clone());
-        }
-    }
-    let tokens = temp;
-
-    let mut temp = Vec::new();
-    let mut comments = Vec::new();
-    let mut in_comment = false;
-    for t in tokens {
-        if t.0 == "#" && !in_comment {
-            in_comment = true;
-            comments.push(t);
-        } else if t.0 == "\n" && in_comment {
-            in_comment = false;
-        } else if in_comment {
-            comments.last_mut().unwrap().0.push_str(&t.0);
-        } else {
-            temp.push(t);
-        }
-    }
-    let tokens = temp;
-
-    let mut affixes: Vec<Affix> = Vec::new();
-    let mut matches: Vec<Match> = Vec::new();
-    for t in comments {
-        if t.0.starts_with("#match") {
-            let args: Vec<&str> = t.0.split(" ").filter(|s| !s.is_empty()).collect();
-            matches.push(Match {
-                opener: args[1].to_string(),
-                closer: args[2].to_string(),
-                func: args[3].to_string(),
-            });
-        } else if t.0.starts_with("#affix") {
-            let args: Vec<&str> = t.0.split(" ").filter(|s| !s.is_empty()).collect();
-            affixes.push(Affix {
-                name: args[1].to_string(),
-                func: args[2].to_string(),
-                arity: args[3].parse().unwrap(),
-                pos: args[4].parse().unwrap(),
-                prec: args[5].parse().unwrap(),
-                assoc: if args[6].to_string() == "l" {
-                    Assoc::Left
-                } else if args[6].to_string() == "r" {
-                    Assoc::Right
-                } else {
-                    panic!("invalid assoc: {}", args[6].to_string())
-                },
-            });
-        }
-    }
-
-    let tokens: Vec<Token> = tokens
-        .split(|t| t.0.chars().next().unwrap().is_whitespace())
-        .filter(|v| !v.is_empty())
-        .flat_map(|v| {
-            let mut out = Vec::new();
-            let mut append = true;
-            for t in v {
-                if t.0.starts_with("\"") {
-                    out.push(t.clone());
-                    append = true;
-                } else if append {
-                    out.push(t.clone());
-                    append = false;
-                } else {
-                    out.last_mut().unwrap().0.push_str(t.0.as_str());
-                }
-            }
-            out
-        })
-        .collect();
-
-    let mut names: Vec<&str> = matches
-        .iter()
-        .flat_map(|m| vec![m.opener.as_str(), m.closer.as_str()])
-        .chain(affixes.iter().map(|a| a.name.as_str()))
-        .collect();
-    names.sort_unstable_by_key(|s| s.len());
-    names.reverse();
-    let tokens: Vec<Token> = tokens
-        .iter()
-        .flat_map(|t| {
-            names.iter().fold(vec![t.clone()], |ts, n| {
-                ts.iter()
-                    .flat_map(|t| {
-                        let mut ts = Vec::new();
-                        if t.0.starts_with("\"")
-                            || n.chars().all(|c| c.is_alphabetic())
-                            || names.contains(&&t.0.as_str())
-                        {
-                            ts.push(t.clone());
-                        } else {
-                            let mut i = 0;
-                            for (j, m) in t.0.match_indices(n) {
-                                if i < j {
-                                    ts.push(Token(t.0[i..j].to_string(), t.1 + i));
-                                }
-                                ts.push(Token(m.to_string(), t.1 + j));
-                                i = j + n.len();
-                            }
-                            if i < t.0.len() {
-                                ts.push(Token(t.0[i..].to_string(), i));
-                            }
-                        }
-                        ts
-                    })
-                    .collect()
-            })
-        })
-        .collect();
-
-    let mut ast = Tree::new(Token("__ROOT__".to_string(), 0));
-    let mut stack: Vec<&str> = vec![];
-    for t in tokens {
-        if &t.0 == stack.last().unwrap_or(&"") {
-            stack.pop();
+        if t.2 == TokenType::Closer {
+            depth -= 1;
         } else {
             fn insert_last(t: &mut Tree<Token>, child: Tree<Token>, depth: usize) {
                 if depth == 0 {
@@ -160,26 +17,56 @@ pub fn parse(s: &str) -> Tree<Token> {
                 }
             }
 
-            insert_last(&mut ast, Tree::new(t.clone()), stack.len());
+            insert_last(&mut ast, Tree::new(t.clone()), depth);
 
-            if let Some(m) = matches.iter().find(|m| m.opener == t.0) {
-                stack.push(&m.closer);
+            if t.2 == TokenType::Opener {
+                depth += 1;
             }
         }
     }
 
-    ast.for_each(&mut |t| {
+    let operators = vec![
+        Operator::new("=", 2, 1, 0, false),
+        Operator::new(":", 2, 1, 1, false),
+        Operator::new("->", 2, 1, 2, false),
+        Operator::new("if", 3, 0, 3, false),
+        Operator::new("||", 2, 1, 4, true),
+        Operator::new("&&", 2, 1, 5, true),
+        Operator::new("==", 2, 1, 6, true),
+        Operator::new("!=", 2, 1, 6, true),
+        Operator::new("<", 2, 1, 6, true),
+        Operator::new(">", 2, 1, 6, true),
+        Operator::new("<=", 2, 1, 6, true),
+        Operator::new(">=", 2, 1, 6, true),
+        Operator::new("|", 2, 1, 7, true),
+        Operator::new("&", 2, 1, 7, true),
+        Operator::new("+", 2, 1, 7, true),
+        Operator::new("-", 2, 1, 7, true),
+        Operator::new("*", 2, 1, 8, true),
+        Operator::new("/", 2, 1, 8, true),
+        Operator::new("%", 2, 1, 8, true),
+        Operator::new("^", 2, 1, 9, true),
+        Operator::new("!", 1, 0, 10, true),
+        Operator::new(".", 2, 1, 11, true),
+        Operator::new("@", 2, 1, 12, true),
+    ];
+
+    fn postorder(t: &mut Tree<Token>, operators: &Vec<Operator>) {
+        for c in &mut t.children {
+            postorder(c, operators);
+        }
+        
         let mut ops = Vec::new();
         for (i, c) in t.children.iter().enumerate() {
-            for a in &affixes {
-                if c.value.0 == a.name {
-                    ops.push((i, a));
+            for o in operators {
+                if c.value.0 == o.name {
+                    ops.push((i, o, c.value.1));
                 }
             }
         }
-        ops.sort_by(|(i, a), (j, b)| {
+        ops.sort_by(|(i, a, _), (j, b, _)| {
             if a.prec == b.prec {
-                if j < i && a.assoc == Assoc::Left {
+                if j < i && a.left || i < j && !a.left {
                     std::cmp::Ordering::Greater
                 } else {
                     std::cmp::Ordering::Less
@@ -189,11 +76,12 @@ pub fn parse(s: &str) -> Tree<Token> {
             }
         });
         for i in 0..ops.len() {
-            let start = ops[i].0 - ops[i].1.pos;
-            let mut end = start + ops[i].1.arity;
-            let mut j = start;
-            while j <= end {
-                if ops[i].0 != j {
+            let mut j = ops[i].0 - ops[i].1.pos;
+            let mut remaining = ops[i].1.arity;
+            while 0 < remaining {
+                if ops[i].0 == j {
+                    j += 1;
+                } else {
                     let child = t.children.remove(j);
                     for (k, p) in ops.iter_mut().enumerate() {
                         if k >= i && p.0 >= j {
@@ -201,65 +89,65 @@ pub fn parse(s: &str) -> Tree<Token> {
                         }
                     }
                     t.children[ops[i].0].children.push(child);
-                    end -= 1;
-                } else {
-                    j += 1;
+                    remaining -= 1;
                 }
             }
         }
-    });
+    }
 
-    ast.for_each(&mut |t| {
-        for a in &affixes {
-            if a.name == t.value.0 {
-                t.value.0 = a.func.clone();
-            }
-        }
-        for m in &matches {
-            if m.opener == t.value.0 {
-                t.value.0 = m.func.clone();
-            }
-        }
-    });
-
-    ast.for_each(&mut |t| {
-        if t.value.0 == "call" {
-            let f = t.children.remove(0);
-            t.value = f.value;
-        }
-    });
+    postorder(&mut ast, &operators);
 
     ast
 }
 
-#[derive(Clone)]
-pub struct Token(pub String, pub usize);
-
-impl std::fmt::Debug for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Debug)]
-struct Affix {
+struct Operator {
     name: String,
-    func: String,
     arity: usize,
     pos: usize,
     prec: isize,
-    assoc: Assoc,
+    left: bool,
 }
 
-#[derive(Debug, PartialEq)]
-enum Assoc {
-    Left,
-    Right,
+impl Operator {
+    fn new(name: &str, arity: usize, pos: usize, prec: isize, left: bool) -> Operator {
+        Operator {
+            name: name.to_string(),
+            arity: arity,
+            pos: pos,
+            prec: prec,
+            left: left,
+        }
+    }
 }
 
-#[derive(Debug)]
-struct Match {
-    opener: String,
-    closer: String,
-    func: String,
+#[derive(Clone)]
+pub struct Tree<T> {
+    pub value: T,
+    pub children: Vec<Tree<T>>,
 }
+
+impl<T> Tree<T> {
+    pub fn new(value: T) -> Tree<T> {
+        Tree {
+            value: value,
+            children: Vec::new(),
+        }
+    }
+}
+
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fmt::Result;
+impl<T: Debug> Debug for Tree<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        fn preorder<T: Debug>(t: &Tree<T>, d: usize, f: &mut Formatter) -> Result {
+            writeln!(f, "{}{:?}", "\t".repeat(d), t.value)?;
+            for c in &t.children {
+                preorder(c, d + 1, f)?;
+            }
+            Ok(())
+        }
+        preorder(self, 0, f)
+    }
+}
+

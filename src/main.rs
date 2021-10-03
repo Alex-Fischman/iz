@@ -1,9 +1,12 @@
-mod bssem;
-mod compile;
-mod parse;
-mod tree;
+pub mod parse;
+pub mod token;
 
 fn main() {
-    let ast = parse::parse(&std::fs::read_to_string("scratch.iz").unwrap());
-    let _program = compile::compile(ast);
+    let program = std::fs::read_to_string("scratch.iz").unwrap();
+
+    let program = token::tokenize(&program);
+    program.iter().for_each(|t| print!("{:?} ", t));
+
+    let program = parse::parse(&program);
+    print!("{:?}", program);
 }
