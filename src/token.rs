@@ -26,7 +26,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 i,
                 if c.is_alphabetic() || c == '_' {
                     TokenType::Alphabetic
-                } else if c.is_whitespace() || c == ';' {
+                } else if c.is_whitespace() {
                     TokenType::Whitespace
                 } else if c.is_numeric() {
                     TokenType::Numeric

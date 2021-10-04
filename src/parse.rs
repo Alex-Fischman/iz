@@ -1,153 +1,160 @@
 use crate::token::Token;
 use crate::token::TokenType;
 
-pub fn parse(tokens: &Vec<Token>) -> Tree<Token> {
-    let mut ast = Tree::new(Token("".to_string(), 0, TokenType::Other));
+pub fn parse(tokens: &Vec<Token>) -> S {
+    // let _operators = vec![
+    //     Operator::new("=", 2, 1, 0, false),
+    //     Operator::new(":", 2, 1, 1, false),
+    //     Operator::new("->", 2, 1, 2, false),
+    //     Operator::new("if", 3, 0, 3, false),
+    //     Operator::new("||", 2, 1, 4, true),
+    //     Operator::new("&&", 2, 1, 5, true),
+    //     Operator::new("==", 2, 1, 6, true),
+    //     Operator::new("!=", 2, 1, 6, true),
+    //     Operator::new("<", 2, 1, 6, true),
+    //     Operator::new(">", 2, 1, 6, true),
+    //     Operator::new("<=", 2, 1, 6, true),
+    //     Operator::new(">=", 2, 1, 6, true),
+    //     Operator::new("|", 2, 1, 7, true),
+    //     Operator::new("&", 2, 1, 7, true),
+    //     Operator::new("+", 2, 1, 7, true),
+    //     Operator::new("-", 2, 1, 7, true),
+    //     Operator::new("*", 2, 1, 8, true),
+    //     Operator::new("/", 2, 1, 8, true),
+    //     Operator::new("%", 2, 1, 8, true),
+    //     Operator::new("^", 2, 1, 9, true),
+    //     Operator::new("!", 1, 0, 10, true),
+    //     Operator::new(".", 2, 1, 11, true),
+    //     Operator::new("@", 2, 1, 12, true),
+    // ];
 
-    let mut depth = 0;
-    for t in tokens {
-        if t.2 == TokenType::Closer {
-            depth -= 1;
-        } else {
-            fn insert_last(t: &mut Tree<Token>, child: Tree<Token>, depth: usize) {
-                if depth == 0 {
-                    t.children.push(child);
-                } else {
-                    insert_last(t.children.last_mut().unwrap(), child, depth - 1);
+    fn parse_expr(tokens: &mut Tokens, min_bp: u8) -> S {
+        let mut lhs = match tokens.peek() {
+            None => panic!("no tokens to start"),
+            Some(t) if t.2 == TokenType::Opener => {
+                let op = t.clone();
+                tokens.next();
+                let mut v = vec![];
+                while let Some(_) = match tokens.peek() {
+                    Some(t) if t.2 != TokenType::Closer => Some(t),
+                    _ => None,
+                } {
+                    v.push(parse_expr(tokens, 0));
                 }
-            }
+                tokens.next();
+                S(op, v)
+            },
+            Some(t) => {
+                match prefix_binding_power(&t.0) {
+                    Some(Bp(r_bp, bps)) => {
+                        let op = t.clone();
+                        tokens.next();
 
-            insert_last(&mut ast, Tree::new(t.clone()), depth);
+                        let mut v = vec![parse_expr(tokens, r_bp)];
 
-            if t.2 == TokenType::Opener {
-                depth += 1;
-            }
-        }
-    }
+                        bps.iter().for_each(|bp| {
+                            if let Some(bp) = bp {
+                                v.push(parse_expr(tokens, *bp));
+                            } else {
+                                tokens.next();
+                            }
+                        });
 
-    let operators = vec![
-        Operator::new("=", 2, 1, 0, false),
-        Operator::new(":", 2, 1, 1, false),
-        Operator::new("->", 2, 1, 2, false),
-        Operator::new("if", 3, 0, 3, false),
-        Operator::new("||", 2, 1, 4, true),
-        Operator::new("&&", 2, 1, 5, true),
-        Operator::new("==", 2, 1, 6, true),
-        Operator::new("!=", 2, 1, 6, true),
-        Operator::new("<", 2, 1, 6, true),
-        Operator::new(">", 2, 1, 6, true),
-        Operator::new("<=", 2, 1, 6, true),
-        Operator::new(">=", 2, 1, 6, true),
-        Operator::new("|", 2, 1, 7, true),
-        Operator::new("&", 2, 1, 7, true),
-        Operator::new("+", 2, 1, 7, true),
-        Operator::new("-", 2, 1, 7, true),
-        Operator::new("*", 2, 1, 8, true),
-        Operator::new("/", 2, 1, 8, true),
-        Operator::new("%", 2, 1, 8, true),
-        Operator::new("^", 2, 1, 9, true),
-        Operator::new("!", 1, 0, 10, true),
-        Operator::new(".", 2, 1, 11, true),
-        Operator::new("@", 2, 1, 12, true),
-    ];
-
-    fn postorder(t: &mut Tree<Token>, operators: &Vec<Operator>) {
-        for c in &mut t.children {
-            postorder(c, operators);
-        }
-        
-        let mut ops = Vec::new();
-        for (i, c) in t.children.iter().enumerate() {
-            for o in operators {
-                if c.value.0 == o.name {
-                    ops.push((i, o, c.value.1));
-                }
-            }
-        }
-        ops.sort_by(|(i, a, _), (j, b, _)| {
-            if a.prec == b.prec {
-                if j < i && a.left || i < j && !a.left {
-                    std::cmp::Ordering::Greater
-                } else {
-                    std::cmp::Ordering::Less
-                }
-            } else {
-                b.prec.cmp(&a.prec)
-            }
-        });
-        for i in 0..ops.len() {
-            let mut j = ops[i].0 - ops[i].1.pos;
-            let mut remaining = ops[i].1.arity;
-            while 0 < remaining {
-                if ops[i].0 == j {
-                    j += 1;
-                } else {
-                    let child = t.children.remove(j);
-                    for (k, p) in ops.iter_mut().enumerate() {
-                        if k >= i && p.0 >= j {
-                            p.0 -= 1;
-                        }
+                        S(op, v)
                     }
-                    t.children[ops[i].0].children.push(child);
-                    remaining -= 1;
+                    None => {
+                        let op = t.clone();
+                        tokens.next();
+                        S(op, vec![])
+                    },
                 }
+            },
+        };
+
+        loop {
+            match tokens.peek() {
+                Some(t) => match infix_binding_power(&t.0) {
+                    Some(Bp(l_bp, bps)) if l_bp > min_bp => {
+                        let op = t.clone();
+
+                        tokens.next();
+
+                        let mut v = vec![lhs];
+
+                        bps.iter().for_each(|bp| {
+                            if let Some(bp) = bp {
+                                v.push(parse_expr(tokens, *bp));
+                            } else {
+                                tokens.next();
+                            }
+                        });
+
+                        lhs = S(op, v);
+                    }
+                    _ => break,
+                },
+                None => break,
             }
         }
+
+        lhs
     }
 
-    postorder(&mut ast, &operators);
-
-    ast
+    parse_expr(&mut Tokens(&tokens, 0), 0)
 }
 
-struct Operator {
-    name: String,
-    arity: usize,
-    pos: usize,
-    prec: isize,
-    left: bool,
-}
+pub struct S(Token, Vec<S>);
 
-impl Operator {
-    fn new(name: &str, arity: usize, pos: usize, prec: isize, left: bool) -> Operator {
-        Operator {
-            name: name.to_string(),
-            arity: arity,
-            pos: pos,
-            prec: prec,
-            left: left,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Tree<T> {
-    pub value: T,
-    pub children: Vec<Tree<T>>,
-}
-
-impl<T> Tree<T> {
-    pub fn new(value: T) -> Tree<T> {
-        Tree {
-            value: value,
-            children: Vec::new(),
-        }
-    }
-}
-
-use std::fmt::Debug;
-use std::fmt::Formatter;
-use std::fmt::Result;
-impl<T: Debug> Debug for Tree<T> {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        fn preorder<T: Debug>(t: &Tree<T>, d: usize, f: &mut Formatter) -> Result {
-            writeln!(f, "{}{:?}", "\t".repeat(d), t.value)?;
-            for c in &t.children {
-                preorder(c, d + 1, f)?;
+impl std::fmt::Debug for S {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if self.1.is_empty() {
+            write!(f, "{:?}", self.0)
+        } else {
+            write!(f, "({:?}", self.0)?;
+            for s in &self.1 {
+                write!(f, " {:?}", s)?;
             }
-            Ok(())
+            write!(f, ")")
         }
-        preorder(self, 0, f)
     }
 }
 
+struct Tokens<'a>(&'a [Token], usize);
+
+impl<'a> Tokens<'a> {
+    fn peek(&self) -> Option<&Token> {
+        self.0.get(self.1)
+    }
+}
+
+impl<'a> Iterator for Tokens<'a> {
+    type Item = &'a Token;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.1 += 1;
+        self.0.get(self.1 - 1)
+    }
+}
+
+struct Bp(u8, Vec<Option<u8>>);
+
+fn prefix_binding_power(op: &str) -> Option<Bp> {
+    Some(match op {
+        "-" => Bp(11, vec![]),
+        "if" => Bp(4, vec![None, Some(0), None, Some(3)]),
+        _ => return None,
+    })
+}
+
+fn infix_binding_power(op: &str) -> Option<Bp> {
+    Some(match op {
+        "=" => Bp(2, vec![Some(1)]),
+        "?" => Bp(4, vec![Some(0), None, Some(3)]),
+        "==" => Bp(5, vec![Some(6)]),
+        "+" | "-" => Bp(7, vec![Some(8)]),
+        "*" | "/" => Bp(9, vec![Some(10)]),
+        "!" => Bp(13, vec![]),
+        "[" => Bp(15, vec![Some(0), None]),
+        "." => Bp(18, vec![Some(17)]),
+        _ => return None,
+    })
+}
