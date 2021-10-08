@@ -1,2 +1,8 @@
-#op 9 r _ ^ _
+#op pow 9 r ^ _
 3^4
+{
+	*asdf&fdsa
+	#op ptr 7 p * _
+	2 + 3 + 4
+}
+#op and 3 l & _
