@@ -1,8 +1,16 @@
-#op pow 9 r ^ _
+#op pow 9 r _ ^ _
 3^4
 {
 	*asdf&fdsa
 	#op ptr 7 p * _
 	2 + 3 + 4
 }
-#op and 3 l & _
+#op and 3 l _ & _
+
+if prefix 3 else if assoc 5 else 4
+
+#op call 10 r _ @ _
+#op func 2 r _ -> _
+f@(x + y)
+x.f@y
+dot = x -> f -> f@x

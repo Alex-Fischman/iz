@@ -3,63 +3,51 @@ pub mod parse;
 fn main() {
     let program = std::fs::read_to_string("scratch.iz").unwrap();
 
-    let (program, prefixes, affixes) = parse::preprocess(&program);
-    println!("{:?} {:?}", prefixes, affixes);
+    let (program, operators) = parse::preprocess(&program);
+    println!("{:?}", operators);
     println!("{:?}", program);
 
     let program = parse::tokenize(&program);
     program.iter().for_each(|t| print!("{:?} ", t));
     println!();
 
-    let program = parse::parse(&program, &prefixes, &affixes);
+    let program = parse::parse(&program, &operators);
     println!("{:?}", program);
+}
 
-    let s = parse::parse(&parse::tokenize("1"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "1");
-
-    let s = parse::parse(&parse::tokenize("1 + 2 * 3"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(add 1 (mul 2 3))");
-
-    let s = parse::parse(&parse::tokenize("a + b * c * d + e"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(add (add a (mul (mul b c) d)) e)");
-
-    let s = parse::parse(&parse::tokenize("f . g . h"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(dot (dot f g) h)");
-
-    let s = parse::parse(&parse::tokenize("f = g = h"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(eq f (eq g h))");
-
-    let s = parse::parse(
-        &parse::tokenize(" 1 + 2 + f = g = h * 3 * 4"),
-        &prefixes,
-        &affixes,
+#[test]
+fn tokenization() {
+    let test = |a, b| assert_eq!(format!("{:?}", parse::tokenize(a)), b);
+    test(
+        "asdf asdf\t\n fj + ++ + ->a -a2b",
+        "[asdf, asdf, fj, +, ++, +, ->, a, -, a, 2, b]",
     );
-    assert_eq!(
-        format!("{:?}", s),
-        "(eq (add (add 1 2) f) (eq g (mul (mul h 3) 4)))"
+}
+
+#[test]
+fn parsing() {
+    let ops = std::collections::HashMap::new();
+    let test = |a, b| assert_eq!(format!("{:?}", parse::parse(&parse::tokenize(a), &ops)), b);
+
+    test("1", "({ 1)");
+    test("a + b", "({ (add a b))");
+    test("a + b + c", "({ (add (add a b) c))");
+    test("a = b = c", "({ (set a (set b c)))");
+    test("a + b * c * d + e", "({ (add (add a (mul (mul b c) d)) e))");
+    test("1 + f = g = h * 3", "({ (set (add 1 f) (set g (mul h 3))))");
+    test("if a b", "({ (if_ a b))");
+    test("- -1 * 2", "({ (mul (neg (neg 1)) 2))");
+    test("- -f . g", "({ (neg (neg (dot f g))))");
+    test("- !b", "({ (neg (not b)))");
+    test("! f . g", "({ (not (dot f g)))");
+    test("(((0)))", "({ (( (( (( 0))))");
+    // test("x[0][1]", "({ (idx (idx x 0) 1))");
+    test(
+        "if a b else if c d else e",
+        "({ (else_ (if_ a b) (else_ (if_ c d) e)))",
     );
-
-    let s = parse::parse(&parse::tokenize("- -1 * 2"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(mul (neg (neg 1)) 2)");
-
-    let s = parse::parse(&parse::tokenize("- -f . g"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(neg (neg (dot f g)))");
-
-    let s = parse::parse(&parse::tokenize("-9!"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(neg (fac 9))");
-
-    let s = parse::parse(&parse::tokenize("f . g !"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(fac (dot f g))");
-
-    let s = parse::parse(&parse::tokenize("(((0)))"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(( (( (( 0)))");
-
-    let s = parse::parse(&parse::tokenize("x[0][1]"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(idx (idx x 0) 1)");
-
-    let s = parse::parse(&parse::tokenize("if a; b; if c; d; e"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(if_ a b (if_ c d e))");
-
-    let s = parse::parse(&parse::tokenize("a = if 0; b ; c = d"), &prefixes, &affixes);
-    assert_eq!(format!("{:?}", s), "(eq a (eq (if_ 0 b c) d))");
+    test(
+        "a = if 0 b else c = d",
+        "({ (set a (set (else_ (if_ 0 b) c) d)))",
+    );
 }

@@ -1,37 +1,25 @@
-type Bp = u8;
-type Pattern = Vec<Option<String>>;
-type Assoc = bool;
+type Operators<'a> =
+    std::collections::HashMap<(&'a str, bool), (&'a str, u8, Vec<Option<&'a str>>, bool)>;
 
-type Prefixes = std::collections::HashMap<String, (String, Bp, Pattern)>;
-type Affixes = std::collections::HashMap<String, (String, Bp, Pattern, Assoc)>;
-
-pub fn preprocess(s: &str) -> (String, Prefixes, Affixes) {
-    let mut prefixes = std::collections::HashMap::new();
-    let mut affixes = std::collections::HashMap::new();
-    let mut program = "".to_string();
-    let mut last = 0;
-    for (i, _) in s.match_indices("#") {
-        let j = i + s[i..].find('\n').unwrap_or(s.len() - i);
-        let mut comment = s[i..j].split_whitespace();
-        if comment.next().unwrap_or("") == "#op" {
-            let func = comment.next().unwrap().to_string();
-            let bp = comment.next().unwrap().parse::<u8>().unwrap();
-            let id = comment.next().unwrap();
-            let name = comment.next().unwrap().to_string();
-            let pattern = comment
-                .map(|c| Some(c.to_string()).filter(|c| c != &"_"))
-                .collect();
-            if id == "p" {
-                prefixes.insert(name, (func, bp, pattern));
-            } else {
-                affixes.insert(name, (func, bp, pattern, id == "r"));
-            }
-        }
-        program.push_str(&s[last..i]);
-        last = j;
-    }
-    program.push_str(&s[last..]);
-    (program, prefixes, affixes)
+pub fn preprocess(s: &str) -> (String, Operators) {
+    let mut operators = std::collections::HashMap::new();
+    let program = s
+        .split('#')
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let (comment, rest) = s.split_at(s.find('\n').unwrap_or(s.len()));
+            let c: Vec<&str> = comment.split_whitespace().collect();
+            let i = 4 + (c[3] != "p") as usize;
+            let p = c[i + 1..].iter().map(|c| Some(*c).filter(|c| c != &"_"));
+            operators.insert(
+                (c[i], c[3] == "p"),
+                (c[1], c[2].parse::<u8>().unwrap(), p.collect(), c[3] == "r"),
+            );
+            rest
+        })
+        .collect::<Vec<&str>>()
+        .join("");
+    (program, operators)
 }
 
 #[derive(Clone)]
@@ -48,6 +36,7 @@ pub enum TokenType {
     Other,
 }
 
+// TODO: remove?
 impl Token {
     fn replace(&self, s: &str) -> Token {
         Token(s.to_string(), self.1, self.2)
@@ -63,14 +52,20 @@ impl std::fmt::Debug for Token {
 pub fn tokenize(s: &str) -> Vec<Token> {
     s.chars()
         .enumerate()
-        .map(|(i, c)| Token(c.to_string(), i, match c {
-            _ if c.is_alphabetic() || c == '_' => Alphabetic,
-            _ if c.is_whitespace() => Whitespace,
-            _ if c.is_numeric() => Numeric,
-            '(' | '{' | '[' => Opener,
-            ')' | '}' | ']' => Closer,
-            _ => Other,
-        }))
+        .map(|(i, c)| {
+            Token(
+                c.to_string(),
+                i,
+                match c {
+                    _ if c.is_alphabetic() || c == '_' => Alphabetic,
+                    _ if c.is_whitespace() => Whitespace,
+                    _ if c.is_numeric() => Numeric,
+                    '(' | '{' | '[' => Opener,
+                    ')' | '}' | ']' => Closer,
+                    _ => Other,
+                },
+            )
+        })
         .fold(Vec::new(), |mut acc: Vec<Token>, t| {
             match acc.last_mut() {
                 Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => s.0.push_str(&t.0),
@@ -87,12 +82,7 @@ pub struct S(Token, Vec<S>);
 
 impl std::fmt::Debug for S {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.0 .0.is_empty() {
-            for s in &self.1 {
-                write!(f, "{:?}", s)?;
-            }
-            Ok(())
-        } else if self.1.is_empty() {
+        if self.1.is_empty() {
             write!(f, "{:?}", self.0)
         } else {
             write!(f, "({:?}", self.0)?;
@@ -104,104 +94,97 @@ impl std::fmt::Debug for S {
     }
 }
 
-struct Tokens<'a>(usize, &'a [Token]);
+struct Context<'a>(usize, &'a [Token], &'a Operators<'a>);
 
-impl<'a> Tokens<'a> {
+impl<'a> Context<'a> {
     fn get(&self) -> &Token {
         &self.1[self.0]
     }
 
-    fn advance(&mut self) {
-        self.0 += 1
+    fn next(&mut self) -> &Token {
+        self.0 += 1;
+        &self.1[self.0 - 1]
     }
 }
 
-pub fn parse(tokens: &Vec<Token>, prefixes: &Prefixes, affixes: &Affixes) -> S {
-    let mut prefixes = prefixes.clone();
-    prefixes.insert("-".to_string(), ("neg".to_string(), 5, vec![None]));
-    prefixes.insert(
-        "if".to_string(),
-        (
-            "if_".to_string(),
-            2,
-            vec![
-                None,
-                Some(";".to_string()),
-                None,
-                Some(";".to_string()),
-                None,
-            ],
-        ),
-    );
+pub fn parse(tokens: &Vec<Token>, operators: &Operators) -> S {
+    let mut operators = operators.clone();
+    operators.insert(("=", false), ("set", 1, vec![None], true));
+    operators.insert((":", false), ("type", 2, vec![None], true));
+    operators.insert(("->", false), ("arr", 3, vec![None], true));
 
-    let mut affixes = affixes.clone();
-    affixes.insert("=".to_string(), ("eq".to_string(), 1, vec![None], true));
-    affixes.insert("+".to_string(), ("add".to_string(), 3, vec![None], false));
-    affixes.insert("-".to_string(), ("sub".to_string(), 3, vec![None], false));
-    affixes.insert("*".to_string(), ("mul".to_string(), 4, vec![None], false));
-    affixes.insert("!".to_string(), ("fac".to_string(), 6, vec![], false));
-    affixes.insert(
-        "[".to_string(),
-        (
-            "idx".to_string(),
-            7,
-            vec![None, Some("]".to_string())],
-            false,
-        ),
-    );
-    affixes.insert(".".to_string(), ("dot".to_string(), 8, vec![None], false));
+    operators.insert(("if", true), ("if_", 4, vec![None, None], false));
+    operators.insert(("else", false), ("else_", 4, vec![None], true));
 
-    type Context<'a> = (&'a mut Tokens<'a>, &'a Prefixes, &'a Affixes);
+    operators.insert(("||", false), ("or", 5, vec![None], false));
+    operators.insert(("&&", false), ("and", 6, vec![None], false));
 
-    fn read_pattern(c: &mut Context, right: &Pattern, bp: Bp) -> Vec<S> {
-        let mut v = vec![];
-        for i in right {
-            match i {
+    operators.insert(("==", false), ("eq", 7, vec![None], false));
+    operators.insert(("!=", false), ("ne", 7, vec![None], false));
+    operators.insert((">", false), ("gt", 7, vec![None], false));
+    operators.insert(("<", false), ("lt", 7, vec![None], false));
+    operators.insert((">=", false), ("ge", 7, vec![None], false));
+    operators.insert(("<=", false), ("le", 7, vec![None], false));
+
+    operators.insert(("|", false), ("or", 8, vec![None], false));
+    operators.insert(("&", false), ("and", 9, vec![None], false));
+
+    operators.insert(("+", false), ("add", 10, vec![None], false));
+    operators.insert(("-", false), ("sub", 10, vec![None], false));
+    operators.insert(("*", false), ("mul", 11, vec![None], false));
+    operators.insert(("/", false), ("div", 11, vec![None], false));
+    operators.insert(("%", false), ("mod", 11, vec![None], false));
+    operators.insert(("^", false), ("pow", 12, vec![None], false));
+
+    operators.insert(("-", true), ("neg", 13, vec![None], false));
+    operators.insert(("!", true), ("not", 13, vec![None], false));
+
+    operators.insert((".", false), ("dot", 14, vec![None], false));
+    operators.insert(("@", false), ("call", 15, vec![None], false));
+
+    fn read_pattern(c: &mut Context, right: &Vec<Option<&str>>, bp: u8) -> Vec<S> {
+        right
+            .iter()
+            .filter_map(|i| match i {
                 Some(s) => {
-                    assert_eq!(&c.0.get().0, s);
-                    c.0.advance();
+                    assert_eq!(&c.next().0, s);
+                    None
                 }
-                None => v.push(expr(c, bp)),
-            }
-        }
-        v
+                None => return Some(expr(c, bp)),
+            })
+            .collect()
     }
 
-    fn expr(c: &mut Context, rbp: Bp) -> S {
-        let mut op = c.0.get().clone();
-        c.0.advance();
-        let mut lhs = match c.1.get(&*op.0) {
-            Some((func, bp, right)) => S(op.replace(func), read_pattern(c, &right, *bp)),
+    fn expr(c: &mut Context, rbp: u8) -> S {
+        let mut op = c.next().clone();
+        let mut lhs = match c.2.get(&(&op.0, true)) {
+            Some((func, bp, right, _)) => S(op.replace(func), read_pattern(c, &right, *bp)),
             None if op.2 == Opener => {
                 let mut v = vec![];
-                while c.0.get().2 != Closer {
+                while c.get().2 != Closer {
                     v.push(expr(c, 0));
                 }
-                c.0.advance();
+                c.next();
                 S(op, v)
             }
             None => S(op, vec![]),
         };
-        while c.0 .0 < c.0 .1.len() {
-            op = c.0.get().clone();
-            if let Some((func, bp, right, assoc)) = c.2.get(&*op.0) {
-                if bp > &rbp {
-                    c.0.advance();
+        while c.0 < c.1.len() {
+            op = c.get().clone();
+            match c.2.get(&(&op.0, false)) {
+                Some((func, bp, right, assoc)) if bp > &rbp => {
+                    c.next();
                     let mut v = read_pattern(c, &right, bp - *assoc as u8);
                     v.insert(0, lhs);
                     lhs = S(op.replace(func), v);
-                } else {
-                    break;
                 }
-            } else {
-                break;
+                _ => break,
             }
         }
         lhs
     }
-    let mut ts = vec![Token("".to_string(), 0, Opener); tokens.len() + 2];
-    let l = ts.len() - 1;
-    ts[l] = Token("END".to_string(), 0, Closer);
-    ts[1..l].clone_from_slice(&tokens);
-    expr(&mut (&mut Tokens(0, &ts), &prefixes, &affixes), 0)
+    let mut ts = tokens.clone();
+    ts.insert(0, Token("{".to_string(), 0, Opener));
+    ts.push(Token("}".to_string(), 0, Closer));
+    expr(&mut Context(0, &ts, &operators), 0)
 }
