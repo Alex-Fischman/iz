@@ -1,5 +1,7 @@
-{
-	f@(x + y)
-x.f@y
-dot = x -> f -> f@x
-}
+if true 1 else if false 2 else 3
+if false 1 else if true 2 else 3
+if false 1 else if false 2 else 3
+if true 1 else if true 2 else 3
+
+if true 4
+if false 5
