@@ -41,6 +41,11 @@ fn main() {
     inter_test("!false && 1 == 1 && true != false || 6 <= 2", Bool(true));
     inter_test("[0 1 2 3 4 5 6][3]", Num(3.0));
     inter_test("if false 1 else if true 2 else 3", Num(2.0));
+
+    inter_test("a = 3 b = 5 a + b", Num(8.0));
+    inter_test("{ a = 1 } a", Var("a".to_string()));
+    inter_test("c = 1 { a = 2 } c", Num(1.0));
+    inter_test("a = 1 a = 2 a + 1", Num(3.0));
 }
 
 use std::collections::HashMap;
@@ -135,9 +140,9 @@ impl std::fmt::Debug for S {
     }
 }
 
-struct Context<'a>(usize, &'a [Token], &'a Operators<'a>);
+struct ParseContext<'a>(usize, &'a [Token], &'a Operators<'a>);
 
-impl<'a> Context<'a> {
+impl<'a> ParseContext<'a> {
     fn get(&self) -> &Token {
         &self.1[self.0]
     }
@@ -181,7 +186,7 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     operators.insert((".", false), ("dot", 15, vec![None], false));
     operators.insert(("@", false), ("call", 16, vec![None], false));
 
-    fn read_pattern(c: &mut Context, right: &[Option<&str>], bp: u8) -> Vec<S> {
+    fn read_pattern(c: &mut ParseContext, right: &[Option<&str>], bp: u8) -> Vec<S> {
         right
             .iter()
             .filter_map(|i| match i {
@@ -194,7 +199,7 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
             .collect()
     }
 
-    fn expr(c: &mut Context, rbp: u8) -> S {
+    fn expr(c: &mut ParseContext, rbp: u8) -> S {
         let op = c.next().clone();
         let mut lhs = match c.2.get(&(&op.0, true)) {
             Some((func, bp, right, _)) => S(
@@ -228,65 +233,81 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     let mut ts = tokens.to_vec();
     ts.insert(0, Token("{".to_string(), 0, Opener));
     ts.push(Token("}".to_string(), 0, Closer));
-    expr(&mut Context(0, &ts, &operators), 0)
+    expr(&mut ParseContext(0, &ts, &operators), 0)
 }
 
 use Expr::*;
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq)]
 enum Expr {
+    Unit,
+    Var(String),
     Bool(bool),
     Num(f64),
     Opt(Box<Option<Expr>>),
+    Tuple(Vec<Expr>),
     List(Vec<Expr>),
 }
 
 impl std::fmt::Debug for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            Unit => write!(f, "()"),
+            Var(s) => write!(f, "{}", s),
             Bool(b) => write!(f, "{}", b),
             Num(n) => write!(f, "{}", n),
             Opt(o) => match &**o {
                 Some(e) => write!(f, "Some({:?})", e),
                 None => write!(f, "None"),
             },
-            List(v) => {
+            Tuple(v) => {
+                write!(f, "(")?;
                 for e in v {
                     write!(f, "{:?} ", e)?;
                 }
-                Ok(())
+                write!(f, ")")
+            }
+            List(v) => {
+                write!(f, "[")?;
+                for e in v {
+                    write!(f, "{:?} ", e)?;
+                }
+                write!(f, "]")
             }
         }
     }
 }
 
-// TODO: = : -> . @
+type Context = HashMap<String, Expr>;
+
+// TODO: : -> . @
 fn interpret(s: &S) -> Expr {
-    let args: Vec<Expr> = s.1.iter().map(|s| interpret(s)).collect();
+    fn interpret_(s: &S, c: &mut Context) -> Expr {
+        if s.0 .2 == Numeric {
+            return Num(s.0 .0.parse().unwrap());
+        } else if s.0 .0 == "set" {
+            let e = interpret_(&s.1[1], c);
+            c.insert(s.1[0].0 .0.to_string(), e);
+            return Unit;
+        }
 
-    let bin_num_op = |f: &dyn Fn(f64, f64) -> f64| match args[..] {
-        [Num(a), Num(b)] => Num(f(a, b)),
-        _ => panic!("{:?}", s.0),
-    };
-
-    match s.0 .2 {
-        Numeric => Num(s.0 .0.parse().unwrap()),
-        Opener => match args.len() {
-            0 => todo!(),
-            1 => args[0].clone(),
-            _ => List(args),
-        },
-        _ => match &*s.0 .0 {
-            "if_" => match &args[..] {
-                [Bool(a), b] => match a {
-                    true => Opt(Box::new(Some(b.clone()))),
-                    false => Opt(Box::new(None)),
-                },
+        let mut c = c.clone();
+        let mut args: Vec<Expr> = s.1.iter().map(|s| interpret_(s, &mut c)).collect();
+        match &*s.0 .0 {
+            "(" => match args.len() {
+                1 => args.pop().unwrap(),
+                _ => Tuple(args),
+            },
+            "{" => args.pop().unwrap(),
+            "[" => List(args),
+            "if_" => match args[0] {
+                Bool(true) => Opt(Box::new(Some(args.remove(1)))),
+                Bool(false) => Opt(Box::new(None)),
                 _ => panic!("if_"),
             },
-            "else_" => match &args[..] {
-                [Opt(a), b] => match &**a {
-                    Some(c) => c.clone(),
-                    None => b.clone(),
+            "else_" => match args.remove(0) {
+                Opt(a) => match *a {
+                    Some(a) => a,
+                    None => args.remove(0),
                 },
                 _ => panic!("else_"),
             },
@@ -300,19 +321,46 @@ fn interpret(s: &S) -> Expr {
             },
             "eq" => Bool(args[0] == args[1]),
             "ne" => Bool(args[0] != args[1]),
-            "gt" => Bool(args[0] > args[1]),
-            "lt" => Bool(args[0] < args[1]),
-            "ge" => Bool(args[0] >= args[1]),
-            "le" => Bool(args[0] <= args[1]),
-            "idx" => match &args[..] {
-                [List(a), Num(b)] => a[*b as usize].clone(),
+            "gt" => match args[..] {
+                [Num(a), Num(b)] => Bool(a > b),
+                _ => panic!("gt"),
+            },
+            "lt" => match args[..] {
+                [Num(a), Num(b)] => Bool(a < b),
+                _ => panic!("lt"),
+            },
+            "ge" => match args[..] {
+                [Num(a), Num(b)] => Bool(a >= b),
+                _ => panic!("ge"),
+            },
+            "le" => match args[..] {
+                [Num(a), Num(b)] => Bool(a <= b),
+                _ => panic!("le"),
+            },
+            "idx" => match (args.remove(1), args.remove(0)) {
+                (Num(i), List(mut a)) => a.remove(i as usize),
                 _ => panic!("idx"),
             },
-            "add" => bin_num_op(&std::ops::Add::add),
-            "sub" => bin_num_op(&std::ops::Sub::sub),
-            "mul" => bin_num_op(&std::ops::Mul::mul),
-            "div" => bin_num_op(&std::ops::Div::div),
-            "pow" => bin_num_op(&f64::powf),
+            "add" => match args[..] {
+                [Num(a), Num(b)] => Num(a + b),
+                _ => panic!("add"),
+            },
+            "sub" => match args[..] {
+                [Num(a), Num(b)] => Num(a - b),
+                _ => panic!("sub"),
+            },
+            "mul" => match args[..] {
+                [Num(a), Num(b)] => Num(a * b),
+                _ => panic!("mul"),
+            },
+            "div" => match args[..] {
+                [Num(a), Num(b)] => Num(a / b),
+                _ => panic!("div"),
+            },
+            "pow" => match args[..] {
+                [Num(a), Num(b)] => Num(a.powf(b)),
+                _ => panic!("pow"),
+            },
             "neg" => match args[..] {
                 [Num(a)] => Num(-a),
                 _ => panic!("neg"),
@@ -323,7 +371,12 @@ fn interpret(s: &S) -> Expr {
             },
             "false" => Bool(false),
             "true" => Bool(true),
-            _ => panic!("unimplemented: {:?} {:?}", s.0, args),
-        },
+            s => match c.get(s) {
+                Some(e) => e.clone(),
+                None => Var(s.to_string()),
+            },
+        }
     }
+
+    interpret_(s, &mut HashMap::new())
 }
