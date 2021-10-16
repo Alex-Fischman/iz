@@ -316,9 +316,7 @@ impl Debug for Expr {
     }
 }
 
-// ---- cleanup ----
-
-// TODO: :
+// todo: types, :
 fn interpret(s: &S) -> Expr {
     fn destructure(s: &S, c: &mut InterContext, a: Expr) {
         fn destructure_(e: &Expr, c: &mut InterContext, a: Expr) {
@@ -338,23 +336,24 @@ fn interpret(s: &S) -> Expr {
     }
 
     fn interpret_(s: &S, c: &mut InterContext) -> Expr {
+        let mut argc = c.clone();
+
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
         } else if s.0 .0 == "func" {
-            return Func(s.1[0].clone(), s.1[1].clone(), c.clone());
+            return Func(s.1[0].clone(), s.1[1].clone(), argc.clone());
         }
 
-        let mut argc = c.clone();
         let mut args: Vec<Expr> = s.1.iter().map(|s| interpret_(s, &mut argc)).collect();
         match &*s.0 .0 {
             "(" => match args.len() {
-                1 => args.pop().unwrap(),
+                1 => args.remove(0),
                 _ => Tuple(args),
             },
             "{" => args.pop().unwrap(),
             "[" => List(args),
             "set" => {
-                let a = args.pop().unwrap();
+                let a = args.remove(1);
                 destructure(&s.1[0], c, a.clone());
                 a
             }
@@ -366,7 +365,7 @@ fn interpret(s: &S) -> Expr {
             "else_" => match args.remove(0) {
                 Opt(a) => match *a {
                     Some(a) => a,
-                    None => args.pop().unwrap(),
+                    None => args.remove(0),
                 },
                 _ => panic!("else_ {:?}", args),
             },
@@ -396,7 +395,7 @@ fn interpret(s: &S) -> Expr {
                 [Num(a), Num(b)] => Bool(a <= b),
                 _ => panic!("le {:?}", args),
             },
-            "idx" => match (args.remove(0), args.pop().unwrap()) {
+            "idx" => match (args.remove(0), args.remove(0)) {
                 (List(mut a), Num(i)) => a.remove(i as usize),
                 _ => panic!("idx {:?}", args),
             },
