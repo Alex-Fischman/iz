@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::fmt::*;
+
 fn main() {
     let program = std::fs::read_to_string("scratch.iz").unwrap();
     let (program, operators) = preprocess(&program);
@@ -36,6 +39,7 @@ fn main() {
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
 
+    // todo: custom op tests, for prefix and infix
     let inter_test = |a, b| assert_eq!(interpret(&parse(&tokenize(a), &HashMap::new())), b);
     inter_test("(1 + 2 * 3 - 4) ^ 2 / -9", Num(-1.0));
     inter_test("!false && 1 == 1 && true != false || 6 <= 2", Bool(true));
@@ -54,34 +58,31 @@ fn main() {
     inter_test("(a -> b -> a)@3@4", Num(3.0));
     inter_test("square=x->x*x dot=x->f->f@x dot@3@square", Num(9.0));
     inter_test("square=x->x*x dot=x->f->f@x 3.square", Num(9.0)); // stdlib
-    inter_test("fst=(a b)->a snd=(a b)->b fst@(3 5)==3&&snd@(3 5)==5", Bool(true)); // stdlib
-    inter_test("thr=(a b c)->c thr@(1 2 3 4)", Num(3.0)); // stdlib?
+    inter_test("{x=2 y->x+y}@3", Num(5.0));
+
+    inter_test("fst=(a b)->a fst@(3 5)", Num(3.0)); // stdlib
+    inter_test("snd=(a b)->b snd@(3 5)", Num(5.0)); // stdlib
+    inter_test("thr=(a b c)->c thr@(1 2 3 4)", Num(3.0)); // stdlib
+    inter_test("(a b c d)=(2 3 5 7 11) c", Num(5.0));
 }
 
-use std::collections::HashMap;
 type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, Vec<Option<&'a str>>, bool)>;
-// todo: formalize op patterns with an enum?
 
 fn preprocess(s: &str) -> (String, Operators) {
     let mut operators = HashMap::new();
     let program = s
         .split('#')
         .map(|s| {
-            let (a, b) = s.split_at(s.find('\n').unwrap_or(s.len()));
+            let (a, b) = s.split_at(s.find('\n').unwrap_or(s.len() - 1));
             let c: Vec<&str> = a.split_whitespace().collect();
             if c[0] == "op" {
                 let i = 4 + (c[3] != "p") as usize;
-                let p = c[i + 1..].iter().map(|c| Some(*c).filter(|c| c != &"_"));
-                operators.insert(
-                    (c[i], c[3] == "p"),
-                    (
-                        c[1],
-                        false,
-                        c[2].parse::<u8>().unwrap(),
-                        p.collect(),
-                        c[3] == "r",
-                    ),
-                );
+                let r = c[i + 1..]
+                    .iter()
+                    .map(|c| Some(*c).filter(|c| c != &"_"))
+                    .collect();
+                let p = c[2].parse::<u8>().unwrap();
+                operators.insert((c[i], c[3] == "p"), (c[1], false, p, r, c[3] == "r"));
                 b
             } else {
                 s
@@ -96,7 +97,7 @@ fn preprocess(s: &str) -> (String, Operators) {
 struct Token(String, usize, TokenType);
 
 use TokenType::*;
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum TokenType {
     Alphabetic,
     Whitespace,
@@ -118,8 +119,8 @@ impl PartialEq for Token {
     }
 }
 
-impl std::fmt::Debug for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for Token {
+    fn fmt(&self, f: &mut Formatter) -> Result {
         write!(f, "{}", self.0)
     }
 }
@@ -141,7 +142,7 @@ fn tokenize(s: &str) -> Vec<Token> {
                 },
             )
         })
-        .fold(Vec::new(), |mut acc: Vec<Token>, t| {
+        .fold(vec![], |mut acc: Vec<Token>, t| {
             match acc.last_mut() {
                 Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => s.0.push_str(&t.0),
                 _ => acc.push(t),
@@ -156,8 +157,8 @@ fn tokenize(s: &str) -> Vec<Token> {
 #[derive(Clone, PartialEq)]
 struct S(Token, Vec<S>);
 
-impl std::fmt::Debug for S {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl Debug for S {
+    fn fmt(&self, f: &mut Formatter) -> Result {
         if self.1.is_empty() {
             write!(f, "{:?}", self.0)
         } else {
@@ -216,7 +217,7 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     operators.insert((".", false), ("dot", false, 15, vec![None], false)); // stdlib
     operators.insert(("@", false), ("call", true, 16, vec![None], false));
 
-    fn read_pattern(c: &mut ParseContext, right: &[Option<&str>], bp: u8) -> Vec<S> {
+    fn pattern(c: &mut ParseContext, right: &[Option<&str>], bp: u8) -> Vec<S> {
         right
             .iter()
             .filter_map(|i| match i {
@@ -229,22 +230,20 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
             .collect()
     }
 
+    fn get_lhs(func: &str, pos: usize, i: bool, v: Vec<S>) -> S {
+        match i {
+            true => S(Token(func.to_string(), pos, Alphabetic), v),
+            false => v.into_iter().fold(
+                S(Token(func.to_string(), pos, Alphabetic), vec![]),
+                |acc, x| S(Token("call".to_string(), 0, Other), vec![acc, x]),
+            ),
+        }
+    }
+
     fn expr(c: &mut ParseContext, rbp: u8) -> S {
         let op = c.next().clone();
         let mut lhs = match c.2.get(&(&op.0, true)) {
-            Some((func, intrinsic, bp, right, _)) => match intrinsic {
-                true => S(
-                    Token(func.to_string(), op.1, Alphabetic),
-                    read_pattern(c, &right, *bp),
-                ),
-                false => {
-                    let mut out = S(Token(func.to_string(), op.1, Alphabetic), vec![]);
-                    for x in read_pattern(c, &right, *bp) {
-                        out = S(Token("call".to_string(), 0, Other), vec![out, x]);
-                    }
-                    out
-                }
-            },
+            Some((func, i, bp, right, _)) => get_lhs(func, op.1, *i, pattern(c, &right, *bp)),
             None if op.2 == Opener => {
                 let mut v = vec![];
                 while c.get().2 != Closer {
@@ -258,19 +257,11 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
         while c.0 < c.1.len() {
             let op = c.get().clone();
             match c.2.get(&(&op.0, false)) {
-                Some((func, intrinsic, bp, right, assoc)) if bp > &rbp => {
+                Some((func, i, bp, right, assoc)) if bp > &rbp => {
                     c.next();
-                    let mut v = read_pattern(c, &right, bp - *assoc as u8);
+                    let mut v = pattern(c, &right, bp - *assoc as u8);
                     v.insert(0, lhs);
-                    match intrinsic {
-                        true => lhs = S(Token(func.to_string(), op.1, Alphabetic), v),
-                        false => {
-                            lhs = S(Token(func.to_string(), op.1, Alphabetic), vec![]);
-                            for x in v {
-                                lhs = S(Token("call".to_string(), 0, Other), vec![lhs, x]);
-                            }
-                        }
-                    }
+                    lhs = get_lhs(func, op.1, *i, v);
                 }
                 _ => break,
             }
@@ -286,7 +277,6 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
 use Expr::*;
 #[derive(Clone, PartialEq)]
 enum Expr {
-    Unit,
     Var(Token),
     Bool(bool),
     Num(f64),
@@ -296,10 +286,22 @@ enum Expr {
     Func(S, S, InterContext),
 }
 
-impl std::fmt::Debug for Expr {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+type InterContext = HashMap<String, Expr>;
+
+fn write_list<A: Debug, I: Iterator<Item = A>>(f: &mut Formatter, mut i: I, s: &str) -> Result {
+    write!(f, "{}", &s[..1])?;
+    if let Some(a) = i.next() {
+        write!(f, "{:?}", a)?;
+    }
+    for a in i {
+        write!(f, "{}{:?}", &s[1..s.len() - 1], a)?;
+    }
+    write!(f, "{}", &s[s.len() - 1..])
+}
+
+impl Debug for Expr {
+    fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
-            Unit => write!(f, "()"),
             Var(s) => write!(f, "v{:?}", s),
             Bool(b) => write!(f, "b{}", b),
             Num(n) => write!(f, "n{}", n),
@@ -307,42 +309,43 @@ impl std::fmt::Debug for Expr {
                 Some(e) => write!(f, "Some({:?})", e),
                 None => write!(f, "None"),
             },
-            Tuple(v) => {
-                write!(f, "(")?;
-                for e in v {
-                    write!(f, "{:?} ", e)?;
-                }
-                write!(f, ")")
-            }
-            List(v) => {
-                write!(f, "[")?;
-                for e in v {
-                    write!(f, "{:?} ", e)?;
-                }
-                write!(f, "]")
-            }
-            Func(x, y, _) => write!(f, "{:?}->{:?}", x, y),
+            Tuple(v) => write_list(f, v.iter(), "( )"),
+            List(v) => write_list(f, v.iter(), "[ ]"),
+            Func(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
         }
     }
 }
 
-type InterContext = HashMap<String, Expr>;
+// ---- cleanup ----
 
 // TODO: :
 fn interpret(s: &S) -> Expr {
+    fn destructure(s: &S, c: &mut InterContext, a: Expr) {
+        fn destructure_(e: &Expr, c: &mut InterContext, a: Expr) {
+            match e {
+                Var(s) => {
+                    c.insert(s.0.clone(), a);
+                }
+                Tuple(ve) => match a {
+                    Tuple(va) => (0..ve.len()).for_each(|i| destructure_(&ve[i], c, va[i].clone())),
+                    _ => panic!("destructure tuple {:?}", a),
+                },
+                // todo: destructure lists
+                _ => panic!("destructure {:?} {:?} {:?}", e, a, c),
+            };
+        }
+        destructure_(&interpret_(s, &mut HashMap::new()), c, a)
+    }
+
     fn interpret_(s: &S, c: &mut InterContext) -> Expr {
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
-        } else if s.0 .0 == "set" {
-            let e = interpret_(&s.1[1], c);
-            c.insert(s.1[0].0 .0.to_string(), e);
-            return Unit;
-        } else if s.0.0 == "func" {
+        } else if s.0 .0 == "func" {
             return Func(s.1[0].clone(), s.1[1].clone(), c.clone());
         }
 
-        let mut c = c.clone();
-        let mut args: Vec<Expr> = s.1.iter().map(|s| interpret_(s, &mut c)).collect();
+        let mut argc = c.clone();
+        let mut args: Vec<Expr> = s.1.iter().map(|s| interpret_(s, &mut argc)).collect();
         match &*s.0 .0 {
             "(" => match args.len() {
                 1 => args.pop().unwrap(),
@@ -350,6 +353,11 @@ fn interpret(s: &S) -> Expr {
             },
             "{" => args.pop().unwrap(),
             "[" => List(args),
+            "set" => {
+                let a = args.pop().unwrap();
+                destructure(&s.1[0], c, a.clone());
+                a
+            }
             "if_" => match args[0] {
                 Bool(true) => Opt(Box::new(Some(args.remove(1)))),
                 Bool(false) => Opt(Box::new(None)),
@@ -421,35 +429,15 @@ fn interpret(s: &S) -> Expr {
                 _ => panic!("not {:?}", args),
             },
             "call" => match args.remove(0) {
-                Func(x, y, z) => {
-                    let mut c = z;
-                    fn destructure(e: &Expr, c: &mut InterContext, args: &mut Vec<Expr>) {
-                        match e {
-                            Var(s) => {
-                                c.insert(s.0.clone(), args.remove(0));
-                            },
-                            Tuple(v) => {
-                                match args.remove(0) {
-                                    Tuple(v) => {
-                                        args.splice(0..0, v);
-                                    },
-                                    _ => panic!("destructure tuple {:?}", args),
-                                }
-                                for e in v {
-                                    destructure(e, c, args);
-                                }
-                            },
-                            x => todo!("destructure {:?}", x),
-                        };
-                    }
-                    destructure(&interpret_(&x, &mut c), &mut c, &mut args);
-                    interpret_(&y, &mut c)
-                },
-                _ => panic!("call"),
+                Func(x, y, mut z) => {
+                    destructure(&x, &mut z, args.remove(0));
+                    interpret_(&y, &mut z)
+                }
+                a => panic!("call {:?} {:?}{:?}", s, a, args),
             },
             "false" => Bool(false),
             "true" => Bool(true),
-            o => match c.get(o) {
+            o => match argc.get(o) {
                 Some(e) => e.clone(),
                 None => Var(s.0.clone()),
             },
