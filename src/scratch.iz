@@ -1,2 +1,4 @@
-a = 1 a = 2 a
-a + 2
+id = x -> x
+dot = x -> f -> f@x
+double = x -> x * 2
+3.double

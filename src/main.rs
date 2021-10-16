@@ -20,9 +20,9 @@ fn main() {
     parse_test("- !b", "(neg (not b))");
     parse_test("! -b", "(not (neg b))");
     parse_test("-a + b", "(add (neg a) b)");
-    parse_test("!a . b", "(not (dot a b))");
+    parse_test("!a . b", "(not (call (call dot a) b))");
     parse_test("- -1 * 2", "(mul (neg (neg 1)) 2)");
-    parse_test("- -f . g", "(neg (neg (dot f g)))");
+    parse_test("- -f . g", "(neg (neg (call (call dot f) g)))");
     parse_test("(0(0))", "(( 0 (( 0))");
     parse_test("((0)(0))", "(( (( 0) (( 0))");
     parse_test("(((0)))", "(( (( (( 0)))");
@@ -46,10 +46,17 @@ fn main() {
     inter_test("{ a = 1 } a", Var("a".to_string()));
     inter_test("c = 1 { a = 2 } c", Num(1.0));
     inter_test("a = 1 a = 2 a + 1", Num(3.0));
+
+    inter_test("(x -> x)@1", Num(1.0));
+    inter_test("(x -> x)@1 x", Var("x".to_string()));
+    inter_test("id = x -> x id@3", Num(3.0));
+    inter_test("(a -> b -> a)@3@4", Num(3.0));
+    inter_test("id=x->x dot=x->f->f@x 3.id", Num(3.0)); // stdlib
 }
 
 use std::collections::HashMap;
-type Operators<'a> = HashMap<(&'a str, bool), (&'a str, u8, Vec<Option<&'a str>>, bool)>;
+type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, Vec<Option<&'a str>>, bool)>;
+// todo: formalize op patterns with an enum?
 
 fn preprocess(s: &str) -> (String, Operators) {
     let mut operators = HashMap::new();
@@ -63,7 +70,13 @@ fn preprocess(s: &str) -> (String, Operators) {
                 let p = c[i + 1..].iter().map(|c| Some(*c).filter(|c| c != &"_"));
                 operators.insert(
                     (c[i], c[3] == "p"),
-                    (c[1], c[2].parse::<u8>().unwrap(), p.collect(), c[3] == "r"),
+                    (
+                        c[1],
+                        false,
+                        c[2].parse::<u8>().unwrap(),
+                        p.collect(),
+                        c[3] == "r",
+                    ),
                 );
                 b
             } else {
@@ -75,7 +88,7 @@ fn preprocess(s: &str) -> (String, Operators) {
     (program, operators)
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Token(String, usize, TokenType);
 
 use TokenType::*;
@@ -124,6 +137,7 @@ fn tokenize(s: &str) -> Vec<Token> {
         .collect()
 }
 
+#[derive(Clone, PartialEq)]
 struct S(Token, Vec<S>);
 
 impl std::fmt::Debug for S {
@@ -155,36 +169,36 @@ impl<'a> ParseContext<'a> {
 
 fn parse(tokens: &[Token], operators: &Operators) -> S {
     let mut operators = operators.clone();
-    operators.insert(("=", false), ("set", 1, vec![None], true));
-    operators.insert((":", false), ("type", 2, vec![None], true));
-    operators.insert(("->", false), ("func", 3, vec![None], true));
+    operators.insert(("=", false), ("set", true, 1, vec![None], true));
+    operators.insert((":", false), ("type", true, 2, vec![None], true));
+    operators.insert(("->", false), ("func", true, 3, vec![None], true));
 
-    operators.insert(("if", true), ("if_", 4, vec![None, None], false));
-    operators.insert(("else", false), ("else_", 4, vec![None], true));
+    operators.insert(("if", true), ("if_", true, 4, vec![None, None], false));
+    operators.insert(("else", false), ("else_", true, 4, vec![None], true));
 
-    operators.insert(("||", false), ("or", 5, vec![None], false));
-    operators.insert(("&&", false), ("and", 6, vec![None], false));
+    operators.insert(("||", false), ("or", true, 5, vec![None], false));
+    operators.insert(("&&", false), ("and", true, 6, vec![None], false));
 
-    operators.insert(("==", false), ("eq", 7, vec![None], false));
-    operators.insert(("!=", false), ("ne", 7, vec![None], false));
-    operators.insert((">", false), ("gt", 7, vec![None], false));
-    operators.insert(("<", false), ("lt", 7, vec![None], false));
-    operators.insert((">=", false), ("ge", 7, vec![None], false));
-    operators.insert(("<=", false), ("le", 7, vec![None], false));
+    operators.insert(("==", false), ("eq", true, 7, vec![None], false));
+    operators.insert(("!=", false), ("ne", true, 7, vec![None], false));
+    operators.insert((">", false), ("gt", true, 7, vec![None], false));
+    operators.insert(("<", false), ("lt", true, 7, vec![None], false));
+    operators.insert((">=", false), ("ge", true, 7, vec![None], false));
+    operators.insert(("<=", false), ("le", true, 7, vec![None], false));
 
-    operators.insert(("[", false), ("idx", 8, vec![None, Some("]")], false));
+    operators.insert(("[", false), ("idx", true, 8, vec![None, Some("]")], false));
 
-    operators.insert(("+", false), ("add", 11, vec![None], false));
-    operators.insert(("-", false), ("sub", 11, vec![None], false));
-    operators.insert(("*", false), ("mul", 12, vec![None], false));
-    operators.insert(("/", false), ("div", 12, vec![None], false));
-    operators.insert(("^", false), ("pow", 13, vec![None], false));
+    operators.insert(("+", false), ("add", true, 11, vec![None], false));
+    operators.insert(("-", false), ("sub", true, 11, vec![None], false));
+    operators.insert(("*", false), ("mul", true, 12, vec![None], false));
+    operators.insert(("/", false), ("div", true, 12, vec![None], false));
+    operators.insert(("^", false), ("pow", true, 13, vec![None], false));
 
-    operators.insert(("-", true), ("neg", 14, vec![None], false));
-    operators.insert(("!", true), ("not", 14, vec![None], false));
+    operators.insert(("-", true), ("neg", true, 14, vec![None], false));
+    operators.insert(("!", true), ("not", true, 14, vec![None], false));
 
-    operators.insert((".", false), ("dot", 15, vec![None], false));
-    operators.insert(("@", false), ("call", 16, vec![None], false));
+    operators.insert((".", false), ("dot", false, 15, vec![None], false)); // stdlib
+    operators.insert(("@", false), ("call", true, 16, vec![None], false));
 
     fn read_pattern(c: &mut ParseContext, right: &[Option<&str>], bp: u8) -> Vec<S> {
         right
@@ -202,10 +216,19 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     fn expr(c: &mut ParseContext, rbp: u8) -> S {
         let op = c.next().clone();
         let mut lhs = match c.2.get(&(&op.0, true)) {
-            Some((func, bp, right, _)) => S(
-                Token(func.to_string(), op.1, Alphabetic),
-                read_pattern(c, &right, *bp),
-            ),
+            Some((func, intrinsic, bp, right, _)) => match intrinsic {
+                true => S(
+                    Token(func.to_string(), op.1, Alphabetic),
+                    read_pattern(c, &right, *bp),
+                ),
+                false => {
+                    let mut out = S(Token(func.to_string(), op.1, Alphabetic), vec![]);
+                    for x in read_pattern(c, &right, *bp) {
+                        out = S(Token("call".to_string(), 0, Other), vec![out, x]);
+                    }
+                    out
+                }
+            },
             None if op.2 == Opener => {
                 let mut v = vec![];
                 while c.get().2 != Closer {
@@ -219,11 +242,19 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
         while c.0 < c.1.len() {
             let op = c.get().clone();
             match c.2.get(&(&op.0, false)) {
-                Some((func, bp, right, assoc)) if bp > &rbp => {
+                Some((func, intrinsic, bp, right, assoc)) if bp > &rbp => {
                     c.next();
                     let mut v = read_pattern(c, &right, bp - *assoc as u8);
                     v.insert(0, lhs);
-                    lhs = S(Token(func.to_string(), op.1, Alphabetic), v);
+                    match intrinsic {
+                        true => lhs = S(Token(func.to_string(), op.1, Alphabetic), v),
+                        false => {
+                            lhs = S(Token(func.to_string(), op.1, Alphabetic), vec![]);
+                            for x in v {
+                                lhs = S(Token("call".to_string(), 0, Other), vec![lhs, x]);
+                            }
+                        }
+                    }
                 }
                 _ => break,
             }
@@ -246,15 +277,16 @@ enum Expr {
     Opt(Box<Option<Expr>>),
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
+    Func(Box<Expr>, S, InterContext),
 }
 
 impl std::fmt::Debug for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Unit => write!(f, "()"),
-            Var(s) => write!(f, "{}", s),
-            Bool(b) => write!(f, "{}", b),
-            Num(n) => write!(f, "{}", n),
+            Var(s) => write!(f, "v{}", s),
+            Bool(b) => write!(f, "b{}", b),
+            Num(n) => write!(f, "n{}", n),
             Opt(o) => match &**o {
                 Some(e) => write!(f, "Some({:?})", e),
                 None => write!(f, "None"),
@@ -273,15 +305,16 @@ impl std::fmt::Debug for Expr {
                 }
                 write!(f, "]")
             }
+            Func(x, y, c) => write!(f, "{:?}->{:?}({:?})", x, y, c),
         }
     }
 }
 
-type Context = HashMap<String, Expr>;
+type InterContext = HashMap<String, Expr>;
 
-// TODO: : -> . @
+// TODO: : .
 fn interpret(s: &S) -> Expr {
-    fn interpret_(s: &S, c: &mut Context) -> Expr {
+    fn interpret_(s: &S, c: &mut InterContext) -> Expr {
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
         } else if s.0 .0 == "set" {
@@ -299,75 +332,94 @@ fn interpret(s: &S) -> Expr {
             },
             "{" => args.pop().unwrap(),
             "[" => List(args),
+            "func" => Func(Box::new(args.remove(0)), s.1[1].clone(), c),
             "if_" => match args[0] {
                 Bool(true) => Opt(Box::new(Some(args.remove(1)))),
                 Bool(false) => Opt(Box::new(None)),
-                _ => panic!("if_"),
+                _ => panic!("if_ {:?}", args),
             },
             "else_" => match args.remove(0) {
                 Opt(a) => match *a {
                     Some(a) => a,
-                    None => args.remove(0),
+                    None => args.pop().unwrap(),
                 },
-                _ => panic!("else_"),
+                _ => panic!("else_ {:?}", args),
             },
             "or" => match args[..] {
                 [Bool(a), Bool(b)] => Bool(a || b),
-                _ => panic!("or"),
+                _ => panic!("or {:?}", args),
             },
             "and" => match args[..] {
                 [Bool(a), Bool(b)] => Bool(a && b),
-                _ => panic!("and"),
+                _ => panic!("and {:?}", args),
             },
             "eq" => Bool(args[0] == args[1]),
             "ne" => Bool(args[0] != args[1]),
             "gt" => match args[..] {
                 [Num(a), Num(b)] => Bool(a > b),
-                _ => panic!("gt"),
+                _ => panic!("gt {:?}", args),
             },
             "lt" => match args[..] {
                 [Num(a), Num(b)] => Bool(a < b),
-                _ => panic!("lt"),
+                _ => panic!("lt {:?}", args),
             },
             "ge" => match args[..] {
                 [Num(a), Num(b)] => Bool(a >= b),
-                _ => panic!("ge"),
+                _ => panic!("ge {:?}", args),
             },
             "le" => match args[..] {
                 [Num(a), Num(b)] => Bool(a <= b),
-                _ => panic!("le"),
+                _ => panic!("le {:?}", args),
             },
-            "idx" => match (args.remove(1), args.remove(0)) {
-                (Num(i), List(mut a)) => a.remove(i as usize),
-                _ => panic!("idx"),
+            "idx" => match (args.remove(0), args.pop().unwrap()) {
+                (List(mut a), Num(i)) => a.remove(i as usize),
+                _ => panic!("idx {:?}", args),
             },
             "add" => match args[..] {
                 [Num(a), Num(b)] => Num(a + b),
-                _ => panic!("add"),
+                _ => panic!("add {:?}", args),
             },
             "sub" => match args[..] {
                 [Num(a), Num(b)] => Num(a - b),
-                _ => panic!("sub"),
+                _ => panic!("sub {:?}", args),
             },
             "mul" => match args[..] {
                 [Num(a), Num(b)] => Num(a * b),
-                _ => panic!("mul"),
+                _ => panic!("mul {:?}", args),
             },
             "div" => match args[..] {
                 [Num(a), Num(b)] => Num(a / b),
-                _ => panic!("div"),
+                _ => panic!("div {:?}", args),
             },
             "pow" => match args[..] {
                 [Num(a), Num(b)] => Num(a.powf(b)),
-                _ => panic!("pow"),
+                _ => panic!("pow {:?}", args),
             },
             "neg" => match args[..] {
                 [Num(a)] => Num(-a),
-                _ => panic!("neg"),
+                _ => panic!("neg {:?}", args),
             },
             "not" => match args[..] {
                 [Bool(a)] => Bool(!a),
-                _ => panic!("not"),
+                _ => panic!("not {:?}", args),
+            },
+            "call" => match match args.remove(0) {
+                Var(s) => match c.get(&s) {
+                    Some(e) => e.clone(),
+                    None => Var(s),
+                },
+                f => f,
+            } {
+                Func(x, y, z) => match *x {
+                    Var(s) => {
+                        let mut c = z;
+                        c.insert(s, args.pop().unwrap());
+                        interpret_(&y, &mut c)
+                    }
+                    _ => todo!("destructuring"),
+                },
+                Var(s) => Var(s),
+                _ => panic!("call"),
             },
             "false" => Bool(false),
             "true" => Bool(true),
