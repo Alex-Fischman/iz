@@ -1,0 +1,5 @@
+id = x -> x
+dot = x -> f -> f@x
+double = x -> 2 * x
+square = x -> x * x
+16.square
