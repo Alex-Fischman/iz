@@ -43,15 +43,19 @@ fn main() {
     inter_test("if false 1 else if true 2 else 3", Num(2.0));
 
     inter_test("a = 3 b = 5 a + b", Num(8.0));
-    inter_test("{ a = 1 } a", Var("a".to_string()));
+    inter_test("{ a = 1 } a", Var(Token::new("a")));
     inter_test("c = 1 { a = 2 } c", Num(1.0));
     inter_test("a = 1 a = 2 a + 1", Num(3.0));
 
     inter_test("(x -> x)@1", Num(1.0));
-    inter_test("(x -> x)@1 x", Var("x".to_string()));
+    inter_test("(x -> x * x)@16", Num(256.0));
+    inter_test("(x -> x)@1 x", Var(Token::new("x")));
     inter_test("id = x -> x id@3", Num(3.0));
     inter_test("(a -> b -> a)@3@4", Num(3.0));
-    inter_test("id=x->x dot=x->f->f@x 3.id", Num(3.0)); // stdlib
+    inter_test("square=x->x*x dot=x->f->f@x dot@3@square", Num(9.0));
+    inter_test("square=x->x*x dot=x->f->f@x 3.square", Num(9.0)); // stdlib
+    inter_test("fst=(a b)->a snd=(a b)->b fst@(3 5)==3&&snd@(3 5)==5", Bool(true)); // stdlib
+    inter_test("thr=(a b c)->c thr@(1 2 3 4)", Num(3.0)); // stdlib?
 }
 
 use std::collections::HashMap;
@@ -88,7 +92,7 @@ fn preprocess(s: &str) -> (String, Operators) {
     (program, operators)
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 struct Token(String, usize, TokenType);
 
 use TokenType::*;
@@ -100,6 +104,18 @@ enum TokenType {
     Opener,
     Closer,
     Other,
+}
+
+impl Token {
+    fn new(s: &str) -> Token {
+        Token(s.to_string(), 0, Other)
+    }
+}
+
+impl PartialEq for Token {
+    fn eq(&self, t: &Token) -> bool {
+        self.0 == t.0
+    }
 }
 
 impl std::fmt::Debug for Token {
@@ -271,20 +287,20 @@ use Expr::*;
 #[derive(Clone, PartialEq)]
 enum Expr {
     Unit,
-    Var(String),
+    Var(Token),
     Bool(bool),
     Num(f64),
     Opt(Box<Option<Expr>>),
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
-    Func(Box<Expr>, S, InterContext),
+    Func(S, S, InterContext),
 }
 
 impl std::fmt::Debug for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Unit => write!(f, "()"),
-            Var(s) => write!(f, "v{}", s),
+            Var(s) => write!(f, "v{:?}", s),
             Bool(b) => write!(f, "b{}", b),
             Num(n) => write!(f, "n{}", n),
             Opt(o) => match &**o {
@@ -305,14 +321,14 @@ impl std::fmt::Debug for Expr {
                 }
                 write!(f, "]")
             }
-            Func(x, y, c) => write!(f, "{:?}->{:?}({:?})", x, y, c),
+            Func(x, y, _) => write!(f, "{:?}->{:?}", x, y),
         }
     }
 }
 
 type InterContext = HashMap<String, Expr>;
 
-// TODO: : .
+// TODO: :
 fn interpret(s: &S) -> Expr {
     fn interpret_(s: &S, c: &mut InterContext) -> Expr {
         if s.0 .2 == Numeric {
@@ -321,6 +337,8 @@ fn interpret(s: &S) -> Expr {
             let e = interpret_(&s.1[1], c);
             c.insert(s.1[0].0 .0.to_string(), e);
             return Unit;
+        } else if s.0.0 == "func" {
+            return Func(s.1[0].clone(), s.1[1].clone(), c.clone());
         }
 
         let mut c = c.clone();
@@ -332,7 +350,6 @@ fn interpret(s: &S) -> Expr {
             },
             "{" => args.pop().unwrap(),
             "[" => List(args),
-            "func" => Func(Box::new(args.remove(0)), s.1[1].clone(), c),
             "if_" => match args[0] {
                 Bool(true) => Opt(Box::new(Some(args.remove(1)))),
                 Bool(false) => Opt(Box::new(None)),
@@ -383,7 +400,7 @@ fn interpret(s: &S) -> Expr {
                 [Num(a), Num(b)] => Num(a - b),
                 _ => panic!("sub {:?}", args),
             },
-            "mul" => match args[..] {
+            "mul" => match &args[..] {
                 [Num(a), Num(b)] => Num(a * b),
                 _ => panic!("mul {:?}", args),
             },
@@ -403,29 +420,38 @@ fn interpret(s: &S) -> Expr {
                 [Bool(a)] => Bool(!a),
                 _ => panic!("not {:?}", args),
             },
-            "call" => match match args.remove(0) {
-                Var(s) => match c.get(&s) {
-                    Some(e) => e.clone(),
-                    None => Var(s),
-                },
-                f => f,
-            } {
-                Func(x, y, z) => match *x {
-                    Var(s) => {
-                        let mut c = z;
-                        c.insert(s, args.pop().unwrap());
-                        interpret_(&y, &mut c)
+            "call" => match args.remove(0) {
+                Func(x, y, z) => {
+                    let mut c = z;
+                    fn destructure(e: &Expr, c: &mut InterContext, args: &mut Vec<Expr>) {
+                        match e {
+                            Var(s) => {
+                                c.insert(s.0.clone(), args.remove(0));
+                            },
+                            Tuple(v) => {
+                                match args.remove(0) {
+                                    Tuple(v) => {
+                                        args.splice(0..0, v);
+                                    },
+                                    _ => panic!("destructure tuple {:?}", args),
+                                }
+                                for e in v {
+                                    destructure(e, c, args);
+                                }
+                            },
+                            x => todo!("destructure {:?}", x),
+                        };
                     }
-                    _ => todo!("destructuring"),
+                    destructure(&interpret_(&x, &mut c), &mut c, &mut args);
+                    interpret_(&y, &mut c)
                 },
-                Var(s) => Var(s),
                 _ => panic!("call"),
             },
             "false" => Bool(false),
             "true" => Bool(true),
-            s => match c.get(s) {
+            o => match c.get(o) {
                 Some(e) => e.clone(),
-                None => Var(s.to_string()),
+                None => Var(s.0.clone()),
             },
         }
     }

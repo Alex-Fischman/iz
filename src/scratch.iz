@@ -1,4 +1,4 @@
-id = x -> x
-dot = x -> f -> f@x
-double = x -> x * 2
-3.double
+fst = (a b) -> a
+snd = (a b) -> b
+thr = (a b c) -> c
+thr@(1 2 3 4)
