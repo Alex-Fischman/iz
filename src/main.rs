@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::*;
 
+// todo: std.iz, built-in enums, remove Opt, built-in structs, remove Cons, Empty, Tuple
+// todo: types, ::
+
 fn main() {
     let program = std::fs::read_to_string("scratch.iz").unwrap();
     let (program, operators) = preprocess(&program);
@@ -72,8 +75,8 @@ fn main() {
     inter_test("if (a) ?= (1 2) a else 3", Tuple(vec![Num(1.0), Num(2.0)]));
     inter_test(
         "dot = x -> f -> f@x
-         map = f -> l -> if x:xs?=l f@x:xs.map@f else []
-         get = i -> l -> if !(x:xs?=l) false else if i==0 x else xs.get@(i - 1)
+         map = f -> l -> if x::xs?=l f@x::xs.map@f else []
+         get = i -> l -> if !(x::xs?=l) false else if i==0 x else xs.get@(i - 1)
          [1 2 3 4 5].map@(x -> x * x).get@3",
         Num(16.0),
     ); // stdlib
@@ -220,7 +223,7 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     operators.insert((">=", false), ("ge", true, 8, vec![None], false));
     operators.insert(("<=", false), ("le", true, 8, vec![None], false));
 
-    operators.insert((":", false), ("cons", true, 10, vec![None], true));
+    operators.insert(("::", false), ("cons", true, 10, vec![None], true));
 
     operators.insert(("+", false), ("add", true, 11, vec![None], false));
     operators.insert(("-", false), ("sub", true, 11, vec![None], false));
@@ -343,7 +346,6 @@ impl Debug for Expr {
     }
 }
 
-// todo: types and :
 fn interpret(s: &S) -> Expr {
     fn destructure(s: &S, a: Expr, c: &mut InterContext) -> bool {
         fn destructure_(e: &Expr, a: Expr, c: &mut InterContext) -> bool {
@@ -482,6 +484,7 @@ fn interpret(s: &S) -> Expr {
             },
             "false" => Bool(false),
             "true" => Bool(true),
+            // todo: Some and None?
             o => match c.get(o) {
                 Some(e) => e.clone(),
                 None => Var(s.0.clone()),
