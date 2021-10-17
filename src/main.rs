@@ -64,18 +64,21 @@ fn main() {
     inter_test("snd=(a b)->b snd@(3 5)", Num(5.0)); // stdlib
     inter_test("thr=(a b c)->c thr@(1 2 3 4)", Num(3.0)); // stdlib
     inter_test("(a b c d)=(2 3 5 7 11) c", Num(5.0));
+    inter_test("fac=n->if n<=1 1 else n*fac@(n-1) fac@4", Num(24.0));
 }
 
-type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, Vec<Option<&'a str>>, bool)>;
+type Pattern<'a> = Vec<Option<&'a str>>;
+//                            name  is_prefix  func   is_impl bp  pattern  assoc_right
+type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, Pattern<'a>, bool)>;
 
 fn preprocess(s: &str) -> (String, Operators) {
     let mut operators = HashMap::new();
     let program = s
         .split('#')
         .map(|s| {
-            let (a, b) = s.split_at(s.find('\n').unwrap_or(s.len() - 1));
+            let (a, b) = s.split_at(s.find('\n').unwrap_or(0));
             let c: Vec<&str> = a.split_whitespace().collect();
-            if c[0] == "op" {
+            if c.get(0) == Some(&"op") {
                 let i = 4 + (c[3] != "p") as usize;
                 let r = c[i + 1..]
                     .iter()
@@ -188,7 +191,7 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     let mut operators = operators.clone();
     operators.insert(("=", false), ("set", true, 1, vec![None], true));
     operators.insert((":", false), ("type", true, 2, vec![None], true));
-    operators.insert(("->", false), ("func", true, 3, vec![None], true));
+    operators.insert(("->", false), ("Closure", true, 3, vec![None], true));
 
     operators.insert(("if", true), ("if_", true, 4, vec![None, None], false));
     operators.insert(("else", false), ("else_", true, 4, vec![None], true));
@@ -217,7 +220,7 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     operators.insert((".", false), ("dot", false, 15, vec![None], false)); // stdlib
     operators.insert(("@", false), ("call", true, 16, vec![None], false));
 
-    fn pattern(c: &mut ParseContext, right: &[Option<&str>], bp: u8) -> Vec<S> {
+    fn pattern(c: &mut ParseContext, right: &Pattern, bp: u8) -> Vec<S> {
         right
             .iter()
             .filter_map(|i| match i {
@@ -277,13 +280,15 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
 use Expr::*;
 #[derive(Clone, PartialEq)]
 enum Expr {
+    Unit,
     Var(Token),
     Bool(bool),
     Num(f64),
     Opt(Box<Option<Expr>>),
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
-    Func(S, S, InterContext),
+    Closure(S, S, InterContext),
+    Function(S, S),
 }
 
 type InterContext = HashMap<String, Expr>;
@@ -302,6 +307,7 @@ fn write_list<A: Debug, I: Iterator<Item = A>>(f: &mut Formatter, mut i: I, s: &
 impl Debug for Expr {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
+            Unit => write!(f, "()"),
             Var(s) => write!(f, "v{:?}", s),
             Bool(b) => write!(f, "b{}", b),
             Num(n) => write!(f, "n{}", n),
@@ -311,12 +317,13 @@ impl Debug for Expr {
             },
             Tuple(v) => write_list(f, v.iter(), "( )"),
             List(v) => write_list(f, v.iter(), "[ ]"),
-            Func(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
+            Closure(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
+            Function(x, y) => write!(f, "{:?}-r>{:?}", x, y),
         }
     }
 }
 
-// todo: types, :
+// todo: types and :
 fn interpret(s: &S) -> Expr {
     fn destructure(s: &S, c: &mut InterContext, a: Expr) {
         fn destructure_(e: &Expr, c: &mut InterContext, a: Expr) {
@@ -324,8 +331,8 @@ fn interpret(s: &S) -> Expr {
                 Var(s) => {
                     c.insert(s.0.clone(), a);
                 }
-                Tuple(ve) => match a {
-                    Tuple(va) => (0..ve.len()).for_each(|i| destructure_(&ve[i], c, va[i].clone())),
+                Tuple(e) => match a {
+                    Tuple(a) => (0..e.len()).for_each(|i| destructure_(&e[i], c, a[i].clone())),
                     _ => panic!("destructure tuple {:?}", a),
                 },
                 // todo: destructure lists
@@ -336,103 +343,113 @@ fn interpret(s: &S) -> Expr {
     }
 
     fn interpret_(s: &S, c: &mut InterContext) -> Expr {
-        let mut argc = c.clone();
-
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
-        } else if s.0 .0 == "func" {
-            return Func(s.1[0].clone(), s.1[1].clone(), argc.clone());
         }
 
-        let mut args: Vec<Expr> = s.1.iter().map(|s| interpret_(s, &mut argc)).collect();
+        let mut argc = c.clone();
+        let mut args = s.1.iter().map(|s| interpret_(s, &mut argc));
         match &*s.0 .0 {
             "(" => match args.len() {
-                1 => args.remove(0),
-                _ => Tuple(args),
+                1 => args.next().unwrap(),
+                _ => Tuple(args.collect()),
             },
-            "{" => args.pop().unwrap(),
-            "[" => List(args),
+            "{" => match args.last() {
+                Some(e) => e,
+                None => Unit,
+            },
+            "[" => List(args.collect()),
             "set" => {
-                let a = args.remove(1);
+                let mut a = args.skip(1).next().unwrap();
+                if let Closure(x, y, z) = &mut a {
+                    // i don't think we need to destructure here
+                    z.insert(s.1[0].0 .0.to_string(), Function(x.clone(), y.clone()));
+                }
                 destructure(&s.1[0], c, a.clone());
                 a
             }
-            "if_" => match args[0] {
-                Bool(true) => Opt(Box::new(Some(args.remove(1)))),
+            "Closure" => Closure(s.1[0].clone(), s.1[1].clone(), c.clone()),
+            "if_" => match args.next().unwrap() {
+                Bool(true) => Opt(Box::new(Some(args.next().unwrap()))),
                 Bool(false) => Opt(Box::new(None)),
                 _ => panic!("if_ {:?}", args),
             },
-            "else_" => match args.remove(0) {
+            "else_" => match args.next().unwrap() {
                 Opt(a) => match *a {
                     Some(a) => a,
-                    None => args.remove(0),
+                    None => args.next().unwrap(),
                 },
                 _ => panic!("else_ {:?}", args),
             },
-            "or" => match args[..] {
-                [Bool(a), Bool(b)] => Bool(a || b),
+            "or" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Bool(a), Bool(b)) => Bool(a || b),
                 _ => panic!("or {:?}", args),
             },
-            "and" => match args[..] {
-                [Bool(a), Bool(b)] => Bool(a && b),
+            "and" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Bool(a), Bool(b)) => Bool(a && b),
                 _ => panic!("and {:?}", args),
             },
-            "eq" => Bool(args[0] == args[1]),
-            "ne" => Bool(args[0] != args[1]),
-            "gt" => match args[..] {
-                [Num(a), Num(b)] => Bool(a > b),
+            "eq" => Bool(args.next().unwrap() == args.next().unwrap()),
+            "ne" => Bool(args.next().unwrap() != args.next().unwrap()),
+            "gt" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Bool(a > b),
                 _ => panic!("gt {:?}", args),
             },
-            "lt" => match args[..] {
-                [Num(a), Num(b)] => Bool(a < b),
+            "lt" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Bool(a < b),
                 _ => panic!("lt {:?}", args),
             },
-            "ge" => match args[..] {
-                [Num(a), Num(b)] => Bool(a >= b),
+            "ge" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Bool(a >= b),
                 _ => panic!("ge {:?}", args),
             },
-            "le" => match args[..] {
-                [Num(a), Num(b)] => Bool(a <= b),
+            "le" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Bool(a <= b),
                 _ => panic!("le {:?}", args),
             },
-            "idx" => match (args.remove(0), args.remove(0)) {
+            "idx" => match (args.next().unwrap(), args.next().unwrap()) {
                 (List(mut a), Num(i)) => a.remove(i as usize),
                 _ => panic!("idx {:?}", args),
             },
-            "add" => match args[..] {
-                [Num(a), Num(b)] => Num(a + b),
+            "add" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Num(a + b),
                 _ => panic!("add {:?}", args),
             },
-            "sub" => match args[..] {
-                [Num(a), Num(b)] => Num(a - b),
+            "sub" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Num(a - b),
                 _ => panic!("sub {:?}", args),
             },
-            "mul" => match &args[..] {
-                [Num(a), Num(b)] => Num(a * b),
+            "mul" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Num(a * b),
                 _ => panic!("mul {:?}", args),
             },
-            "div" => match args[..] {
-                [Num(a), Num(b)] => Num(a / b),
+            "div" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Num(a / b),
                 _ => panic!("div {:?}", args),
             },
-            "pow" => match args[..] {
-                [Num(a), Num(b)] => Num(a.powf(b)),
+            "pow" => match (args.next().unwrap(), args.next().unwrap()) {
+                (Num(a), Num(b)) => Num(a.powf(b)),
                 _ => panic!("pow {:?}", args),
             },
-            "neg" => match args[..] {
-                [Num(a)] => Num(-a),
+            "neg" => match args.next().unwrap() {
+                Num(a) => Num(-a),
                 _ => panic!("neg {:?}", args),
             },
-            "not" => match args[..] {
-                [Bool(a)] => Bool(!a),
+            "not" => match args.next().unwrap() {
+                Bool(a) => Bool(!a),
                 _ => panic!("not {:?}", args),
             },
-            "call" => match args.remove(0) {
-                Func(x, y, mut z) => {
-                    destructure(&x, &mut z, args.remove(0));
+            "call" => match args.next().unwrap() {
+                Closure(x, y, mut z) => {
+                    destructure(&x, &mut z, args.next().unwrap());
                     interpret_(&y, &mut z)
                 }
-                a => panic!("call {:?} {:?}{:?}", s, a, args),
+                Function(x, y) => {
+                    let a = args.next().unwrap();
+                    destructure(&x, &mut argc, a);
+                    interpret_(&y, &mut argc)
+                }
+                a => panic!("call {:?} {:?} {:?}", a, args.next().unwrap(), argc),
             },
             "false" => Bool(false),
             "true" => Bool(true),
