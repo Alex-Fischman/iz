@@ -2,17 +2,18 @@ use std::collections::HashMap;
 use std::fmt::*;
 
 // todo: std.iz, built-in enums, remove Opt, built-in structs, remove Cons, Empty, Tuple
-// todo: types, ::
+// todo: types, :
 
 fn main() {
     let program = std::fs::read_to_string("scratch.iz").unwrap();
     let (program, operators) = preprocess(&program);
-    let program = interpret(&parse(&tokenize(&program), &operators));
+    // println!("{:?}", &parse(tokenize(&program), &operators));
+    let program = interpret(&parse(tokenize(&program), &operators));
     println!("{:?}", program);
 
     let parse_test = |a, b| {
         assert_eq!(
-            format!("{:?}", parse(&tokenize(a), &HashMap::new())),
+            format!("{:?}", parse(tokenize(a), &HashMap::new())),
             format!("({{ {})", b)
         )
     };
@@ -42,7 +43,7 @@ fn main() {
     );
 
     // todo: custom op tests, for prefix and infix
-    let inter_test = |a, b| assert_eq!(interpret(&parse(&tokenize(a), &HashMap::new())), b);
+    let inter_test = |a, b| assert_eq!(interpret(&parse(tokenize(a), &HashMap::new())), b);
     inter_test("(1 + 2 * 3 - 4) ^ 2 / -9", Num(-1.0));
     inter_test("!false && 1 == 1 && true != false || 6 <= 2", Bool(true));
     inter_test("if false 1 else if true 2 else 3", Num(2.0));
@@ -68,6 +69,7 @@ fn main() {
     inter_test("fac=n->if n<=1 1 else n*fac@(n-1) fac@4", Num(24.0));
 
     inter_test("if (a ?= 1) a else 2", Num(1.0));
+    inter_test("if a ?= 5 1 a", Num(5.0)); // todo
     inter_test("if (a b) ?= (1 2) a else 3", Num(1.0));
     inter_test("if (a b) ?= (1 2) b else 3", Num(2.0));
     inter_test("if (a b) ?= (1) a else 3", Num(3.0));
@@ -82,9 +84,8 @@ fn main() {
     ); // stdlib
 }
 
-type Pattern<'a> = Vec<Option<&'a str>>; // todo: replace with enum
-type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, Pattern<'a>, bool)>;
-//                            name  is_prefix  func   is_impl bp  pattern  assoc_right
+type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, bool, bool)>;
+//                            name  is_prefix  func   is_impl bp 2_args assoc_right
 
 fn preprocess(s: &str) -> (String, Operators) {
     let mut operators = HashMap::new();
@@ -95,10 +96,7 @@ fn preprocess(s: &str) -> (String, Operators) {
             let c: Vec<&str> = a.split_whitespace().collect();
             if c.get(0) == Some(&"op") {
                 let i = 4 + (c[3] != "p") as usize;
-                let r = c[i + 1..]
-                    .iter()
-                    .map(|c| Some(*c).filter(|c| c != &"_"))
-                    .collect();
+                let r = c.len() == 7;
                 let p = c[2].parse::<u8>().unwrap();
                 operators.insert((c[i], c[3] == "p"), (c[1], false, p, r, c[3] == "r"));
                 b
@@ -202,53 +200,40 @@ impl<'a> ParseContext<'a> {
     }
 }
 
-fn parse(tokens: &[Token], operators: &Operators) -> S {
+fn parse(mut tokens: Vec<Token>, operators: &Operators) -> S {
     let mut operators = operators.clone();
-    operators.insert(("=", false), ("set", true, 1, vec![None], true));
-    operators.insert((":", false), ("type", true, 2, vec![None], true));
-    operators.insert(("->", false), ("func", true, 3, vec![None], true));
+    operators.insert(("=", false), ("set", true, 1, true, true));
+    operators.insert((":", false), ("type", true, 2, true, true));
+    operators.insert(("->", false), ("func", true, 3, true, true));
 
-    operators.insert(("if", true), ("if_", true, 4, vec![None, None], false));
-    operators.insert(("else", false), ("else_", true, 4, vec![None], true));
+    operators.insert(("if", true), ("if_", true, 4, true, true));
+    operators.insert(("else", false), ("else_", true, 4, true, true));
 
-    operators.insert(("?=", false), ("try", true, 5, vec![None], true));
+    operators.insert(("?=", false), ("try", true, 5, true, true));
 
-    operators.insert(("||", false), ("or", true, 6, vec![None], false));
-    operators.insert(("&&", false), ("and", true, 7, vec![None], false));
+    operators.insert(("||", false), ("or", true, 6, true, false));
+    operators.insert(("&&", false), ("and", true, 7, true, false));
 
-    operators.insert(("==", false), ("eq", true, 8, vec![None], false));
-    operators.insert(("!=", false), ("ne", true, 8, vec![None], false));
-    operators.insert((">", false), ("gt", true, 8, vec![None], false));
-    operators.insert(("<", false), ("lt", true, 8, vec![None], false));
-    operators.insert((">=", false), ("ge", true, 8, vec![None], false));
-    operators.insert(("<=", false), ("le", true, 8, vec![None], false));
+    operators.insert(("==", false), ("eq", true, 8, true, false));
+    operators.insert(("!=", false), ("ne", true, 8, true, false));
+    operators.insert((">", false), ("gt", true, 8, true, false));
+    operators.insert(("<", false), ("lt", true, 8, true, false));
+    operators.insert((">=", false), ("ge", true, 8, true, false));
+    operators.insert(("<=", false), ("le", true, 8, true, false));
 
-    operators.insert(("::", false), ("cons", true, 10, vec![None], true));
+    operators.insert(("::", false), ("cons", true, 9, true, true));
 
-    operators.insert(("+", false), ("add", true, 11, vec![None], false));
-    operators.insert(("-", false), ("sub", true, 11, vec![None], false));
-    operators.insert(("*", false), ("mul", true, 12, vec![None], false));
-    operators.insert(("/", false), ("div", true, 12, vec![None], false));
-    operators.insert(("^", false), ("pow", true, 13, vec![None], false));
+    operators.insert(("+", false), ("add", true, 10, true, false));
+    operators.insert(("-", false), ("sub", true, 10, true, false));
+    operators.insert(("*", false), ("mul", true, 11, true, false));
+    operators.insert(("/", false), ("div", true, 11, true, false));
+    operators.insert(("^", false), ("pow", true, 12, true, false));
 
-    operators.insert(("-", true), ("neg", true, 14, vec![None], false));
-    operators.insert(("!", true), ("not", true, 14, vec![None], false));
+    operators.insert(("-", true), ("neg", true, 13, false, false));
+    operators.insert(("!", true), ("not", true, 13, false, false));
 
-    operators.insert((".", false), ("dot", false, 15, vec![None], false)); // stdlib
-    operators.insert(("@", false), ("call", true, 16, vec![None], false));
-
-    fn pattern(c: &mut ParseContext, right: &Pattern, bp: u8) -> Vec<S> {
-        right
-            .iter()
-            .filter_map(|i| match i {
-                Some(s) => {
-                    assert_eq!(&c.next().0, s);
-                    None
-                }
-                None => Some(expr(c, bp)),
-            })
-            .collect()
-    }
+    operators.insert((".", false), ("dot", false, 14, true, false)); // stdlib
+    operators.insert(("@", false), ("call", true, 15, true, false));
 
     fn get_lhs(func: &str, pos: usize, i: bool, v: Vec<S>) -> S {
         match i {
@@ -261,9 +246,10 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
     }
 
     fn expr(c: &mut ParseContext, rbp: u8) -> S {
-        let op = c.next().clone();
+        let mut op = c.next().clone();
         let mut lhs = match c.2.get(&(&op.0, true)) {
-            Some((func, i, bp, right, _)) => get_lhs(func, op.1, *i, pattern(c, &right, *bp)),
+            Some((f, i, bp, false, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp)]),
+            Some((f, i, bp, _, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp), expr(c, *bp)]),
             None if op.2 == Opener => {
                 let mut v = vec![];
                 while c.get().2 != Closer {
@@ -275,23 +261,25 @@ fn parse(tokens: &[Token], operators: &Operators) -> S {
             None => S(op, vec![]),
         };
         while c.0 < c.1.len() {
-            let op = c.get().clone();
+            op = c.get().clone();
             match c.2.get(&(&op.0, false)) {
-                Some((func, i, bp, right, assoc)) if bp > &rbp => {
+                Some((f, i, bp, true, ri)) if bp > &rbp => {
                     c.next();
-                    let mut v = pattern(c, &right, bp - *assoc as u8);
-                    v.insert(0, lhs);
-                    lhs = get_lhs(func, op.1, *i, v);
+                    lhs = get_lhs(f, op.1, *i, vec![lhs, expr(c, bp - *ri as u8)]);
+                }
+                Some((f, i, bp, false, _)) if bp > &rbp => {
+                    c.next();
+                    lhs = get_lhs(f, op.1, *i, vec![lhs]);
                 }
                 _ => break,
             }
         }
         lhs
     }
-    let mut ts = tokens.to_vec();
-    ts.insert(0, Token("{".to_string(), 0, Opener));
-    ts.push(Token("}".to_string(), 0, Closer));
-    expr(&mut ParseContext(0, &ts, &operators), 0)
+
+    tokens.insert(0, Token("{".to_string(), 0, Opener));
+    tokens.push(Token("}".to_string(), 0, Closer));
+    expr(&mut ParseContext(0, &tokens, &operators), 0)
 }
 
 use Expr::*;
@@ -360,7 +348,7 @@ fn interpret(s: &S) -> Expr {
                 }),
                 (Cons(e, f), Cons(a, b)) => {
                     destructure_(e, *a.clone(), c) && destructure_(f, *b.clone(), c)
-                },
+                }
                 (e, a) => e == &a,
             }
         }
@@ -379,7 +367,7 @@ fn interpret(s: &S) -> Expr {
             return Num(s.0 .0.parse().unwrap());
         }
 
-        let snapshot = c.clone(); // todo: if (and others) also shouldn't bleed scope
+        let snapshot = c.clone();
         let mut args = s.1.iter().map(|s| interpret_(s, c));
         match &*s.0 .0 {
             "(" => match args.len() {
@@ -443,7 +431,7 @@ fn interpret(s: &S) -> Expr {
             },
             "le" => match (args.next().unwrap(), args.next().unwrap()) {
                 (Num(a), Num(b)) => Bool(a <= b),
-               a => panic!("le {:?} {:?}", a, args),
+                a => panic!("le {:?} {:?}", a, args),
             },
             "cons" => Cons(
                 Box::new(args.next().unwrap()),
@@ -478,13 +466,14 @@ fn interpret(s: &S) -> Expr {
                 a => panic!("not {:?} {:?}", a, args),
             },
             "call" => match args.next().unwrap() {
+                Var(Token(s, _, _)) if s == "Some" => Opt(Some(Box::new(args.next().unwrap()))),
                 Closure(x, y, mut z) => call(&x, &y, args.next().unwrap(), &mut z),
                 Function(x, y) => call(&x, &y, args.next().unwrap(), c),
                 a => panic!("call {:?} {:?} {:?}", a, args.next().unwrap(), c),
             },
             "false" => Bool(false),
             "true" => Bool(true),
-            // todo: Some and None?
+            "None" => Opt(None),
             o => match c.get(o) {
                 Some(e) => e.clone(),
                 None => Var(s.0.clone()),

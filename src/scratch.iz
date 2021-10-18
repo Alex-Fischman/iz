@@ -1,4 +1,4 @@
 dot = x -> f -> f@x
 map = f -> l -> if x::xs ?= l (f@x :: xs.map@f) else []
-get = i -> l -> if !(x::xs ?= l) false else if i == 0 x else xs.get@(i - 1)
+get = i -> l -> if !(x::xs ?= l) None else if i == 0 Some@x else xs.get@(i - 1)
 [1 2 3 4 5].map@(x -> x * x).get@3
