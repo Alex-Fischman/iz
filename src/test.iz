@@ -22,4 +22,4 @@ assert 5 {x = 2 y->x+y}@3
 assert 24 factorial@4
 
 assert 1 if a ?= 1 a else 2
-assert 16 [1 2 3 4 5].map@square.get@3
+assert Some@16 [1 2 3 4 5].map@square.get@3

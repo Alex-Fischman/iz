@@ -172,14 +172,10 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
     new_op(operators, "if", true, "if_", 5, true, true);
     new_op(operators, "else", false, "else_", 5, true, true);
     new_op(operators, "?=", false, "try", 6, true, true);
-    new_op(operators, "||", false, "or", 7, true, false);
-    new_op(operators, "&&", false, "and", 8, true, false);
     new_op(operators, "==", false, "eq", 9, true, false);
     new_op(operators, "!=", false, "ne", 9, true, false);
     new_op(operators, ">", false, "gt", 9, true, false);
     new_op(operators, "<", false, "lt", 9, true, false);
-    new_op(operators, ">=", false, "ge", 9, true, false);
-    new_op(operators, "<=", false, "le", 9, true, false);
     new_op(operators, "::", false, "cons", 10, true, true);
     new_op(operators, "+", false, "add", 11, true, false);
     new_op(operators, "-", false, "sub", 11, true, false);
@@ -355,14 +351,6 @@ fn interpret(s: &S) -> Expr {
             },
             // todo: merge with eq?
             "try" => Bool(destructure(&s.1[0], args.skip(1).next().unwrap(), c)),
-            "or" => match (args.next().unwrap(), args.next().unwrap()) {
-                (Bool(a), Bool(b)) => Bool(a || b),
-                a => panic!("or {:?} {:?}", a, args),
-            },
-            "and" => match (args.next().unwrap(), args.next().unwrap()) {
-                (Bool(a), Bool(b)) => Bool(a && b),
-                a => panic!("and {:?} {:?}", a, args),
-            },
             "eq" => Bool(args.next().unwrap() == args.next().unwrap()),
             "ne" => Bool(args.next().unwrap() != args.next().unwrap()),
             "gt" => match (args.next().unwrap(), args.next().unwrap()) {
@@ -372,14 +360,6 @@ fn interpret(s: &S) -> Expr {
             "lt" => match (args.next().unwrap(), args.next().unwrap()) {
                 (Num(a), Num(b)) => Bool(a < b),
                 a => panic!("lt {:?} {:?}", a, args),
-            },
-            "ge" => match (args.next().unwrap(), args.next().unwrap()) {
-                (Num(a), Num(b)) => Bool(a >= b),
-                a => panic!("ge {:?} {:?}", a, args),
-            },
-            "le" => match (args.next().unwrap(), args.next().unwrap()) {
-                (Num(a), Num(b)) => Bool(a <= b),
-                a => panic!("le {:?} {:?}", a, args),
             },
             "cons" => Cons(
                 Box::new(args.next().unwrap()),
