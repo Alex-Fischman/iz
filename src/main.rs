@@ -6,12 +6,12 @@ use std::fmt::*;
 // types, :
 
 fn main() {
-    let (program, operators) = preprocess(&std::fs::read_to_string("scratch.iz").unwrap());
-    interpret(&parse(tokenize(&program), &operators));
+    run_program("scratch.iz");
 
     let parse_test = |a, b| {
+        let (p, mut ops) = preprocess(a);
         assert_eq!(
-            format!("{:?}", parse(tokenize(a), &HashMap::new())),
+            format!("{:?}", parse(tokenize(&p), &mut ops)),
             format!("({{ {})", b)
         )
     };
@@ -22,12 +22,10 @@ fn main() {
     parse_test("a = b = c", "(set a (set b c))");
     parse_test("1 + f = g = h * 3", "(set (add 1 f) (set g (mul h 3)))");
     parse_test("a + b * c * d + e", "(add (add a (mul (mul b c) d)) e)");
-    parse_test("- !b", "(neg (not b))");
-    parse_test("! -b", "(not (neg b))");
-    parse_test("-a + b", "(add (neg a) b)");
-    parse_test("!a && b", "(and (not a) b)");
-    parse_test("- -1 * 2", "(mul (neg (neg 1)) 2)");
-    parse_test("- -f + g", "(add (neg (neg f)) g)");
+    parse_test("#op dot 15 l _ . _\na . b", "(call (call dot a) b)");
+    parse_test("#op neg 14 p - _\n-a + b", "(add (call neg a) b)");
+    parse_test("#op neg 14 p - _\n- -1 * 2", "(mul (call neg (call neg 1)) 2)");
+    parse_test("#op neg 14 p - _\n- -f + g", "(add (call neg (call neg f)) g)");
     parse_test("(0(0))", "(( 0 (( 0))");
     parse_test("((0)(0))", "(( (( 0) (( 0))");
     parse_test("(((0)))", "(( (( (( 0)))");
@@ -40,16 +38,18 @@ fn main() {
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
 
-    let (program, operators) = preprocess(&std::fs::read_to_string("test.iz").unwrap());
-    interpret(&parse(tokenize(&program), &operators));
+    run_program("test.iz");
+}
 
-    // todo: custom op tests, for prefix and infix
+fn run_program(f: &str) -> Expr {
+    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+    interpret(&parse(tokenize(&p), &mut ops))
 }
 
 type Operators = HashMap<(String, bool), (String, bool, u8, bool, bool)>;
 
-fn new_op(ops: &mut Operators, n: &str, p: bool, f: &str, i: bool, bp: u8, ar: bool, ri: bool) {
-    ops.insert((n.to_string(), p), (f.to_string(), i, bp, ar, ri));
+fn new_op(ops: &mut Operators, n: &str, p: bool, f: &str, bp: u8, ar: bool, ri: bool) {
+    ops.insert((n.to_string(), p), (f.to_string(), true, bp, ar, ri));
 }
 
 fn preprocess(s: &str) -> (String, Operators) {
@@ -60,15 +60,10 @@ fn preprocess(s: &str) -> (String, Operators) {
             let (a, b) = s.split_at(s.find('\n').unwrap_or(0));
             let c: Vec<&str> = a.split_whitespace().collect();
             if c.get(0) == Some(&"op") {
-                new_op(
-                    &mut operators,
-                    c[4 + (c[3] != "p") as usize],
-                    c[3] == "p",
-                    c[1],
-                    false,
-                    c[2].parse::<u8>().unwrap(),
-                    c.len() == 7,
-                    c[3] == "r",
+                let bp = c[2].parse::<u8>().unwrap();
+                operators.insert(
+                    (c[4 + (c[3] != "p") as usize].to_string(), c[3] == "p"),
+                    (c[1].to_string(), false, bp, c.len() == 7, c[3] == "r"),
                 );
                 b.to_string()
             } else if c.get(0) == Some(&"include") {
@@ -163,57 +158,35 @@ impl<'a> ParseContext<'a> {
         &self.1[self.0]
     }
 
-    fn next(&mut self) -> &Token {
+    fn next(&mut self) {
         self.0 += 1;
-        &self.1[self.0 - 1]
     }
 }
 
-fn parse(mut tokens: Vec<Token>, operators: &Operators) -> S {
-    let mut operators = operators.clone();
-    new_op(&mut operators, "print", true, "print", true, 1, false, true);
-    new_op(
-        &mut operators,
-        "assert",
-        true,
-        "assert",
-        true,
-        1,
-        true,
-        true,
-    );
-
-    new_op(&mut operators, "=", false, "set", true, 2, true, true);
-    new_op(&mut operators, ":", false, "type", true, 3, true, true);
-    new_op(&mut operators, "->", false, "func", true, 4, true, true);
-
-    new_op(&mut operators, "if", true, "if_", true, 5, true, true);
-    new_op(&mut operators, "else", false, "else_", true, 5, true, true);
-
-    new_op(&mut operators, "?=", false, "try", true, 6, true, true);
-
-    new_op(&mut operators, "||", false, "or", true, 7, true, false);
-    new_op(&mut operators, "&&", false, "and", true, 8, true, false);
-
-    new_op(&mut operators, "==", false, "eq", true, 9, true, false);
-    new_op(&mut operators, "!=", false, "ne", true, 9, true, false);
-    new_op(&mut operators, ">", false, "gt", true, 9, true, false);
-    new_op(&mut operators, "<", false, "lt", true, 9, true, false);
-    new_op(&mut operators, ">=", false, "ge", true, 9, true, false);
-    new_op(&mut operators, "<=", false, "le", true, 9, true, false);
-
-    new_op(&mut operators, "::", false, "cons", true, 10, true, true);
-
-    new_op(&mut operators, "+", false, "add", true, 11, true, false);
-    new_op(&mut operators, "-", false, "sub", true, 11, true, false);
-    new_op(&mut operators, "*", false, "mul", true, 12, true, false);
-    new_op(&mut operators, "/", false, "div", true, 12, true, false);
-    new_op(&mut operators, "^", false, "pow", true, 13, true, false);
-
-    new_op(&mut operators, "-", true, "neg", true, 14, false, false);
-    new_op(&mut operators, "!", true, "not", true, 14, false, false);
-
-    new_op(&mut operators, "@", false, "call", true, 15, true, false);
+fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
+    new_op(operators, "print", true, "print", 1, false, true);
+    new_op(operators, "assert", true, "assert", 1, true, true);
+    new_op(operators, "=", false, "set", 2, true, true);
+    new_op(operators, ":", false, "type", 3, true, true);
+    new_op(operators, "->", false, "func", 4, true, true);
+    new_op(operators, "if", true, "if_", 5, true, true);
+    new_op(operators, "else", false, "else_", 5, true, true);
+    new_op(operators, "?=", false, "try", 6, true, true);
+    new_op(operators, "||", false, "or", 7, true, false);
+    new_op(operators, "&&", false, "and", 8, true, false);
+    new_op(operators, "==", false, "eq", 9, true, false);
+    new_op(operators, "!=", false, "ne", 9, true, false);
+    new_op(operators, ">", false, "gt", 9, true, false);
+    new_op(operators, "<", false, "lt", 9, true, false);
+    new_op(operators, ">=", false, "ge", 9, true, false);
+    new_op(operators, "<=", false, "le", 9, true, false);
+    new_op(operators, "::", false, "cons", 10, true, true);
+    new_op(operators, "+", false, "add", 11, true, false);
+    new_op(operators, "-", false, "sub", 11, true, false);
+    new_op(operators, "*", false, "mul", 12, true, false);
+    new_op(operators, "/", false, "div", 12, true, false);
+    new_op(operators, "^", false, "pow", 13, true, false);
+    new_op(operators, "@", false, "call", 16, true, false);
 
     fn get_lhs(func: &str, pos: usize, i: bool, v: Vec<S>) -> S {
         match i {
@@ -226,7 +199,8 @@ fn parse(mut tokens: Vec<Token>, operators: &Operators) -> S {
     }
 
     fn expr(c: &mut ParseContext, rbp: u8) -> S {
-        let mut op = c.next().clone();
+        let mut op = c.get().clone();
+        c.next();
         let mut lhs = match c.2.get(&(op.0.clone(), true)) {
             Some((f, i, bp, false, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp)]),
             Some((f, i, bp, _, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp), expr(c, *bp)]),
@@ -430,14 +404,6 @@ fn interpret(s: &S) -> Expr {
             "pow" => match (args.next().unwrap(), args.next().unwrap()) {
                 (Num(a), Num(b)) => Num(a.powf(b)),
                 a => panic!("pow {:?} {:?}", a, args),
-            },
-            "neg" => match args.next().unwrap() {
-                Num(a) => Num(-a),
-                a => panic!("neg {:?} {:?}", a, args),
-            },
-            "not" => match args.next().unwrap() {
-                Bool(a) => Bool(!a),
-                a => panic!("not {:?} {:?}", a, args),
             },
             "call" => match args.next().unwrap() {
                 Var(Token(s, _, _)) if s == "Some" => Opt(Some(Box::new(args.next().unwrap()))),

@@ -1,5 +1,11 @@
-#op dot 14 l _ . _
+#op dot 15 l _ . _
 dot = x -> f -> f@x
 
 map = f -> l -> if x::xs ?= l (f@x :: xs.map@f) else []
 get = i -> l -> if x::xs ?= l (if i == 0 x else xs.get@(i - 1)) else false
+
+#op not 14 p ! _
+not = b -> if b false else true
+
+#op neg 14 p - _
+neg = x -> 0 - x
