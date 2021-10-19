@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::*;
 
-// todo: std.iz, built-in enums, remove Opt, built-in structs, remove Cons, Empty, Tuple
-// todo: types, :
+// built-in enums, remove Opt, remove Bool
+// built-in structs, remove Cons, Empty, Tuple
+// types, :
 
 fn main() {
-    let program = std::fs::read_to_string("scratch.iz").unwrap();
-    let (program, operators) = preprocess(&program);
-    // println!("{:?}", &parse(tokenize(&program), &operators));
-    let program = interpret(&parse(tokenize(&program), &operators));
-    println!("{:?}", program);
+    let (program, operators) = preprocess(&std::fs::read_to_string("scratch.iz").unwrap());
+    interpret(&parse(tokenize(&program), &operators));
 
     let parse_test = |a, b| {
         assert_eq!(
@@ -27,9 +25,9 @@ fn main() {
     parse_test("- !b", "(neg (not b))");
     parse_test("! -b", "(not (neg b))");
     parse_test("-a + b", "(add (neg a) b)");
-    parse_test("!a . b", "(not (call (call dot a) b))");
+    parse_test("!a && b", "(and (not a) b)");
     parse_test("- -1 * 2", "(mul (neg (neg 1)) 2)");
-    parse_test("- -f . g", "(neg (neg (call (call dot f) g)))");
+    parse_test("- -f + g", "(add (neg (neg f)) g)");
     parse_test("(0(0))", "(( 0 (( 0))");
     parse_test("((0)(0))", "(( (( 0) (( 0))");
     parse_test("(((0)))", "(( (( (( 0)))");
@@ -42,50 +40,17 @@ fn main() {
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
 
+    let (program, operators) = preprocess(&std::fs::read_to_string("test.iz").unwrap());
+    interpret(&parse(tokenize(&program), &operators));
+
     // todo: custom op tests, for prefix and infix
-    let inter_test = |a, b| assert_eq!(interpret(&parse(tokenize(a), &HashMap::new())), b);
-    inter_test("(1 + 2 * 3 - 4) ^ 2 / -9", Num(-1.0));
-    inter_test("!false && 1 == 1 && true != false || 6 <= 2", Bool(true));
-    inter_test("if false 1 else if true 2 else 3", Num(2.0));
-
-    inter_test("a = 3 b = 5 a + b", Num(8.0));
-    inter_test("{ a = 1 } a", Var(Token::new("a")));
-    inter_test("c = 1 { a = 2 } c", Num(1.0));
-    inter_test("a = 1 a = 2 a + 1", Num(3.0));
-
-    inter_test("(x -> x)@1", Num(1.0));
-    inter_test("(x -> x * x)@16", Num(256.0));
-    inter_test("(x -> x)@1 x", Var(Token::new("x")));
-    inter_test("id = x -> x id@3", Num(3.0));
-    inter_test("(a -> b -> a)@3@4", Num(3.0));
-    inter_test("square=x->x*x dot=x->f->f@x dot@3@square", Num(9.0));
-    inter_test("square=x->x*x dot=x->f->f@x 3.square", Num(9.0)); // stdlib
-    inter_test("{x=2 y->x+y}@3", Num(5.0));
-
-    inter_test("fst=(a b)->a fst@(3 5)", Num(3.0)); // stdlib
-    inter_test("snd=(a b)->b snd@(3 5)", Num(5.0)); // stdlib
-    inter_test("thr=(a b c)->c thr@(1 2 3 4)", Num(3.0)); // stdlib
-    inter_test("(a b c d)=(2 3 5 7 11) c", Num(5.0));
-    inter_test("fac=n->if n<=1 1 else n*fac@(n-1) fac@4", Num(24.0));
-
-    inter_test("if (a ?= 1) a else 2", Num(1.0));
-    inter_test("if a ?= 5 1 a", Num(5.0)); // todo
-    inter_test("if (a b) ?= (1 2) a else 3", Num(1.0));
-    inter_test("if (a b) ?= (1 2) b else 3", Num(2.0));
-    inter_test("if (a b) ?= (1) a else 3", Num(3.0));
-    inter_test("if (a b)?=(1 2 3) b else 4", Num(2.0));
-    inter_test("if (a) ?= (1 2) a else 3", Tuple(vec![Num(1.0), Num(2.0)]));
-    inter_test(
-        "dot = x -> f -> f@x
-         map = f -> l -> if x::xs?=l f@x::xs.map@f else []
-         get = i -> l -> if !(x::xs?=l) false else if i==0 x else xs.get@(i - 1)
-         [1 2 3 4 5].map@(x -> x * x).get@3",
-        Num(16.0),
-    ); // stdlib
 }
 
-type Operators<'a> = HashMap<(&'a str, bool), (&'a str, bool, u8, bool, bool)>;
-//                            name  is_prefix  func   is_impl bp 2_args assoc_right
+type Operators = HashMap<(String, bool), (String, bool, u8, bool, bool)>;
+
+fn new_op(ops: &mut Operators, n: &str, p: bool, f: &str, i: bool, bp: u8, ar: bool, ri: bool) {
+    ops.insert((n.to_string(), p), (f.to_string(), i, bp, ar, ri));
+}
 
 fn preprocess(s: &str) -> (String, Operators) {
     let mut operators = HashMap::new();
@@ -95,16 +60,26 @@ fn preprocess(s: &str) -> (String, Operators) {
             let (a, b) = s.split_at(s.find('\n').unwrap_or(0));
             let c: Vec<&str> = a.split_whitespace().collect();
             if c.get(0) == Some(&"op") {
-                let i = 4 + (c[3] != "p") as usize;
-                let r = c.len() == 7;
-                let p = c[2].parse::<u8>().unwrap();
-                operators.insert((c[i], c[3] == "p"), (c[1], false, p, r, c[3] == "r"));
-                b
+                new_op(
+                    &mut operators,
+                    c[4 + (c[3] != "p") as usize],
+                    c[3] == "p",
+                    c[1],
+                    false,
+                    c[2].parse::<u8>().unwrap(),
+                    c.len() == 7,
+                    c[3] == "r",
+                );
+                b.to_string()
+            } else if c.get(0) == Some(&"include") {
+                let (p, ops) = preprocess(&std::fs::read_to_string(c[1]).unwrap());
+                operators.extend(ops);
+                p + b
             } else {
-                s
+                s.to_string()
             }
         })
-        .collect::<Vec<&str>>()
+        .collect::<Vec<String>>()
         .join("");
     (program, operators)
 }
@@ -113,7 +88,7 @@ fn preprocess(s: &str) -> (String, Operators) {
 struct Token(String, usize, TokenType);
 
 use TokenType::*;
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum TokenType {
     Alphabetic,
     Whitespace,
@@ -121,12 +96,6 @@ enum TokenType {
     Opener,
     Closer,
     Other,
-}
-
-impl Token {
-    fn new(s: &str) -> Token {
-        Token(s.to_string(), 0, Other)
-    }
 }
 
 impl PartialEq for Token {
@@ -187,7 +156,7 @@ impl Debug for S {
     }
 }
 
-struct ParseContext<'a>(usize, &'a [Token], &'a Operators<'a>);
+struct ParseContext<'a>(usize, &'a [Token], &'a Operators);
 
 impl<'a> ParseContext<'a> {
     fn get(&self) -> &Token {
@@ -202,38 +171,49 @@ impl<'a> ParseContext<'a> {
 
 fn parse(mut tokens: Vec<Token>, operators: &Operators) -> S {
     let mut operators = operators.clone();
-    operators.insert(("=", false), ("set", true, 1, true, true));
-    operators.insert((":", false), ("type", true, 2, true, true));
-    operators.insert(("->", false), ("func", true, 3, true, true));
+    new_op(&mut operators, "print", true, "print", true, 1, false, true);
+    new_op(
+        &mut operators,
+        "assert",
+        true,
+        "assert",
+        true,
+        1,
+        true,
+        true,
+    );
 
-    operators.insert(("if", true), ("if_", true, 4, true, true));
-    operators.insert(("else", false), ("else_", true, 4, true, true));
+    new_op(&mut operators, "=", false, "set", true, 2, true, true);
+    new_op(&mut operators, ":", false, "type", true, 3, true, true);
+    new_op(&mut operators, "->", false, "func", true, 4, true, true);
 
-    operators.insert(("?=", false), ("try", true, 5, true, true));
+    new_op(&mut operators, "if", true, "if_", true, 5, true, true);
+    new_op(&mut operators, "else", false, "else_", true, 5, true, true);
 
-    operators.insert(("||", false), ("or", true, 6, true, false));
-    operators.insert(("&&", false), ("and", true, 7, true, false));
+    new_op(&mut operators, "?=", false, "try", true, 6, true, true);
 
-    operators.insert(("==", false), ("eq", true, 8, true, false));
-    operators.insert(("!=", false), ("ne", true, 8, true, false));
-    operators.insert((">", false), ("gt", true, 8, true, false));
-    operators.insert(("<", false), ("lt", true, 8, true, false));
-    operators.insert((">=", false), ("ge", true, 8, true, false));
-    operators.insert(("<=", false), ("le", true, 8, true, false));
+    new_op(&mut operators, "||", false, "or", true, 7, true, false);
+    new_op(&mut operators, "&&", false, "and", true, 8, true, false);
 
-    operators.insert(("::", false), ("cons", true, 9, true, true));
+    new_op(&mut operators, "==", false, "eq", true, 9, true, false);
+    new_op(&mut operators, "!=", false, "ne", true, 9, true, false);
+    new_op(&mut operators, ">", false, "gt", true, 9, true, false);
+    new_op(&mut operators, "<", false, "lt", true, 9, true, false);
+    new_op(&mut operators, ">=", false, "ge", true, 9, true, false);
+    new_op(&mut operators, "<=", false, "le", true, 9, true, false);
 
-    operators.insert(("+", false), ("add", true, 10, true, false));
-    operators.insert(("-", false), ("sub", true, 10, true, false));
-    operators.insert(("*", false), ("mul", true, 11, true, false));
-    operators.insert(("/", false), ("div", true, 11, true, false));
-    operators.insert(("^", false), ("pow", true, 12, true, false));
+    new_op(&mut operators, "::", false, "cons", true, 10, true, true);
 
-    operators.insert(("-", true), ("neg", true, 13, false, false));
-    operators.insert(("!", true), ("not", true, 13, false, false));
+    new_op(&mut operators, "+", false, "add", true, 11, true, false);
+    new_op(&mut operators, "-", false, "sub", true, 11, true, false);
+    new_op(&mut operators, "*", false, "mul", true, 12, true, false);
+    new_op(&mut operators, "/", false, "div", true, 12, true, false);
+    new_op(&mut operators, "^", false, "pow", true, 13, true, false);
 
-    operators.insert((".", false), ("dot", false, 14, true, false)); // stdlib
-    operators.insert(("@", false), ("call", true, 15, true, false));
+    new_op(&mut operators, "-", true, "neg", true, 14, false, false);
+    new_op(&mut operators, "!", true, "not", true, 14, false, false);
+
+    new_op(&mut operators, "@", false, "call", true, 15, true, false);
 
     fn get_lhs(func: &str, pos: usize, i: bool, v: Vec<S>) -> S {
         match i {
@@ -247,7 +227,7 @@ fn parse(mut tokens: Vec<Token>, operators: &Operators) -> S {
 
     fn expr(c: &mut ParseContext, rbp: u8) -> S {
         let mut op = c.next().clone();
-        let mut lhs = match c.2.get(&(&op.0, true)) {
+        let mut lhs = match c.2.get(&(op.0.clone(), true)) {
             Some((f, i, bp, false, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp)]),
             Some((f, i, bp, _, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp), expr(c, *bp)]),
             None if op.2 == Opener => {
@@ -262,7 +242,7 @@ fn parse(mut tokens: Vec<Token>, operators: &Operators) -> S {
         };
         while c.0 < c.1.len() {
             op = c.get().clone();
-            match c.2.get(&(&op.0, false)) {
+            match c.2.get(&(op.0, false)) {
                 Some((f, i, bp, true, ri)) if bp > &rbp => {
                     c.next();
                     lhs = get_lhs(f, op.1, *i, vec![lhs, expr(c, bp - *ri as u8)]);
@@ -290,7 +270,6 @@ enum Expr {
     Bool(bool),
     Num(f64),
     Opt(Option<Box<Expr>>),
-    Tuple(Vec<Expr>),
     Cons(Box<Expr>, Box<Expr>),
     Empty,
     Closure(S, S, InterContext),
@@ -303,23 +282,13 @@ impl Debug for Expr {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
             Unit => write!(f, "{{}}"),
-            Var(s) => write!(f, "v{:?}", s),
-            Bool(b) => write!(f, "b{}", b),
-            Num(n) => write!(f, "n{}", n),
+            Var(s) => write!(f, "{:?}", s),
+            Bool(b) => write!(f, "{}", b),
+            Num(n) => write!(f, "{}", n),
             Opt(Some(e)) => write!(f, "Some({:?})", e),
             Opt(None) => write!(f, "None"),
-            Tuple(v) => {
-                write!(f, "(")?;
-                if let Some(a) = v.get(0) {
-                    write!(f, "{:?}", a)?;
-                }
-                for a in &v[1..] {
-                    write!(f, " {:?}", a)?;
-                }
-                write!(f, ")")
-            }
             Cons(a, b) => {
-                write!(f, "[{:?}", a)?;
+                write!(f, " [{:?}", a)?;
                 let mut e = b;
                 while let Cons(a, b) = &**e {
                     write!(f, " {:?}", a)?;
@@ -329,7 +298,7 @@ impl Debug for Expr {
             }
             Empty => write!(f, "[]"),
             Closure(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
-            Function(x, y) => write!(f, "{:?}-r>{:?}", x, y),
+            Function(x, y) => write!(f, "{:?}->{:?}", x, y),
         }
     }
 }
@@ -342,10 +311,6 @@ fn interpret(s: &S) -> Expr {
                     c.insert(s.0.clone(), a);
                     true
                 }
-                (Tuple(e), Tuple(a)) => (0..e.len()).all(|i| match (e.get(i), a.get(i)) {
-                    (Some(e), Some(a)) => destructure_(&e, a.clone(), c),
-                    _ => false,
-                }),
                 (Cons(e, f), Cons(a, b)) => {
                     destructure_(e, *a.clone(), c) && destructure_(f, *b.clone(), c)
                 }
@@ -372,7 +337,7 @@ fn interpret(s: &S) -> Expr {
         match &*s.0 .0 {
             "(" => match args.len() {
                 1 => args.next().unwrap(),
-                _ => Tuple(args.collect()),
+                _ => panic!("tuple {:?}", args),
             },
             "{" => match args.last() {
                 None => Unit,
@@ -384,6 +349,15 @@ fn interpret(s: &S) -> Expr {
             "[" => args
                 .rev()
                 .fold(Empty, |acc, b| Cons(Box::new(b), Box::new(acc))),
+            "assert" => {
+                let a = args.next().unwrap();
+                assert_eq!(a, args.next().unwrap());
+                a
+            }
+            "print" => {
+                println!("{:?}", args.next().unwrap());
+                Unit
+            }
             "set" => {
                 let mut a = args.skip(1).next().unwrap();
                 if let Closure(x, y, z) = &mut a {
