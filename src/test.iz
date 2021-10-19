@@ -1,4 +1,4 @@
-#include std.iz
+#include src/std.iz
 
 assert -1 (1 + 2 * 3 - 4) ^ 2 / -9
 assert true !false && 1 == 1 && true != false || 6 <= 2

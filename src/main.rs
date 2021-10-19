@@ -24,8 +24,14 @@ fn main() {
     parse_test("a + b * c * d + e", "(add (add a (mul (mul b c) d)) e)");
     parse_test("#op dot 15 l _ . _\na . b", "(call (call dot a) b)");
     parse_test("#op neg 14 p - _\n-a + b", "(add (call neg a) b)");
-    parse_test("#op neg 14 p - _\n- -1 * 2", "(mul (call neg (call neg 1)) 2)");
-    parse_test("#op neg 14 p - _\n- -f + g", "(add (call neg (call neg f)) g)");
+    parse_test(
+        "#op neg 14 p - _\n- -1 * 2",
+        "(mul (call neg (call neg 1)) 2)",
+    );
+    parse_test(
+        "#op neg 14 p - _\n- -f + g",
+        "(add (call neg (call neg f)) g)",
+    );
     parse_test("(0(0))", "(( 0 (( 0))");
     parse_test("((0)(0))", "(( (( 0) (( 0))");
     parse_test("(((0)))", "(( (( (( 0)))");
@@ -37,12 +43,16 @@ fn main() {
         "a = if 0 b else c = d",
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
+}
 
-    run_program("test.iz");
+#[test]
+fn test() {
+    run_program("src/test.iz");
 }
 
 fn run_program(f: &str) -> Expr {
-    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+    let p = std::fs::canonicalize(f).unwrap();
+    let (p, mut ops) = preprocess(&std::fs::read_to_string(p).unwrap());
     interpret(&parse(tokenize(&p), &mut ops))
 }
 
