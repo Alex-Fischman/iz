@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::*;
 
+// wildcards _
+// built-in structs, remove Cons, Empty
 // built-in enums, remove Opt, remove Bool
-// built-in structs, remove Cons, Empty, Tuple
 // types, :
 
 fn main() {
@@ -288,7 +289,9 @@ fn interpret(s: &S) -> Expr {
         fn destructure_(e: &Expr, a: Expr, c: &mut InterContext) -> bool {
             match (e, a) {
                 (Var(s), a) => {
-                    c.insert(s.0.clone(), a);
+                    if s.0 != "_" {
+                        c.insert(s.0.clone(), a);
+                    }
                     true
                 }
                 (Cons(e, f), Cons(a, b)) => {
