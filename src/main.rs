@@ -276,29 +276,20 @@ impl Debug for Expr {
 }
 
 fn interpret(s: &S) -> Expr {
-    fn destructure(s: &S, a: Expr, c: &mut InterContext) -> bool {
-        fn destructure_(e: &Expr, a: Expr, c: &mut InterContext) -> bool {
+    fn destructure(s: &S, a: &Expr, c: &mut InterContext) -> bool {
+        fn destructure_(e: &Expr, a: &Expr, c: &mut InterContext) -> bool {
             match (e, a) {
                 (Var(s), a) => {
                     if s.0 != "_" {
-                        c.insert(s.0.clone(), a);
+                        c.insert(s.0.clone(), a.clone());
                     }
                     true
                 }
-                (Cons(e, f), Cons(a, b)) => {
-                    destructure_(e, *a, c) && destructure_(f, *b, c)
-                }
-                (e, a) => e == &a,
+                (Cons(e, f), Cons(a, b)) => destructure_(e, a, c) && destructure_(f, b, c),
+                (e, a) => e == a,
             }
         }
         destructure_(&interpret_(s, &mut HashMap::new()), a, c)
-    }
-
-    fn call(x: &S, y: &S, a: Expr, c: &mut InterContext) -> Expr {
-        if !destructure(x, a, c) {
-            panic!("call closure {:?} {:?} {:?}", x, y, c);
-        }
-        interpret_(y, c)
     }
 
     fn interpret_(s: &S, c: &mut InterContext) -> Expr {
@@ -314,10 +305,10 @@ fn interpret(s: &S) -> Expr {
             "{" => {
                 let mut c = c.clone();
                 s.1.iter().fold(Unit, |_, s| interpret_(s, &mut c))
-            },
-            "[" => s.1.iter()
-                .rev()
-                .fold(Empty, |acc, s| Cons(Box::new(interpret_(s, c)), Box::new(acc))),
+            }
+            "[" => s.1.iter().rev().fold(Empty, |acc, s| {
+                Cons(Box::new(interpret_(s, c)), Box::new(acc))
+            }),
             "assert" => {
                 assert_eq!(interpret_(&s.1[0], c), interpret_(&s.1[1], c));
                 Unit
@@ -331,7 +322,7 @@ fn interpret(s: &S) -> Expr {
                 if let Closure(x, y, z) = &mut a {
                     z.insert(s.1[0].0 .0.to_string(), Function(x.clone(), y.clone()));
                 }
-                match destructure(&s.1[0], a.clone(), c) {
+                match destructure(&s.1[0], &a, c) {
                     true => a,
                     false => panic!("set {:?}", a),
                 }
@@ -348,7 +339,7 @@ fn interpret(s: &S) -> Expr {
                 _ => panic!("else_ {:?}", s.1),
             },
             // todo: merge with eq?
-            "try" => Bool(destructure(&s.1[0], interpret_(&s.1[1], c), c)),
+            "try" => Bool(destructure(&s.1[0], &interpret_(&s.1[1], c), c)),
             "eq" => Bool(interpret_(&s.1[0], c) == interpret_(&s.1[1], c)),
             "gt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Bool(a > b),
@@ -384,8 +375,18 @@ fn interpret(s: &S) -> Expr {
             },
             "call" => match interpret_(&s.1[0], c) {
                 Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
-                Closure(x, y, mut z) => call(&x, &y, interpret_(&s.1[1], c), &mut z),
-                Function(x, y) => call(&x, &y, interpret_(&s.1[1], c), c),
+                Closure(x, y, mut z) => {
+                    if !destructure(&x, &interpret_(&s.1[1], c), &mut z) {
+                        panic!("call closure {:?} {:?} {:?}", x, y, z);
+                    }
+                    interpret_(&y, &mut z)
+                }
+                Function(x, y) => {
+                    if !destructure(&x, &interpret_(&s.1[1], c), c) {
+                        panic!("call function {:?} {:?}", x, y);
+                    }
+                    interpret_(&y, c)
+                }
                 _ => panic!("call {:?} {:?}", s.1, c),
             },
             "false" => Bool(false),
@@ -398,5 +399,5 @@ fn interpret(s: &S) -> Expr {
         }
     }
 
-    interpret_(s, &mut HashMap::with_hasher(std::collections::hash_map::RandomState::new()))
+    interpret_(s, &mut HashMap::new())
 }
