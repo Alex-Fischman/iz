@@ -9,13 +9,15 @@ get = i -> l -> if x::xs ?= l (if i == 0 Some@x else xs.get@(i - 1)) else None
 or  = a -> b -> if a true else b
 and = a -> b -> if a b else false
 
-#op ge 9 l _ >= _
-#op le 9 l _ <= _
-ge = a -> b -> a > b || a == b
-le = a -> b -> a < b || a == b
-
 #op not 14 p ! _
 not = b -> if b false else true
+
+#op ne 9 l _ != _
+#op ge 9 l _ >= _
+#op le 9 l _ <= _
+ne = a -> b -> not@(a == b)
+ge = a -> b -> a > b || a == b
+le = a -> b -> a < b || a == b
 
 #op neg 14 p - _
 neg = x -> 0 - x

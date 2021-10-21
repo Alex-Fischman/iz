@@ -1,13 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::*;
 
-// wildcards _
-// built-in structs, remove Cons, Empty
-// built-in enums, remove Opt, remove Bool
-// types, :
-
 fn main() {
-    run_program("scratch.iz");
+    run_program("src/scratch.iz");
 
     let parse_test = |a, b| {
         let (p, mut ops) = preprocess(a);
@@ -44,10 +39,7 @@ fn main() {
         "a = if 0 b else c = d",
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
-}
 
-#[test]
-fn test() {
     run_program("src/test.iz");
 }
 
@@ -184,7 +176,6 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
     new_op(operators, "else", false, "else_", 5, true, true);
     new_op(operators, "?=", false, "try", 6, true, true);
     new_op(operators, "==", false, "eq", 9, true, false);
-    new_op(operators, "!=", false, "ne", 9, true, false);
     new_op(operators, ">", false, "gt", 9, true, false);
     new_op(operators, "<", false, "lt", 9, true, false);
     new_op(operators, "::", false, "cons", 10, true, true);
@@ -295,7 +286,7 @@ fn interpret(s: &S) -> Expr {
                     true
                 }
                 (Cons(e, f), Cons(a, b)) => {
-                    destructure_(e, *a.clone(), c) && destructure_(f, *b.clone(), c)
+                    destructure_(e, *a, c) && destructure_(f, *b, c)
                 }
                 (e, a) => e == &a,
             }
@@ -315,34 +306,28 @@ fn interpret(s: &S) -> Expr {
             return Num(s.0 .0.parse().unwrap());
         }
 
-        let snapshot = c.clone();
-        let mut args = s.1.iter().map(|s| interpret_(s, c));
         match &*s.0 .0 {
-            "(" => match args.len() {
-                1 => args.next().unwrap(),
-                _ => panic!("tuple {:?}", args),
+            "(" => match s.1.len() {
+                1 => interpret_(&s.1[0], c),
+                _ => panic!("tuple {:?}", s.1),
             },
-            "{" => match args.last() {
-                None => Unit,
-                Some(e) => {
-                    *c = snapshot;
-                    e
-                }
+            "{" => {
+                let mut c = c.clone();
+                s.1.iter().fold(Unit, |_, s| interpret_(s, &mut c))
             },
-            "[" => args
+            "[" => s.1.iter()
                 .rev()
-                .fold(Empty, |acc, b| Cons(Box::new(b), Box::new(acc))),
+                .fold(Empty, |acc, s| Cons(Box::new(interpret_(s, c)), Box::new(acc))),
             "assert" => {
-                let a = args.next().unwrap();
-                assert_eq!(a, args.next().unwrap());
-                a
+                assert_eq!(interpret_(&s.1[0], c), interpret_(&s.1[1], c));
+                Unit
             }
             "print" => {
-                println!("{:?}", args.next().unwrap());
+                println!("{:?}", interpret_(&s.1[0], c));
                 Unit
             }
             "set" => {
-                let mut a = args.skip(1).next().unwrap();
+                let mut a = interpret_(&s.1[1], c);
                 if let Closure(x, y, z) = &mut a {
                     z.insert(s.1[0].0 .0.to_string(), Function(x.clone(), y.clone()));
                 }
@@ -352,57 +337,56 @@ fn interpret(s: &S) -> Expr {
                 }
             }
             "func" => Closure(s.1[0].clone(), s.1[1].clone(), c.clone()),
-            "if_" => match args.next().unwrap() {
-                Bool(true) => Opt(Some(Box::new(args.next().unwrap()))),
+            "if_" => match interpret_(&s.1[0], c) {
+                Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
                 Bool(false) => Opt(None),
-                a => panic!("if_ {:?} {:?}", a, args),
+                _ => panic!("if_ {:?}", s.1),
             },
-            "else_" => match args.next().unwrap() {
+            "else_" => match interpret_(&s.1[0], c) {
                 Opt(Some(a)) => *a,
-                Opt(None) => args.next().unwrap(),
-                a => panic!("else_ {:?} {:?}", a, args),
+                Opt(None) => interpret_(&s.1[1], c),
+                _ => panic!("else_ {:?}", s.1),
             },
             // todo: merge with eq?
-            "try" => Bool(destructure(&s.1[0], args.skip(1).next().unwrap(), c)),
-            "eq" => Bool(args.next().unwrap() == args.next().unwrap()),
-            "ne" => Bool(args.next().unwrap() != args.next().unwrap()),
-            "gt" => match (args.next().unwrap(), args.next().unwrap()) {
+            "try" => Bool(destructure(&s.1[0], interpret_(&s.1[1], c), c)),
+            "eq" => Bool(interpret_(&s.1[0], c) == interpret_(&s.1[1], c)),
+            "gt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Bool(a > b),
-                a => panic!("gt {:?} {:?}", a, args),
+                _ => panic!("gt {:?}", s.1),
             },
-            "lt" => match (args.next().unwrap(), args.next().unwrap()) {
+            "lt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Bool(a < b),
-                a => panic!("lt {:?} {:?}", a, args),
+                _ => panic!("lt {:?}", s.1),
             },
             "cons" => Cons(
-                Box::new(args.next().unwrap()),
-                Box::new(args.next().unwrap()),
+                Box::new(interpret_(&s.1[0], c)),
+                Box::new(interpret_(&s.1[1], c)),
             ),
-            "add" => match (args.next().unwrap(), args.next().unwrap()) {
+            "add" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a + b),
-                a => panic!("add {:?} {:?}", a, args),
+                _ => panic!("add {:?}", s.1),
             },
-            "sub" => match (args.next().unwrap(), args.next().unwrap()) {
+            "sub" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a - b),
-                a => panic!("sub {:?} {:?}", a, args),
+                _ => panic!("sub {:?}", s.1),
             },
-            "mul" => match (args.next().unwrap(), args.next().unwrap()) {
+            "mul" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a * b),
-                a => panic!("mul {:?} {:?}", a, args),
+                _ => panic!("mul {:?}", s.1),
             },
-            "div" => match (args.next().unwrap(), args.next().unwrap()) {
+            "div" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a / b),
-                a => panic!("div {:?} {:?}", a, args),
+                _ => panic!("div {:?}", s.1),
             },
-            "pow" => match (args.next().unwrap(), args.next().unwrap()) {
+            "pow" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a.powf(b)),
-                a => panic!("pow {:?} {:?}", a, args),
+                _ => panic!("pow {:?}", s.1),
             },
-            "call" => match args.next().unwrap() {
-                Var(Token(s, _, _)) if s == "Some" => Opt(Some(Box::new(args.next().unwrap()))),
-                Closure(x, y, mut z) => call(&x, &y, args.next().unwrap(), &mut z),
-                Function(x, y) => call(&x, &y, args.next().unwrap(), c),
-                a => panic!("call {:?} {:?} {:?}", a, args.next().unwrap(), c),
+            "call" => match interpret_(&s.1[0], c) {
+                Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
+                Closure(x, y, mut z) => call(&x, &y, interpret_(&s.1[1], c), &mut z),
+                Function(x, y) => call(&x, &y, interpret_(&s.1[1], c), c),
+                _ => panic!("call {:?} {:?}", s.1, c),
             },
             "false" => Bool(false),
             "true" => Bool(true),
@@ -414,5 +398,5 @@ fn interpret(s: &S) -> Expr {
         }
     }
 
-    interpret_(s, &mut HashMap::new())
+    interpret_(s, &mut HashMap::with_hasher(std::collections::hash_map::RandomState::new()))
 }
