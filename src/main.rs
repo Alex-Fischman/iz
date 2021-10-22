@@ -39,6 +39,7 @@ fn main() {
         "a = if 0 b else c = d",
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
+    parse_test("  \" asdfs sadfasdf \"  ", " asdfs sadfasdf ");
 
     run_program("src/test.iz");
 }
@@ -69,7 +70,8 @@ fn preprocess(s: &str) -> (String, Operators) {
                 );
                 b.to_string()
             } else if c.get(0) == Some(&"include") {
-                let (p, ops) = preprocess(&std::fs::read_to_string(c[1]).unwrap());
+                let f = &c[1][1..c[1].len()-1];
+                let (p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
                 operators.extend(ops);
                 p + b
             } else {
@@ -92,6 +94,7 @@ enum TokenType {
     Numeric,
     Opener,
     Closer,
+    Str,
     Other,
 }
 
@@ -124,13 +127,24 @@ fn tokenize(s: &str) -> Vec<Token> {
                 },
             )
         })
-        .fold(vec![], |mut acc: Vec<Token>, t| {
-            match acc.last_mut() {
-                Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => s.0.push_str(&t.0),
-                _ => acc.push(t),
+        .fold((false, vec![]), |(mut in_s, mut acc): (bool, Vec<Token>), t| {
+            match &*t.0 {
+                "\"" => match in_s {
+                    true => in_s = false,
+                    false => {
+                        in_s = true;
+                        acc.push(Token("".to_string(), t.1, TokenType::Str));
+                    },
+                },
+                _ => match acc.last_mut() {
+                    Some(s) if in_s => s.0.push_str(&t.0),
+                    Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => s.0.push_str(&t.0),
+                    _ => acc.push(t),
+                }
             }
-            acc
+            (in_s, acc)
         })
+        .1
         .into_iter()
         .filter(|t| t.2 != Whitespace)
         .collect()
@@ -182,6 +196,7 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
     new_op(operators, "-", false, "sub", 11, true, false);
     new_op(operators, "*", false, "mul", 12, true, false);
     new_op(operators, "/", false, "div", 12, true, false);
+    new_op(operators, "%", false, "mod", 12, true, false);
     new_op(operators, "^", false, "pow", 13, true, false);
     new_op(operators, "@", false, "call", 16, true, false);
 
@@ -245,6 +260,7 @@ enum Expr {
     Empty,
     Closure(S, S, InterContext),
     Function(S, S),
+    Str(Token),
 }
 
 type InterContext = HashMap<String, Expr>;
@@ -270,6 +286,7 @@ impl Debug for Expr {
             Empty => write!(f, "[]"),
             Closure(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
             Function(x, y) => write!(f, "{:?}->{:?}", x, y),
+            Expr::Str(s) => write!(f, "{}", s.0),
         }
     }
 }
@@ -378,6 +395,10 @@ fn interpret(s: &S) -> Expr {
                 (Num(a), Num(b)) => Num(a / b),
                 _ => panic!("div {:?}", s.1),
             },
+            "mod" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+                (Num(a), Num(b)) => Num(a % b),
+                _ => panic!("mod {:?}", s.1),
+            },
             "pow" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a.powf(b)),
                 _ => panic!("pow {:?}", s.1),
@@ -401,9 +422,12 @@ fn interpret(s: &S) -> Expr {
             "false" => Bool(false),
             "true" => Bool(true),
             "None" => Opt(None),
-            o => match c.get(o) {
-                Some(e) => e.clone(),
-                None => Var(s.0.clone()),
+            o => match s.0.2 {
+                TokenType::Str => Expr::Str(s.0.clone()),
+                _ => match c.get(o) {
+                    Some(e) => e.clone(),
+                    None => Var(s.0.clone()),
+                }
             },
         }
     }
