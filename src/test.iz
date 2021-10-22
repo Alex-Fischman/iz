@@ -8,6 +8,7 @@ assert 8 {a = 3 b = 5 a + b}
 assert a {{a = 1} a}
 assert 3 {a = 1 a = 2 a + 1}
 assert 1 {c = 1 {c = 2} c}
+assert 1 {c = 1 {c}}
 
 id = x -> x
 square = x -> x * x
@@ -25,3 +26,4 @@ assert 1 if a ?= 1 a else 2
 assert Some@16 [1 2 3 4 5].map@square.get@3
 
 assert _ {_ = 1 _}
+assert 1 {a = 2 {a = 1 x -> a}@5}

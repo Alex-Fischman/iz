@@ -44,8 +44,7 @@ fn main() {
 }
 
 fn run_program(f: &str) -> Expr {
-    let p = std::fs::canonicalize(f).unwrap();
-    let (p, mut ops) = preprocess(&std::fs::read_to_string(p).unwrap());
+    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
     interpret(&parse(tokenize(&p), &mut ops))
 }
 
@@ -292,6 +291,10 @@ fn interpret(s: &S) -> Expr {
         destructure_(&interpret_(s, &mut HashMap::new()), a, c)
     }
 
+    fn search(tree: &S, string: &str) -> bool {
+        tree.0 .0 == string || tree.1.iter().any(|s| search(s, string))
+    }
+
     fn interpret_(s: &S, c: &mut InterContext) -> Expr {
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
@@ -327,7 +330,14 @@ fn interpret(s: &S) -> Expr {
                     false => panic!("set {:?}", a),
                 }
             }
-            "func" => Closure(s.1[0].clone(), s.1[1].clone(), c.clone()),
+            "func" => Closure(
+                s.1[0].clone(),
+                s.1[1].clone(),
+                c.iter()
+                    .filter(|(k, _)| search(s, k))
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
             "if_" => match interpret_(&s.1[0], c) {
                 Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
                 Bool(false) => Opt(None),
@@ -338,7 +348,6 @@ fn interpret(s: &S) -> Expr {
                 Opt(None) => interpret_(&s.1[1], c),
                 _ => panic!("else_ {:?}", s.1),
             },
-            // todo: merge with eq?
             "try" => Bool(destructure(&s.1[0], &interpret_(&s.1[1], c), c)),
             "eq" => Bool(interpret_(&s.1[0], c) == interpret_(&s.1[1], c)),
             "gt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
