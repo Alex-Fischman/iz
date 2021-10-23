@@ -1,13 +1,13 @@
 #include "src/std.iz"
 
-print [1 2 3].map@(x -> x * x).get@1
-
 fizzbuzz = max -> n -> {
 	print if n % 15 == 0 "fizzbuzz"
-	else  if n % 3  == 0 "fizz"
-	else  if n % 5  == 0 "buzz"
-	else                 n
+	 else if n % 3  == 0 "fizz"
+	 else if n % 5  == 0 "buzz"
+	 else                n
 	if n < max fizzbuzz@max@(n + 1)
 }
 
-fizzbuzz@20@1
+sum = l -> if (x::xs = l) x + xs.sum else 0
+
+print sum@[1 5 7]
