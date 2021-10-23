@@ -69,7 +69,7 @@ fn preprocess(s: &str) -> (String, Operators) {
                 );
                 b.to_string()
             } else if c.get(0) == Some(&"include") {
-                let f = &c[1][1..c[1].len()-1];
+                let f = &c[1][1..c[1].len() - 1];
                 let (p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
                 operators.extend(ops);
                 p + b
@@ -126,23 +126,28 @@ fn tokenize(s: &str) -> Vec<Token> {
                 },
             )
         })
-        .fold((false, vec![]), |(mut in_s, mut acc): (bool, Vec<Token>), t| {
-            match &*t.0 {
-                "\"" => match in_s {
-                    true => in_s = false,
-                    false => {
-                        in_s = true;
-                        acc.push(Token("".to_string(), t.1, TokenType::Str));
+        .fold(
+            (false, vec![]),
+            |(mut in_s, mut acc): (bool, Vec<Token>), t| {
+                match &*t.0 {
+                    "\"" => match in_s {
+                        true => in_s = false,
+                        false => {
+                            in_s = true;
+                            acc.push(Token("".to_string(), t.1, TokenType::Str));
+                        }
                     },
-                },
-                _ => match acc.last_mut() {
-                    Some(s) if in_s => s.0.push_str(&t.0),
-                    Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => s.0.push_str(&t.0),
-                    _ => acc.push(t),
+                    _ => match acc.last_mut() {
+                        Some(s) if in_s => s.0.push_str(&t.0),
+                        Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => {
+                            s.0.push_str(&t.0)
+                        }
+                        _ => acc.push(t),
+                    },
                 }
-            }
-            (in_s, acc)
-        })
+                (in_s, acc)
+            },
+        )
         .1
         .into_iter()
         .filter(|t| t.2 != Whitespace)
@@ -256,8 +261,7 @@ enum Expr {
     Opt(Option<Box<Expr>>),
     Cons(Box<Expr>, Box<Expr>),
     Empty,
-    Closure(S, S, InterContext),
-    Function(S, S),
+    Function(S, S, InterContext),
     Str(Token),
 }
 
@@ -282,8 +286,7 @@ impl Debug for Expr {
                 write!(f, "]")
             }
             Empty => write!(f, "[]"),
-            Closure(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
-            Function(x, y) => write!(f, "{:?}->{:?}", x, y),
+            Function(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
             Expr::Str(s) => write!(f, "{}", s.0),
         }
     }
@@ -337,14 +340,17 @@ fn interpret(s: &S) -> Expr {
             }
             "set" => {
                 let mut a = interpret_(&s.1[1], c);
-                if let Closure(x, y, z) = &mut a {
+                if let Function(x, y, z) = &mut a {
                     if search(y, &s.1[0].0 .0.to_string()) {
-                        z.insert(s.1[0].0 .0.to_string(), Function(x.clone(), y.clone()));
+                        z.insert(
+                            s.1[0].0 .0.to_string(),
+                            Function(x.clone(), y.clone(), HashMap::new()),
+                        );
                     }
                 }
                 Bool(destructure(&s.1[0], &a, c))
             }
-            "func" => Closure(
+            "func" => Function(
                 s.1[0].clone(),
                 s.1[1].clone(),
                 c.iter()
@@ -401,16 +407,11 @@ fn interpret(s: &S) -> Expr {
             },
             "call" => match interpret_(&s.1[0], c) {
                 Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
-                Closure(x, y, mut z) => {
-                    if !destructure(&x, &interpret_(&s.1[1], c), &mut z) {
+                Function(x, y, z) => {
+                    if !destructure(&x, &interpret_(&s.1[1], c), c) {
                         panic!("call closure {:?} {:?} {:?}", x, y, z);
                     }
-                    interpret_(&y, &mut z)
-                }
-                Function(x, y) => {
-                    if !destructure(&x, &interpret_(&s.1[1], c), c) {
-                        panic!("call function {:?} {:?}", x, y);
-                    }
+                    c.extend(z);
                     interpret_(&y, c)
                 }
                 o => panic!("{:?} {:?} {:?}", o, s, c),
@@ -418,12 +419,12 @@ fn interpret(s: &S) -> Expr {
             "false" => Bool(false),
             "true" => Bool(true),
             "None" => Opt(None),
-            o => match s.0.2 {
+            o => match s.0 .2 {
                 TokenType::Str => Expr::Str(s.0.clone()),
                 _ => match c.get(o) {
                     Some(e) => e.clone(),
                     None => Var(s.0.clone()),
-                }
+                },
             },
         }
     }
