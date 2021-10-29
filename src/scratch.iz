@@ -10,4 +10,4 @@ fizzbuzz = max -> n -> {
 
 sum = l -> if (x::xs = l) x + xs.sum else 0
 
-print sum@[1 5 7]
+print [1 2 3 4].map@(x -> x * 2).sum

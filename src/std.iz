@@ -1,9 +1,6 @@
 #op dot 15 l _ . _
 dot = x -> f -> f@x
 
-map = f -> l -> if (x::xs = l) f@x :: xs.map@f else []
-get = i -> l -> if (x::xs = l) if i == 0 Some@x else xs.get@(i - 1) else None
-
 #op or  7 l _ || _
 #op and 8 l _ && _
 or  = a -> b -> if a true else b
@@ -21,3 +18,6 @@ le = a -> b -> a < b || a == b
 
 #op neg 14 p - _
 neg = x -> 0 - x
+
+map = f -> l -> if (x::xs = l) f@x :: xs.map@f else []
+get = i -> l -> if (x::xs = l) if i == 0 Some@x else xs.get@(i - 1) else None

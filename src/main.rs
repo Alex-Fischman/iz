@@ -5,7 +5,7 @@ fn main() {
     let parse_test = |a, b| {
         let (p, mut ops) = preprocess(a);
         assert_eq!(
-            format!("{:?}", parse(tokenize(&p), &mut ops)),
+            format!("{}", parse(tokenize(&p), &mut ops)),
             format!("({{ {})", b)
         )
     };
@@ -39,7 +39,7 @@ fn main() {
     );
     parse_test("  \" asdfs sadfasdf \"  ", " asdfs sadfasdf ");
 
-    // run_program("src/test.iz");
+    run_program("src/test.iz");
     run_program("src/scratch.iz");
 }
 
@@ -54,36 +54,61 @@ fn new_op(ops: &mut Operators, n: &str, p: bool, f: &str, bp: u8, ar: bool, ri: 
     ops.insert((n.to_string(), p), (f.to_string(), true, bp, ar, ri));
 }
 
-fn preprocess(s: &str) -> (String, Operators) {
+#[derive(Clone, PartialEq)]
+struct FilePos(usize, usize);
+
+impl Debug for FilePos {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(f, "{}:{}", self.0, self.1)
+    }
+}
+
+fn preprocess(s: &str) -> (Vec<(char, FilePos)>, Operators) {
     let mut operators = HashMap::new();
-    let program = s
-        .split('#')
+
+    let mut cur = FilePos(1, 1);
+    let program: Vec<(char, FilePos)> = s
+        .chars()
+        .map(|c| {
+            let out = (c, cur.clone());
+            cur = match c {
+                '\n' => FilePos(cur.0 + 1, 1),
+                _ => FilePos(cur.0, cur.1 + 1),
+            };
+            out
+        })
+        .collect();
+
+    let program = program
+        .split(|(c, _)| c == &'#')
         .map(|s| {
-            let (a, b) = s.split_at(s.find('\n').unwrap_or(0));
-            let c: Vec<&str> = a.split_whitespace().collect();
+            let parts: Vec<&[(char, FilePos)]> = s.splitn(2, |(c, _)| c == &'\n').collect();
+            let c = parts[0].iter().map(|(c, _)| c).collect::<String>();
+            let c: Vec<&str> = c.split_whitespace().collect();
             if c.get(0) == Some(&"op") {
                 let bp = c[2].parse::<u8>().unwrap();
                 operators.insert(
                     (c[4 + (c[3] != "p") as usize].to_string(), c[3] == "p"),
                     (c[1].to_string(), false, bp, c.len() == 7, c[3] == "r"),
                 );
-                b.to_string()
+                parts[1].to_vec()
             } else if c.get(0) == Some(&"include") {
                 let f = &c[1][1..c[1].len() - 1];
-                let (p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+                let (mut p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
                 operators.extend(ops);
-                p + b
+                p.extend_from_slice(parts[1]);
+                p
             } else {
-                s.to_string()
+                s.to_vec()
             }
         })
-        .collect::<Vec<String>>()
-        .join("");
+        .flatten()
+        .collect::<Vec<(char, FilePos)>>();
     (program, operators)
 }
 
 #[derive(Clone)]
-struct Token(String, usize, TokenType);
+struct Token(String, FilePos, TokenType);
 
 use TokenType::*;
 #[derive(Clone, Debug, PartialEq)]
@@ -103,21 +128,26 @@ impl PartialEq for Token {
     }
 }
 
-impl Debug for Token {
+impl Display for Token {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(f, "{}", self.0)
     }
 }
 
-fn tokenize(s: &str) -> Vec<Token> {
-    s.chars()
-        .enumerate()
-        .map(|(i, c)| {
+impl Debug for Token {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(f, "{}@{:?}", self.0, self.1)
+    }
+}
+
+fn tokenize(s: &[(char, FilePos)]) -> Vec<Token> {
+    s.iter()
+        .map(|(c, u)| {
             Token(
                 c.to_string(),
-                i,
+                u.clone(),
                 match c {
-                    _ if c.is_alphabetic() || c == '_' => Alphabetic,
+                    _ if c.is_alphabetic() || c == &'_' => Alphabetic,
                     _ if c.is_whitespace() => Whitespace,
                     _ if c.is_numeric() => Numeric,
                     '(' | '{' | '[' => Opener,
@@ -157,6 +187,20 @@ fn tokenize(s: &str) -> Vec<Token> {
 #[derive(Clone, PartialEq)]
 struct S(Token, Vec<S>);
 
+impl Display for S {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        if self.1.is_empty() {
+            write!(f, "{}", self.0)
+        } else {
+            write!(f, "({}", self.0)?;
+            for s in &self.1 {
+                write!(f, " {}", s)?;
+            }
+            write!(f, ")")
+        }
+    }
+}
+
 impl Debug for S {
     fn fmt(&self, f: &mut Formatter) -> Result {
         if self.1.is_empty() {
@@ -171,9 +215,9 @@ impl Debug for S {
     }
 }
 
-struct ParseContext<'a>(usize, &'a [Token], &'a Operators);
+struct Context<'a>(usize, &'a [Token], &'a Operators);
 
-impl<'a> ParseContext<'a> {
+impl<'a> Context<'a> {
     fn get(&self) -> &Token {
         &self.1[self.0]
     }
@@ -203,17 +247,17 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
     new_op(operators, "^", false, "pow", 13, true, false);
     new_op(operators, "@", false, "call", 16, true, false);
 
-    fn get_lhs(func: &str, pos: usize, i: bool, v: Vec<S>) -> S {
+    fn get_lhs(func: &str, pos: FilePos, i: bool, v: Vec<S>) -> S {
         match i {
             true => S(Token(func.to_string(), pos, Alphabetic), v),
             false => v.into_iter().fold(
-                S(Token(func.to_string(), pos, Alphabetic), vec![]),
-                |acc, x| S(Token("call".to_string(), 0, Other), vec![acc, x]),
+                S(Token(func.to_string(), pos.clone(), Alphabetic), vec![]),
+                |acc, x| S(Token("call".to_string(), pos.clone(), Other), vec![acc, x]),
             ),
         }
     }
 
-    fn expr(c: &mut ParseContext, rbp: u8) -> S {
+    fn expr(c: &mut Context, rbp: u8) -> S {
         let mut op = c.get().clone();
         c.next();
         let mut lhs = match c.2.get(&(op.0.clone(), true)) {
@@ -246,28 +290,26 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         lhs
     }
 
-    tokens.insert(0, Token("{".to_string(), 0, Opener));
-    tokens.push(Token("}".to_string(), 0, Closer));
-    expr(&mut ParseContext(0, &tokens, &operators), 0)
+    tokens.insert(0, Token("{".to_string(), FilePos(0, 0), Opener));
+    tokens.push(Token("}".to_string(), FilePos(0, 0), Closer));
+    expr(&mut Context(0, &tokens, &operators), 0)
 }
 
 use Expr::*;
 #[derive(Clone, PartialEq)]
-enum Expr {
+enum Expr<'a> {
     Unit,
     Var(Token),
     Bool(bool),
     Num(f64),
-    Opt(Option<Box<Expr>>),
-    Cons(Box<Expr>, Box<Expr>),
+    Opt(Option<Box<Expr<'a>>>),
+    Cons(Box<Expr<'a>>, Box<Expr<'a>>),
     Empty,
-    Function(S, S, InterContext),
+    Function(Token, S, Env<'a>),
     Str(Token),
 }
 
-type InterContext = HashMap<String, Expr>;
-
-impl Debug for Expr {
+impl<'a> Debug for Expr<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
             Unit => write!(f, "{{}}"),
@@ -286,46 +328,49 @@ impl Debug for Expr {
                 write!(f, "]")
             }
             Empty => write!(f, "[]"),
-            Function(x, y, z) => write!(f, "{:?}->{:?}{:?}", x, y, z),
+            Function(x, y, _) => write!(f, "{:?}->{:?}", x, y),
             Expr::Str(s) => write!(f, "{}", s.0),
         }
     }
 }
 
-fn interpret(s: &S) -> Expr {
-    fn destructure(s: &S, a: &Expr, c: &mut InterContext) -> bool {
-        fn destructure_(e: &Expr, a: &Expr, c: &mut InterContext) -> bool {
-            match (e, a) {
-                (Var(s), a) => {
-                    if s.0 != "_" {
-                        c.insert(s.0.clone(), a.clone());
-                    }
-                    true
-                }
-                (Cons(e, f), Cons(a, b)) => destructure_(e, a, c) && destructure_(f, b, c),
-                (e, a) => e == a,
-            }
+#[derive(Clone, PartialEq)]
+struct Env<'a>(HashMap<String, Expr<'a>>, Option<&'a Env<'a>>, FilePos);
+
+impl<'a> Env<'a> {
+    fn new() -> Env<'a> {
+        Env(HashMap::new(), None, FilePos(0, 0))
+    }
+
+    fn get(&self, s: &str) -> Option<Expr> {
+        match self.0.get(s) {
+            Some(e) => Some(e.clone()),
+            None => self.1.and_then(|c| c.get(s)),
         }
-        destructure_(&interpret_(s, &mut HashMap::new()), a, c)
     }
+}
 
-    fn search(tree: &S, string: &str) -> bool {
-        tree.0 .0 == string || tree.1.iter().any(|s| search(s, string))
+impl<'a> Debug for Env<'a> {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(f, "{:#?}@{:?} ", self.0, self.2)?;
+        match self.1 {
+            Some(c) => write!(f, "{:?}", c),
+            None => Ok(()),
+        }
     }
+}
 
-    fn interpret_(s: &S, c: &mut InterContext) -> Expr {
+fn interpret(s: &S) -> Expr {
+    fn interpret_<'a>(s: &S, c: &'a mut Env<'a>) -> Expr<'a> {
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
         }
 
         match &*s.0 .0 {
-            "(" => match s.1.len() {
-                1 => interpret_(&s.1[0], c),
-                _ => panic!("{:?}", s),
-            },
+            "(" => interpret_(&s.1[0], c),
             "{" => {
-                let mut c = c.clone();
-                s.1.iter().fold(Unit, |_, s| interpret_(s, &mut c))
+                let mut child = Env(HashMap::new(), Some(c), s.0 .1);
+                s.1.iter().fold(Unit, |_, s| interpret_(s, &mut child))
             }
             "[" => s.1.iter().rev().fold(Empty, |acc, s| {
                 Cons(Box::new(interpret_(s, c)), Box::new(acc))
@@ -339,43 +384,44 @@ fn interpret(s: &S) -> Expr {
                 Unit
             }
             "set" => {
-                let mut a = interpret_(&s.1[1], c);
-                if let Function(x, y, z) = &mut a {
-                    if search(y, &s.1[0].0 .0.to_string()) {
-                        z.insert(
-                            s.1[0].0 .0.to_string(),
-                            Function(x.clone(), y.clone(), HashMap::new()),
-                        );
+                fn destruct<'a>(e: &Expr, a: Expr<'a>, c: &mut Env<'a>) -> bool {
+                    match (e, a) {
+                        (Var(s), a) => {
+                            if s.0 != "_" {
+                                c.0.insert(s.0.clone(), a);
+                            }
+                            true
+                        }
+                        (Cons(e, f), Cons(a, b)) => destruct(e, *a, c) && destruct(f, *b, c),
+                        (e, a) => e == &a,
                     }
                 }
-                Bool(destructure(&s.1[0], &a, c))
+                let a = interpret_(&s.1[1], c);
+                Bool(destruct(
+                    &interpret_(&s.1[0], &mut Env::new()),
+                    a,
+                    c,
+                ))
             }
-            "func" => Function(
-                s.1[0].clone(),
-                s.1[1].clone(),
-                c.iter()
-                    .filter(|(k, _)| search(&s.1[1], k))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            ),
+            "func" => Function(s.1[0].0.clone(), s.1[1].clone(), Env(HashMap::new(), Some(c), s.0.1)),
             "if_" => match interpret_(&s.1[0], c) {
                 Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
                 Bool(false) => Opt(None),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "else_" => match interpret_(&s.1[0], c) {
                 Opt(Some(a)) => *a,
                 Opt(None) => interpret_(&s.1[1], c),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "eq" => Bool(interpret_(&s.1[0], c) == interpret_(&s.1[1], c)),
             "gt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Bool(a > b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "lt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Bool(a < b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "cons" => Cons(
                 Box::new(interpret_(&s.1[0], c)),
@@ -383,36 +429,33 @@ fn interpret(s: &S) -> Expr {
             ),
             "add" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a + b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "sub" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a - b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "mul" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a * b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "div" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a / b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "mod" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a % b),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "pow" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
                 (Num(a), Num(b)) => Num(a.powf(b)),
-                _ => panic!("{:?}", s),
+                _ => panic!("{:?} {:?}", s, c),
             },
             "call" => match interpret_(&s.1[0], c) {
                 Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
-                Function(x, y, z) => {
-                    if !destructure(&x, &interpret_(&s.1[1], c), c) {
-                        panic!("call closure {:?} {:?} {:?}", x, y, z);
-                    }
-                    c.extend(z);
-                    interpret_(&y, c)
+                Function(x, y, mut z) => {
+                    z.0.insert(x.0, interpret_(&s.1[1], c));
+                    interpret_(&y, &mut z)
                 }
                 o => panic!("{:?} {:?} {:?}", o, s, c),
             },
@@ -422,12 +465,12 @@ fn interpret(s: &S) -> Expr {
             o => match s.0 .2 {
                 TokenType::Str => Expr::Str(s.0.clone()),
                 _ => match c.get(o) {
-                    Some(e) => e.clone(),
+                    Some(e) => e,
                     None => Var(s.0.clone()),
                 },
             },
         }
     }
 
-    interpret_(s, &mut HashMap::new())
+    interpret_(s, &mut Env::new())
 }
