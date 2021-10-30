@@ -20,4 +20,4 @@ le = a -> b -> a < b || a == b
 neg = x -> 0 - x
 
 map = f -> l -> if (x::xs = l) f@x :: xs.map@f else []
-get = i -> l -> if (x::xs = l) if i == 0 Some@x else xs.get@(i - 1) else None
+get = i -> l -> if !(x::xs = l) None else if i == 0 Some@x else xs.get@(i - 1)

@@ -1,7 +1,5 @@
 #include "src/std.iz"
 
-assert true !false && 1 == 1 && true != false || (6 <= 2)
-
 assert -1 (1 + 2 * 3 - 4) ^ 2 / -9
 assert true !false && 1 == 1 && true != false || (6 <= 2)
 assert 2 if false 1 else if true 2 else 3
@@ -24,7 +22,7 @@ assert 9 3.square
 assert 5 {x = 2 y->x+y}@3
 assert 24 factorial@4
 
-assert 1 if (a = 1) a else 2
+assert 1 {if (a = 1) a else 2}
 assert Some@16 [1 2 3 4 5].map@square.get@3
 
 assert _ {_ = 1 _}

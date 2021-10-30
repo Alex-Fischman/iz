@@ -54,7 +54,7 @@ fn new_op(ops: &mut Operators, n: &str, p: bool, f: &str, bp: u8, ar: bool, ri: 
     ops.insert((n.to_string(), p), (f.to_string(), true, bp, ar, ri));
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 struct FilePos(usize, usize);
 
 impl Debug for FilePos {
@@ -70,7 +70,7 @@ fn preprocess(s: &str) -> (Vec<(char, FilePos)>, Operators) {
     let program: Vec<(char, FilePos)> = s
         .chars()
         .map(|c| {
-            let out = (c, cur.clone());
+            let out = (c, cur);
             cur = match c {
                 '\n' => FilePos(cur.0 + 1, 1),
                 _ => FilePos(cur.0, cur.1 + 1),
@@ -145,7 +145,7 @@ fn tokenize(s: &[(char, FilePos)]) -> Vec<Token> {
         .map(|(c, u)| {
             Token(
                 c.to_string(),
-                u.clone(),
+                *u,
                 match c {
                     _ if c.is_alphabetic() || c == &'_' => Alphabetic,
                     _ if c.is_whitespace() => Whitespace,
@@ -251,8 +251,8 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         match i {
             true => S(Token(func.to_string(), pos, Alphabetic), v),
             false => v.into_iter().fold(
-                S(Token(func.to_string(), pos.clone(), Alphabetic), vec![]),
-                |acc, x| S(Token("call".to_string(), pos.clone(), Other), vec![acc, x]),
+                S(Token(func.to_string(), pos, Alphabetic), vec![]),
+                |acc, x| S(Token("call".to_string(), pos, Other), vec![acc, x]),
             ),
         }
     }
@@ -297,19 +297,19 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
 
 use Expr::*;
 #[derive(Clone, PartialEq)]
-enum Expr<'a> {
+enum Expr {
     Unit,
     Var(Token),
     Bool(bool),
     Num(f64),
-    Opt(Option<Box<Expr<'a>>>),
-    Cons(Box<Expr<'a>>, Box<Expr<'a>>),
+    Opt(Option<Box<Expr>>),
+    Cons(Box<Expr>, Box<Expr>),
     Empty,
-    Function(Token, S, Env<'a>),
+    Function(Token, S, HashMap<String, Expr>),
     Str(Token),
 }
 
-impl<'a> Debug for Expr<'a> {
+impl Debug for Expr {
     fn fmt(&self, f: &mut Formatter) -> Result {
         match self {
             Unit => write!(f, "{{}}"),
@@ -334,14 +334,9 @@ impl<'a> Debug for Expr<'a> {
     }
 }
 
-#[derive(Clone, PartialEq)]
-struct Env<'a>(HashMap<String, Expr<'a>>, Option<&'a Env<'a>>, FilePos);
+struct Env<'a>(&'a mut HashMap<String, Expr>, Option<&'a Env<'a>>, FilePos);
 
 impl<'a> Env<'a> {
-    fn new() -> Env<'a> {
-        Env(HashMap::new(), None, FilePos(0, 0))
-    }
-
     fn get(&self, s: &str) -> Option<Expr> {
         match self.0.get(s) {
             Some(e) => Some(e.clone()),
@@ -361,7 +356,7 @@ impl<'a> Debug for Env<'a> {
 }
 
 fn interpret(s: &S) -> Expr {
-    fn interpret_<'a>(s: &S, c: &'a mut Env<'a>) -> Expr<'a> {
+    fn interpret_(s: &S, c: &mut Env) -> Expr {
         if s.0 .2 == Numeric {
             return Num(s.0 .0.parse().unwrap());
         }
@@ -369,14 +364,19 @@ fn interpret(s: &S) -> Expr {
         match &*s.0 .0 {
             "(" => interpret_(&s.1[0], c),
             "{" => {
-                let mut child = Env(HashMap::new(), Some(c), s.0 .1);
+                let mut hash_map = HashMap::new();
+                let mut child = Env(&mut hash_map, Some(c), s.0 .1);
                 s.1.iter().fold(Unit, |_, s| interpret_(s, &mut child))
             }
             "[" => s.1.iter().rev().fold(Empty, |acc, s| {
                 Cons(Box::new(interpret_(s, c)), Box::new(acc))
             }),
             "assert" => {
-                assert_eq!(interpret_(&s.1[0], c), interpret_(&s.1[1], c));
+                let left = interpret_(&s.1[0], c);
+                let right = interpret_(&s.1[1], c);
+                if left != right {
+                    panic!("{:?}!={:?} {:?}", left, right, c);
+                }
                 Unit
             }
             "print" => {
@@ -384,7 +384,7 @@ fn interpret(s: &S) -> Expr {
                 Unit
             }
             "set" => {
-                fn destruct<'a>(e: &Expr, a: Expr<'a>, c: &mut Env<'a>) -> bool {
+                fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
                     match (e, a) {
                         (Var(s), a) => {
                             if s.0 != "_" {
@@ -398,12 +398,12 @@ fn interpret(s: &S) -> Expr {
                 }
                 let a = interpret_(&s.1[1], c);
                 Bool(destruct(
-                    &interpret_(&s.1[0], &mut Env::new()),
+                    &interpret_(&s.1[0], &mut Env(&mut HashMap::new(), None, s.0 .1)),
                     a,
                     c,
                 ))
             }
-            "func" => Function(s.1[0].0.clone(), s.1[1].clone(), Env(HashMap::new(), Some(c), s.0.1)),
+            "func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.0.clone()), // todo
             "if_" => match interpret_(&s.1[0], c) {
                 Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
                 Bool(false) => Opt(None),
@@ -454,8 +454,8 @@ fn interpret(s: &S) -> Expr {
             "call" => match interpret_(&s.1[0], c) {
                 Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
                 Function(x, y, mut z) => {
-                    z.0.insert(x.0, interpret_(&s.1[1], c));
-                    interpret_(&y, &mut z)
+                    z.insert(x.0, interpret_(&s.1[1], c));
+                    interpret_(&y, &mut Env(&mut z, Some(c), s.0.1))
                 }
                 o => panic!("{:?} {:?} {:?}", o, s, c),
             },
@@ -472,5 +472,5 @@ fn interpret(s: &S) -> Expr {
         }
     }
 
-    interpret_(s, &mut Env::new())
+    interpret_(s, &mut Env(&mut HashMap::new(), None, FilePos(0, 0)))
 }
