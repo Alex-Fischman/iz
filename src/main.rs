@@ -5,7 +5,7 @@ fn main() {
     let parse_test = |a, b| {
         let (p, mut ops) = preprocess(a);
         assert_eq!(
-            format!("{}", parse(tokenize(&p), &mut ops)),
+            format!("{}", parse(tokenize(p), &mut ops)),
             format!("({{ {})", b)
         )
     };
@@ -37,78 +37,21 @@ fn main() {
         "a = if 0 b else c = d",
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
-    parse_test("  \" asdfs sadfasdf \"  ", " asdfs sadfasdf ");
+    parse_test("  \" asdfs sadfasdf \"  ", "\" asdfs sadfasdf \"");
 
     run_program("src/test.iz");
     run_program("src/scratch.iz");
 }
 
-fn run_program(f: &str) -> Expr {
+fn run_program(f: &str) {
     let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
-    interpret(&parse(tokenize(&p), &mut ops))
+    interpret(&parse(tokenize(p), &mut ops));
 }
 
 type Operators = HashMap<(String, bool), (String, bool, u8, bool, bool)>;
 
-fn new_op(ops: &mut Operators, n: &str, p: bool, f: &str, bp: u8, ar: bool, ri: bool) {
-    ops.insert((n.to_string(), p), (f.to_string(), true, bp, ar, ri));
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct FilePos(usize, usize);
-
-impl Debug for FilePos {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{}:{}", self.0, self.1)
-    }
-}
-
-fn preprocess(s: &str) -> (Vec<(char, FilePos)>, Operators) {
-    let mut operators = HashMap::new();
-
-    let mut cur = FilePos(1, 1);
-    let program: Vec<(char, FilePos)> = s
-        .chars()
-        .map(|c| {
-            let out = (c, cur);
-            cur = match c {
-                '\n' => FilePos(cur.0 + 1, 1),
-                _ => FilePos(cur.0, cur.1 + 1),
-            };
-            out
-        })
-        .collect();
-
-    let program = program
-        .split(|(c, _)| c == &'#')
-        .map(|s| {
-            let parts: Vec<&[(char, FilePos)]> = s.splitn(2, |(c, _)| c == &'\n').collect();
-            let c = parts[0].iter().map(|(c, _)| c).collect::<String>();
-            let c: Vec<&str> = c.split_whitespace().collect();
-            if c.get(0) == Some(&"op") {
-                let bp = c[2].parse::<u8>().unwrap();
-                operators.insert(
-                    (c[4 + (c[3] != "p") as usize].to_string(), c[3] == "p"),
-                    (c[1].to_string(), false, bp, c.len() == 7, c[3] == "r"),
-                );
-                parts[1].to_vec()
-            } else if c.get(0) == Some(&"include") {
-                let f = &c[1][1..c[1].len() - 1];
-                let (mut p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
-                operators.extend(ops);
-                p.extend_from_slice(parts[1]);
-                p
-            } else {
-                s.to_vec()
-            }
-        })
-        .flatten()
-        .collect::<Vec<(char, FilePos)>>();
-    (program, operators)
-}
-
 #[derive(Clone)]
-struct Token(String, FilePos, TokenType);
+struct Token(String, usize, usize, TokenType);
 
 use TokenType::*;
 #[derive(Clone, Debug, PartialEq)]
@@ -124,7 +67,7 @@ enum TokenType {
 
 impl PartialEq for Token {
     fn eq(&self, t: &Token) -> bool {
-        self.0 == t.0
+        self.0 == t.0 && self.3 == t.3
     }
 }
 
@@ -140,36 +83,83 @@ impl Debug for Token {
     }
 }
 
-fn tokenize(s: &[(char, FilePos)]) -> Vec<Token> {
-    s.iter()
-        .map(|(c, u)| {
-            Token(
-                c.to_string(),
-                *u,
-                match c {
-                    _ if c.is_alphabetic() || c == &'_' => Alphabetic,
-                    _ if c.is_whitespace() => Whitespace,
-                    _ if c.is_numeric() => Numeric,
-                    '(' | '{' | '[' => Opener,
-                    ')' | '}' | ']' => Closer,
-                    _ => Other,
-                },
-            )
+fn preprocess(s: &str) -> (Vec<Token>, Operators) {
+    let mut row = 1;
+    let mut col = 1;
+    let mut program = Vec::with_capacity(s.len());
+    for c in s.chars() {
+        let t = match c {
+            c if c.is_alphabetic() || c == '_' => Alphabetic,
+            c if c.is_whitespace() => Whitespace,
+            c if c.is_numeric() => Numeric,
+            '(' | '{' | '[' => Opener,
+            ')' | '}' | ']' => Closer,
+            '\"' => TokenType::Str,
+            _ => Other,
+        };
+        program.push(Token(c.to_string(), row, col, t));
+        if c == '\n' {
+            row += 1;
+            col = 1
+        } else {
+            col += 1;
+        }
+    }
+    let mut operators = HashMap::new();
+    let program = program
+        .split(|t| t.0 == "#")
+        .map(|s| {
+            if let Some(i) = s.iter().position(|t| t.0 == "\n") {
+                let (command, rest) = s.split_at(i);
+                let c = command.iter().map(|t| &*t.0).collect::<String>();
+                let c: Vec<&str> = c.split_whitespace().collect();
+                match c.get(0) {
+                    Some(&"op") => {
+                        let bp = c[2].parse::<u8>().unwrap();
+                        operators.insert(
+                            (c[4 + (c[3] != "p") as usize].to_string(), c[3] == "p"),
+                            (c[1].to_string(), false, bp, c.len() == 7, c[3] == "r"),
+                        );
+                        rest.to_vec()
+                    }
+                    Some(&"include") => {
+                        let f = &c[1][1..c[1].len() - 1];
+                        let (mut p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+                        operators.extend(ops);
+                        p.extend(rest.to_vec());
+                        p
+                    }
+                    Some(c) => panic!("unrecognized command {:?}", c),
+                    None => unreachable!(),
+                }
+            } else {
+                s.to_vec()
+            }
         })
+        .flatten()
+        .collect();
+    (program, operators)
+}
+
+fn tokenize(s: Vec<Token>) -> Vec<Token> {
+    s.into_iter()
         .fold(
             (false, vec![]),
             |(mut in_s, mut acc): (bool, Vec<Token>), t| {
                 match &*t.0 {
                     "\"" => match in_s {
-                        true => in_s = false,
+                        true => {
+                            in_s = false;
+                            acc.last_mut().unwrap().0.push('\"');
+                        }
                         false => {
                             in_s = true;
-                            acc.push(Token("".to_string(), t.1, TokenType::Str));
+                            acc.push(Token("\"".to_string(), t.1, t.2, t.3));
                         }
                     },
                     _ => match acc.last_mut() {
                         Some(s) if in_s => s.0.push_str(&t.0),
-                        Some(s) if s.2 == t.2 && s.2 != Opener && s.2 != Closer => {
+                        Some(s) if s.3 == t.3 && s.3 != Opener && s.3 != Closer => {
                             s.0.push_str(&t.0)
                         }
                         _ => acc.push(t),
@@ -180,7 +170,7 @@ fn tokenize(s: &[(char, FilePos)]) -> Vec<Token> {
         )
         .1
         .into_iter()
-        .filter(|t| t.2 != Whitespace)
+        .filter(|t| t.3 != Whitespace)
         .collect()
 }
 
@@ -228,32 +218,35 @@ impl<'a> Context<'a> {
 }
 
 fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
-    new_op(operators, "print", true, "print", 1, false, true);
-    new_op(operators, "assert", true, "assert", 1, true, true);
-    new_op(operators, "=", false, "set", 2, true, true);
-    new_op(operators, ":", false, "type", 3, true, true);
-    new_op(operators, "->", false, "func", 4, true, true);
-    new_op(operators, "if", true, "if_", 5, true, true);
-    new_op(operators, "else", false, "else_", 5, true, true);
-    new_op(operators, "==", false, "eq", 9, true, false);
-    new_op(operators, ">", false, "gt", 9, true, false);
-    new_op(operators, "<", false, "lt", 9, true, false);
-    new_op(operators, "::", false, "cons", 10, true, true);
-    new_op(operators, "+", false, "add", 11, true, false);
-    new_op(operators, "-", false, "sub", 11, true, false);
-    new_op(operators, "*", false, "mul", 12, true, false);
-    new_op(operators, "/", false, "div", 12, true, false);
-    new_op(operators, "%", false, "mod", 12, true, false);
-    new_op(operators, "^", false, "pow", 13, true, false);
-    new_op(operators, "@", false, "call", 16, true, false);
+    let mut new_op = |n: &str, p: bool, f: &str, bp: u8, ar: bool, ri: bool| {
+        operators.insert((n.to_string(), p), (f.to_string(), true, bp, ar, ri))
+    };
+    new_op("print", true, "print", 1, false, true);
+    new_op("assert", true, "assert", 1, true, true);
+    new_op("=", false, "set", 2, true, true);
+    new_op(":", false, "type", 3, true, true);
+    new_op("->", false, "func", 4, true, true);
+    new_op("if", true, "if_", 5, true, true);
+    new_op("else", false, "else_", 5, true, true);
+    new_op("==", false, "eq", 9, true, false);
+    new_op(">", false, "gt", 9, true, false);
+    new_op("<", false, "lt", 9, true, false);
+    new_op("::", false, "cons", 10, true, true);
+    new_op("+", false, "add", 11, true, false);
+    new_op("-", false, "sub", 11, true, false);
+    new_op("*", false, "mul", 12, true, false);
+    new_op("/", false, "div", 12, true, false);
+    new_op("%", false, "mod", 12, true, false);
+    new_op("^", false, "pow", 13, true, false);
+    new_op("@", false, "call", 16, true, false);
 
-    fn get_lhs(func: &str, pos: FilePos, i: bool, v: Vec<S>) -> S {
+    fn get_lhs(func: &str, row: usize, col: usize, i: bool, v: Vec<S>) -> S {
+        let f = Token(func.to_string(), row, col, Other);
         match i {
-            true => S(Token(func.to_string(), pos, Alphabetic), v),
-            false => v.into_iter().fold(
-                S(Token(func.to_string(), pos, Alphabetic), vec![]),
-                |acc, x| S(Token("call".to_string(), pos, Other), vec![acc, x]),
-            ),
+            true => S(f, v),
+            false => v.into_iter().fold(S(f, vec![]), |acc, x| {
+                S(Token("call".to_string(), 0, 0, Other), vec![acc, x])
+            }),
         }
     }
 
@@ -261,11 +254,11 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         let mut op = c.get().clone();
         c.next();
         let mut lhs = match c.2.get(&(op.0.clone(), true)) {
-            Some((f, i, bp, false, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp)]),
-            Some((f, i, bp, _, _)) => get_lhs(f, op.1, *i, vec![expr(c, *bp), expr(c, *bp)]),
-            None if op.2 == Opener => {
+            Some((f, i, bp, false, _)) => get_lhs(f, op.1, op.2, *i, vec![expr(c, *bp)]),
+            Some((f, i, bp, _, _)) => get_lhs(f, op.1, op.2, *i, vec![expr(c, *bp), expr(c, *bp)]),
+            None if op.3 == Opener => {
                 let mut v = vec![];
-                while c.get().2 != Closer {
+                while c.get().3 != Closer {
                     v.push(expr(c, 0));
                 }
                 c.next();
@@ -278,11 +271,11 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
             match c.2.get(&(op.0, false)) {
                 Some((f, i, bp, true, ri)) if bp > &rbp => {
                     c.next();
-                    lhs = get_lhs(f, op.1, *i, vec![lhs, expr(c, bp - *ri as u8)]);
+                    lhs = get_lhs(f, op.1, op.2, *i, vec![lhs, expr(c, bp - *ri as u8)]);
                 }
                 Some((f, i, bp, false, _)) if bp > &rbp => {
                     c.next();
-                    lhs = get_lhs(f, op.1, *i, vec![lhs]);
+                    lhs = get_lhs(f, op.1, op.2, *i, vec![lhs]);
                 }
                 _ => break,
             }
@@ -290,8 +283,8 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         lhs
     }
 
-    tokens.insert(0, Token("{".to_string(), FilePos(0, 0), Opener));
-    tokens.push(Token("}".to_string(), FilePos(0, 0), Closer));
+    tokens.insert(0, Token("{".to_string(), 0, 0, Opener));
+    tokens.push(Token("}".to_string(), 0, 0, Closer));
     expr(&mut Context(0, &tokens, &operators), 0)
 }
 
@@ -334,7 +327,7 @@ impl Debug for Expr {
     }
 }
 
-struct Env<'a>(&'a mut HashMap<String, Expr>, Option<&'a Env<'a>>, FilePos);
+struct Env<'a>(&'a mut HashMap<String, Expr>, Option<&'a Env<'a>>);
 
 impl<'a> Env<'a> {
     fn get(&self, s: &str) -> Option<Expr> {
@@ -347,7 +340,7 @@ impl<'a> Env<'a> {
 
 impl<'a> Debug for Env<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{:#?}@{:?} ", self.0, self.2)?;
+        write!(f, "{:#?} ", self.0)?;
         match self.1 {
             Some(c) => write!(f, "{:?}", c),
             None => Ok(()),
@@ -357,7 +350,7 @@ impl<'a> Debug for Env<'a> {
 
 fn interpret(s: &S) -> Expr {
     fn interpret_(s: &S, c: &mut Env) -> Expr {
-        if s.0 .2 == Numeric {
+        if s.0 .3 == Numeric {
             return Num(s.0 .0.parse().unwrap());
         }
 
@@ -365,7 +358,7 @@ fn interpret(s: &S) -> Expr {
             "(" => interpret_(&s.1[0], c),
             "{" => {
                 let mut hash_map = HashMap::new();
-                let mut child = Env(&mut hash_map, Some(c), s.0 .1);
+                let mut child = Env(&mut hash_map, Some(c));
                 s.1.iter().fold(Unit, |_, s| interpret_(s, &mut child))
             }
             "[" => s.1.iter().rev().fold(Empty, |acc, s| {
@@ -398,7 +391,7 @@ fn interpret(s: &S) -> Expr {
                 }
                 let a = interpret_(&s.1[1], c);
                 Bool(destruct(
-                    &interpret_(&s.1[0], &mut Env(&mut HashMap::new(), None, s.0 .1)),
+                    &interpret_(&s.1[0], &mut Env(&mut HashMap::new(), None)),
                     a,
                     c,
                 ))
@@ -452,17 +445,19 @@ fn interpret(s: &S) -> Expr {
                 _ => panic!("{:?} {:?}", s, c),
             },
             "call" => match interpret_(&s.1[0], c) {
-                Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
+                Var(Token(t, _, _, _)) if t == "Some" => {
+                    Opt(Some(Box::new(interpret_(&s.1[1], c))))
+                }
                 Function(x, y, mut z) => {
                     z.insert(x.0, interpret_(&s.1[1], c));
-                    interpret_(&y, &mut Env(&mut z, Some(c), s.0.1))
+                    interpret_(&y, &mut Env(&mut z, Some(c)))
                 }
                 o => panic!("{:?} {:?} {:?}", o, s, c),
             },
             "false" => Bool(false),
             "true" => Bool(true),
             "None" => Opt(None),
-            o => match s.0 .2 {
+            o => match s.0 .3 {
                 TokenType::Str => Expr::Str(s.0.clone()),
                 _ => match c.get(o) {
                     Some(e) => e,
@@ -472,5 +467,5 @@ fn interpret(s: &S) -> Expr {
         }
     }
 
-    interpret_(s, &mut Env(&mut HashMap::new(), None, FilePos(0, 0)))
+    interpret_(s, &mut Env(&mut HashMap::new(), None))
 }
