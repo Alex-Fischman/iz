@@ -9,9 +9,9 @@ fizzbuzz = max -> n -> {
 }
 
 sum = l -> if (x::xs = l) x + xs.sum else 0
-filter = f -> l -> if !(x::xs = l) [] else {
+filter = f -> l -> if (x::xs = l) {
 	rest = xs.filter@f
 	if f@x x::rest else rest
-}
+} else []
 
 print [1 2 3 4].map@(x -> x * x).filter@(x -> x % 2 != 0).sum

@@ -327,7 +327,7 @@ impl Debug for Expr {
     }
 }
 
-struct Env<'a>(&'a mut HashMap<String, Expr>, Option<&'a Env<'a>>);
+struct Env<'a>(HashMap<String, Expr>, Option<&'a Env<'a>>);
 
 impl<'a> Env<'a> {
     fn get(&self, s: &str) -> Option<Expr> {
@@ -335,6 +335,10 @@ impl<'a> Env<'a> {
             Some(e) => Some(e.clone()),
             None => self.1.and_then(|c| c.get(s)),
         }
+    }
+
+    fn child(&self) -> Env {
+        Env(HashMap::new(), Some(self))
     }
 }
 
@@ -357,23 +361,22 @@ fn interpret(s: &S) -> Expr {
         match &*s.0 .0 {
             "(" => interpret_(&s.1[0], c),
             "{" => {
-                let mut hash_map = HashMap::new();
-                let mut child = Env(&mut hash_map, Some(c));
+                let mut child = c.child();
                 s.1.iter().fold(Unit, |_, s| interpret_(s, &mut child))
             }
             "[" => s.1.iter().rev().fold(Empty, |acc, s| {
-                Cons(Box::new(interpret_(s, c)), Box::new(acc))
+                Cons(Box::new(interpret_(s, &mut c.child())), Box::new(acc))
             }),
             "assert" => {
-                let left = interpret_(&s.1[0], c);
-                let right = interpret_(&s.1[1], c);
+                let left = interpret_(&s.1[0], &mut c.child());
+                let right = interpret_(&s.1[1], &mut c.child());
                 if left != right {
-                    panic!("{:?}!={:?} {:?}", left, right, c);
+                    panic!("{:?} != {:?} {:?}", left, right, c);
                 }
                 Unit
             }
             "print" => {
-                println!("{:?}", interpret_(&s.1[0], c));
+                println!("{:?}", interpret_(&s.1[0], &mut c.child()));
                 Unit
             }
             "set" => {
@@ -389,68 +392,68 @@ fn interpret(s: &S) -> Expr {
                         (e, a) => e == &a,
                     }
                 }
-                let a = interpret_(&s.1[1], c);
+                let a = interpret_(&s.1[1], &mut c.child());
                 Bool(destruct(
-                    &interpret_(&s.1[0], &mut Env(&mut HashMap::new(), None)),
+                    &interpret_(&s.1[0], &mut Env(HashMap::new(), None)),
                     a,
                     c,
                 ))
             }
-            "func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.0.clone()), // todo
+            "func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.0.clone()),
             "if_" => match interpret_(&s.1[0], c) {
-                Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], c)))),
+                Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], &mut c.child())))),
                 Bool(false) => Opt(None),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "else_" => match interpret_(&s.1[0], c) {
+            "else_" => match interpret_(&s.1[0], &mut c.child()) {
                 Opt(Some(a)) => *a,
-                Opt(None) => interpret_(&s.1[1], c),
+                Opt(None) => interpret_(&s.1[1], &mut c.child()),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "eq" => Bool(interpret_(&s.1[0], c) == interpret_(&s.1[1], c)),
-            "gt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "eq" => Bool(interpret_(&s.1[0], &mut c.child()) == interpret_(&s.1[1], &mut c.child())),
+            "gt" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Bool(a > b),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "lt" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "lt" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Bool(a < b),
                 _ => panic!("{:?} {:?}", s, c),
             },
             "cons" => Cons(
-                Box::new(interpret_(&s.1[0], c)),
-                Box::new(interpret_(&s.1[1], c)),
+                Box::new(interpret_(&s.1[0], &mut c.child())),
+                Box::new(interpret_(&s.1[1], &mut c.child())),
             ),
-            "add" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "add" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Num(a + b),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "sub" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "sub" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Num(a - b),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "mul" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "mul" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Num(a * b),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "div" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "div" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Num(a / b),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "mod" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "mod" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Num(a % b),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "pow" => match (interpret_(&s.1[0], c), interpret_(&s.1[1], c)) {
+            "pow" => match (interpret_(&s.1[0], &mut c.child()), interpret_(&s.1[1], &mut c.child())) {
                 (Num(a), Num(b)) => Num(a.powf(b)),
                 _ => panic!("{:?} {:?}", s, c),
             },
-            "call" => match interpret_(&s.1[0], c) {
+            "call" => match interpret_(&s.1[0], &mut c.child()) {
                 Var(Token(t, _, _, _)) if t == "Some" => {
-                    Opt(Some(Box::new(interpret_(&s.1[1], c))))
+                    Opt(Some(Box::new(interpret_(&s.1[1], &mut c.child()))))
                 }
                 Function(x, y, mut z) => {
-                    z.insert(x.0, interpret_(&s.1[1], c));
-                    interpret_(&y, &mut Env(&mut z, Some(c)))
+                    z.insert(x.0, interpret_(&s.1[1], &mut c.child()));
+                    interpret_(&y, &mut Env(z, Some(&mut c.child())))
                 }
                 o => panic!("{:?} {:?} {:?}", o, s, c),
             },
@@ -467,5 +470,5 @@ fn interpret(s: &S) -> Expr {
         }
     }
 
-    interpret_(s, &mut Env(&mut HashMap::new(), None))
+    interpret_(s, &mut Env(HashMap::new(), None))
 }
