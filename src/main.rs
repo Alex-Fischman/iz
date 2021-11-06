@@ -4,8 +4,9 @@ use std::fmt::*;
 fn main() {
     let parse_test = |a, b| {
         let (p, mut ops) = preprocess(a);
+        add_std_ops(&mut ops);
         assert_eq!(
-            format!("{}", parse(tokenize(p), &mut ops)),
+            format!("{}", parse(tokenize(p), ops)),
             format!("({{ {})", b)
         )
     };
@@ -16,14 +17,14 @@ fn main() {
     parse_test("a = b = c", "(set a (set b c))");
     parse_test("1 + f = g = h * 3", "(set (add 1 f) (set g (mul h 3)))");
     parse_test("a + b * c * d + e", "(add (add a (mul (mul b c) d)) e)");
-    parse_test("#op dot 15 l _ . _\na . b", "(call (call dot a) b)");
-    parse_test("#op neg 14 p - _\n-a + b", "(add (call neg a) b)");
+    parse_test("#op . dot 15 left\na . b", "(call (call dot a) b)");
+    parse_test("#op - neg 14 prefix\n-a + b", "(add (call neg a) b)");
     parse_test(
-        "#op neg 14 p - _\n- -1 * 2",
+        "#op - neg 14 prefix\n- -1 * 2",
         "(mul (call neg (call neg 1)) 2)",
     );
     parse_test(
-        "#op neg 14 p - _\n- -f + g",
+        "#op - neg 14 prefix\n- -f + g",
         "(add (call neg (call neg f)) g)",
     );
     parse_test("(0(0))", "(( 0 (( 0))");
@@ -45,13 +46,58 @@ fn main() {
 
 fn run_program(f: &str) {
     let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
-    interpret(&parse(tokenize(p), &mut ops));
+    add_std_ops(&mut ops);
+    interpret(&parse(tokenize(p), ops));
 }
 
-type Operators = HashMap<(String, bool), (String, bool, u8, bool, bool)>;
+type Ops = HashMap<(String, bool), (String, bool, u8, OpType)>;
+
+use OpType::*;
+#[derive(Debug)]
+enum OpType {
+    Prefix,
+    Prefix2,
+    Left,
+    Right,
+}
+
+impl OpType {
+    fn is_prefix(&self) -> bool {
+        match self {
+            Prefix => true,
+            Prefix2 => true,
+            Left => false,
+            Right => false,
+        }
+    }
+}
+
+fn add_std_ops(ops: &mut Ops) {
+    let mut new_op = |n: &str, f: &str, bp: u8, ty: OpType| {
+        ops.insert((n.to_string(), ty.is_prefix()), (f.to_string(), true, bp, ty))
+    };
+    new_op("print", "print", 1, Prefix);
+    new_op("assert", "assert", 1, Prefix2);
+    new_op("=", "set", 2, Right);
+    new_op(":", "type", 3, Right);
+    new_op("->", "func", 4, Right);
+    new_op("if", "if_", 5, Prefix2);
+    new_op("else", "else_", 5, Right);
+    new_op("==", "eq", 9, Left);
+    new_op(">", "gt", 9, Left);
+    new_op("<", "lt", 9, Left);
+    new_op("::", "cons", 10, Right);
+    new_op("+", "add", 11, Left);
+    new_op("-", "sub", 11, Left);
+    new_op("*", "mul", 12, Left);
+    new_op("/", "div", 12, Left);
+    new_op("%", "mod", 12, Left);
+    new_op("^", "pow", 13, Left);
+    new_op("@", "call", 16, Left);
+}
 
 #[derive(Clone)]
-struct Token(String, usize, usize, TokenType);
+struct Token(String, TokenType, usize, usize);
 
 use TokenType::*;
 #[derive(Clone, Debug, PartialEq)]
@@ -67,7 +113,7 @@ enum TokenType {
 
 impl PartialEq for Token {
     fn eq(&self, t: &Token) -> bool {
-        self.0 == t.0 && self.3 == t.3
+        self.0 == t.0 && self.1 == t.1
     }
 }
 
@@ -79,11 +125,11 @@ impl Display for Token {
 
 impl Debug for Token {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{}@{:?}", self.0, self.1)
+        write!(f, "{}@{:?}", self.0, self.3)
     }
 }
 
-fn preprocess(s: &str) -> (Vec<Token>, Operators) {
+fn preprocess(s: &str) -> (Vec<Token>, Ops) {
     let mut row = 1;
     let mut col = 1;
     let mut program = Vec::with_capacity(s.len());
@@ -97,7 +143,7 @@ fn preprocess(s: &str) -> (Vec<Token>, Operators) {
             '\"' => TokenType::Str,
             _ => Other,
         };
-        program.push(Token(c.to_string(), row, col, t));
+        program.push(Token(c.to_string(), t, row, col));
         if c == '\n' {
             row += 1;
             col = 1
@@ -115,10 +161,16 @@ fn preprocess(s: &str) -> (Vec<Token>, Operators) {
                 let c: Vec<&str> = c.split_whitespace().collect();
                 match c.get(0) {
                     Some(&"op") => {
-                        let bp = c[2].parse::<u8>().unwrap();
+                        let t = match c[4] {
+                            "prefix" => Prefix,
+                            "statement" => Prefix2,
+                            "left" => Left,
+                            "right" => Right,
+                            c => panic!("{:?}", c),
+                        };
                         operators.insert(
-                            (c[4 + (c[3] != "p") as usize].to_string(), c[3] == "p"),
-                            (c[1].to_string(), false, bp, c.len() == 7, c[3] == "r"),
+                            (c[1].to_string(), t.is_prefix()),
+                            (c[2].to_string(), false, c[3].parse::<u8>().unwrap(), t),
                         );
                         rest.to_vec()
                     }
@@ -159,7 +211,7 @@ fn tokenize(s: Vec<Token>) -> Vec<Token> {
                     },
                     _ => match acc.last_mut() {
                         Some(s) if in_s => s.0.push_str(&t.0),
-                        Some(s) if s.3 == t.3 && s.3 != Opener && s.3 != Closer => {
+                        Some(s) if s.1 == t.1 && s.1 != Opener && s.1 != Closer => {
                             s.0.push_str(&t.0)
                         }
                         _ => acc.push(t),
@@ -170,7 +222,7 @@ fn tokenize(s: Vec<Token>) -> Vec<Token> {
         )
         .1
         .into_iter()
-        .filter(|t| t.3 != Whitespace)
+        .filter(|t| t.1 != Whitespace)
         .collect()
 }
 
@@ -205,7 +257,7 @@ impl Debug for S {
     }
 }
 
-struct Context<'a>(usize, &'a [Token], &'a Operators);
+struct Context<'a>(usize, &'a [Token], &'a Ops);
 
 impl<'a> Context<'a> {
     fn get(&self) -> &Token {
@@ -217,35 +269,13 @@ impl<'a> Context<'a> {
     }
 }
 
-fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
-    let mut new_op = |n: &str, p: bool, f: &str, bp: u8, ar: bool, ri: bool| {
-        operators.insert((n.to_string(), p), (f.to_string(), true, bp, ar, ri))
-    };
-    new_op("print", true, "print", 1, false, true);
-    new_op("assert", true, "assert", 1, true, true);
-    new_op("=", false, "set", 2, true, true);
-    new_op(":", false, "type", 3, true, true);
-    new_op("->", false, "func", 4, true, true);
-    new_op("if", true, "if_", 5, true, true);
-    new_op("else", false, "else_", 5, true, true);
-    new_op("==", false, "eq", 9, true, false);
-    new_op(">", false, "gt", 9, true, false);
-    new_op("<", false, "lt", 9, true, false);
-    new_op("::", false, "cons", 10, true, true);
-    new_op("+", false, "add", 11, true, false);
-    new_op("-", false, "sub", 11, true, false);
-    new_op("*", false, "mul", 12, true, false);
-    new_op("/", false, "div", 12, true, false);
-    new_op("%", false, "mod", 12, true, false);
-    new_op("^", false, "pow", 13, true, false);
-    new_op("@", false, "call", 16, true, false);
-
+fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
     fn get_lhs(func: &str, row: usize, col: usize, i: bool, v: Vec<S>) -> S {
-        let f = Token(func.to_string(), row, col, Other);
+        let f = Token(func.to_string(), Other, row, col);
         match i {
             true => S(f, v),
             false => v.into_iter().fold(S(f, vec![]), |acc, x| {
-                S(Token("call".to_string(), 0, 0, Other), vec![acc, x])
+                S(Token("call".to_string(), Other, 0, 0), vec![acc, x])
             }),
         }
     }
@@ -254,11 +284,14 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         let mut op = c.get().clone();
         c.next();
         let mut lhs = match c.2.get(&(op.0.clone(), true)) {
-            Some((f, i, bp, false, _)) => get_lhs(f, op.1, op.2, *i, vec![expr(c, *bp)]),
-            Some((f, i, bp, _, _)) => get_lhs(f, op.1, op.2, *i, vec![expr(c, *bp), expr(c, *bp)]),
-            None if op.3 == Opener => {
+            Some((f, i, bp, Prefix)) => get_lhs(f, op.2, op.3, *i, vec![expr(c, *bp)]),
+            Some((f, i, bp, Prefix2)) => {
+                get_lhs(f, op.2, op.3, *i, vec![expr(c, *bp), expr(c, *bp)])
+            }
+            Some(_) => unreachable!(),
+            None if op.1 == Opener => {
                 let mut v = vec![];
-                while c.get().3 != Closer {
+                while c.get().1 != Closer {
                     v.push(expr(c, 0));
                 }
                 c.next();
@@ -269,13 +302,13 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         while c.0 < c.1.len() {
             op = c.get().clone();
             match c.2.get(&(op.0, false)) {
-                Some((f, i, bp, true, ri)) if bp > &rbp => {
+                Some((f, i, bp, Right)) if bp > &rbp => {
                     c.next();
-                    lhs = get_lhs(f, op.1, op.2, *i, vec![lhs, expr(c, bp - *ri as u8)]);
+                    lhs = get_lhs(f, op.2, op.3, *i, vec![lhs, expr(c, bp - 1)]);
                 }
-                Some((f, i, bp, false, _)) if bp > &rbp => {
+                Some((f, i, bp, Left)) if bp > &rbp => {
                     c.next();
-                    lhs = get_lhs(f, op.1, op.2, *i, vec![lhs]);
+                    lhs = get_lhs(f, op.2, op.3, *i, vec![lhs, expr(c, *bp)]);
                 }
                 _ => break,
             }
@@ -283,8 +316,8 @@ fn parse(mut tokens: Vec<Token>, operators: &mut Operators) -> S {
         lhs
     }
 
-    tokens.insert(0, Token("{".to_string(), 0, 0, Opener));
-    tokens.push(Token("}".to_string(), 0, 0, Closer));
+    tokens.insert(0, Token("{".to_string(), Opener, 0, 0));
+    tokens.push(Token("}".to_string(), Closer, 0, 0));
     expr(&mut Context(0, &tokens, &operators), 0)
 }
 
@@ -327,11 +360,11 @@ impl Debug for Expr {
     }
 }
 
-struct Env<'a>(HashMap<String, Expr>, Option<&'a Env<'a>>);
+struct Env<'a>(HashMap<String, Expr>, Option<&'a Env<'a>>, usize, usize);
 
 impl<'a> Env<'a> {
     fn new() -> Env<'a> {
-        Env(HashMap::new(), None)
+        Env(HashMap::new(), None, 0, 0)
     }
 
     fn get(&self, s: &str) -> Option<Expr> {
@@ -341,14 +374,14 @@ impl<'a> Env<'a> {
         }
     }
 
-    fn child(&self) -> Env {
-        Env(HashMap::new(), Some(self))
+    fn child(&self, s: &S) -> Env {
+        Env(HashMap::new(), Some(self), s.0.2, s.0.3)
     }
 }
 
 impl<'a> Debug for Env<'a> {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{:#?} ", self.0)?;
+        write!(f, "{:#?}@{:?} ", self.0, self.2)?;
         match self.1 {
             Some(c) => write!(f, "{:?}", c),
             None => Ok(()),
@@ -358,12 +391,12 @@ impl<'a> Debug for Env<'a> {
 
 fn interpret(s: &S) -> Expr {
     fn interpret_(s: &S, c: &mut Env) -> Expr {
-        if s.0 .3 == Numeric {
+        if s.0 .1 == Numeric {
             return Num(s.0 .0.parse().unwrap());
         }
 
-        let get_lhs = || interpret_(&s.1[0], &mut c.child());
-        let get_rhs = || interpret_(&s.1[1], &mut c.child());
+        let get_lhs = || interpret_(&s.1[0], &mut c.child(s));
+        let get_rhs = || interpret_(&s.1[1], &mut c.child(s));
         let get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_lhs(), get_rhs()) {
             (Num(a), Num(b)) => Num(f(a, b)),
             _ => panic!("{:?} {:?}", s, c),
@@ -372,11 +405,11 @@ fn interpret(s: &S) -> Expr {
         match &*s.0 .0 {
             "(" => interpret_(&s.1[0], c),
             "{" => {
-                let mut child = c.child();
+                let mut child = c.child(s);
                 s.1.iter().fold(Unit, |_, s| interpret_(s, &mut child))
             }
             "[" => s.1.iter().rev().fold(Empty, |acc, s| {
-                Cons(Box::new(interpret_(s, &mut c.child())), Box::new(acc))
+                Cons(Box::new(interpret_(s, &mut c.child(s))), Box::new(acc))
             }),
             "assert" => {
                 if get_lhs() != get_rhs() {
@@ -409,7 +442,7 @@ fn interpret(s: &S) -> Expr {
             }
             "func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.0.clone()),
             "if_" => match interpret_(&s.1[0], c) {
-                Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], &mut c.child())))),
+                Bool(true) => Opt(Some(Box::new(interpret_(&s.1[1], &mut c.child(s))))),
                 Bool(false) => Opt(None),
                 _ => panic!("{:?} {:?}", s, c),
             },
@@ -438,14 +471,14 @@ fn interpret(s: &S) -> Expr {
                 Var(Token(t, _, _, _)) if t == "Some" => Opt(Some(Box::new(get_rhs()))),
                 Function(x, y, mut z) => {
                     z.insert(x.0, get_rhs());
-                    interpret_(&y, &mut Env(z, Some(c)))
+                    interpret_(&y, &mut Env(z, Some(c), s.0.2, s.0.3))
                 }
                 o => panic!("{:?} {:?} {:?}", o, s, c),
             },
             "false" => Bool(false),
             "true" => Bool(true),
             "None" => Opt(None),
-            o => match s.0 .3 {
+            o => match s.0 .1 {
                 TokenType::Str => Expr::Str(s.0.clone()),
                 _ => match c.get(o) {
                     Some(e) => e,

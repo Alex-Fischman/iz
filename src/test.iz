@@ -10,10 +10,6 @@ assert 3 {a = 1 a = 2 a + 1}
 assert 1 {c = 1 {c = 2} c}
 assert 1 {c = 1 {c}}
 
-id = x -> x
-square = x -> x * x
-factorial = n -> if n <= 1 1 else n * factorial@(n - 1)
-
 assert 1 id@1
 assert 256 square@16
 assert 3 (a -> b -> a)@3@4

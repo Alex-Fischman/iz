@@ -15,3 +15,5 @@ filter = f -> l -> if (x::xs = l) {
 } else []
 
 print [1 2 3 4].map@(x -> x * x).filter@(x -> x % 2 != 0).sum
+
+print [1 2 3 4 5 6 7].map@factorial
