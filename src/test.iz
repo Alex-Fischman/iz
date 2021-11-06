@@ -7,7 +7,7 @@ assert 1 9 % 4
 
 assert 8 {a = 3 b = 5 a + b}
 assert 3 {a = 1 a = 2 a + 1}
-assert 1 {c = 1 {c = 2} c}
+assert 2 {c = 1 {c = 2} c}
 assert 1 {c = 1 {c}}
 
 assert 1 id@1
