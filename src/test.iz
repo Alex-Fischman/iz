@@ -17,6 +17,10 @@ assert 9 dot@3@square
 assert 9 3.square
 assert 5 {x = 2 y->x+y}@3
 assert 24 factorial@4
+assert [[3] 1 2] {
+	x::y::xs = [1 2 3]
+	[xs x y]
+}
 
 assert 1 {if (a = 1) a else 2}
 assert Some@16 [1 2 3 4 5].map@square.get@3

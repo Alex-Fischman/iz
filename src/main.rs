@@ -390,7 +390,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
     };
     let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
         (Num(a), Num(b)) => Num(f(a, b)),
-        _ => panic!("{:?} {:?}", s, c),
+        (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
     };
 
     match &*s.0 .0 {
@@ -407,7 +407,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "assert" => {
             if get_arg(c, 0) != get_arg(c, 1) {
                 panic!(
-                    "{:?} != {:?} @ {:?}:{:?} {:?}",
+                    "{:?} != {:?} @ {:?}:{:?} {:#?}",
                     get_arg(c, 0),
                     get_arg(c, 1),
                     s.0 .2,
@@ -434,7 +434,11 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
                     (e, a) => e == &a,
                 }
             }
-            Bool(destruct(&interpret(&s.1[0], &mut vec![]), get_arg(c, 1), c))
+            Bool(destruct(
+                &interpret(&s.1[0], &mut vec![]),
+                get_arg(c, 1),
+                c,
+            ))
         }
         "func" => Function(
             s.1[0].0.clone(),
@@ -444,21 +448,21 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "if_" => match interpret(&s.1[0], c) {
             Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
             Bool(false) => Opt(None),
-            _ => panic!("{:?} {:?}", s, c),
+            _ => panic!("{:?} {:#?}", s, c),
         },
         "else_" => match get_arg(c, 0) {
             Opt(Some(a)) => *a,
             Opt(None) => get_arg(c, 1),
-            _ => panic!("{:?} {:?}", s, c),
+            a => panic!("{:?} {:?} {:#?}", a, s, c),
         },
         "eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
         "gt" => match (get_arg(c, 0), get_arg(c, 1)) {
             (Num(a), Num(b)) => Bool(a > b),
-            _ => panic!("{:?} {:?}", s, c),
+            (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
         },
         "lt" => match (get_arg(c, 0), get_arg(c, 1)) {
             (Num(a), Num(b)) => Bool(a < b),
-            _ => panic!("{:?} {:?}", s, c),
+            (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
         },
         "cons" => Cons(Box::new(get_arg(c, 0)), Box::new(get_arg(c, 1))),
         "add" => get_num_bin_op(|a, b| a + b),
@@ -476,7 +480,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
                 c.pop();
                 out
             }
-            o => panic!("{:?} {:?} {:?}", o, s, c),
+            o => panic!("{:?} {:?} {:#?}", o, s, c),
         },
         "false" => Bool(false),
         "true" => Bool(true),

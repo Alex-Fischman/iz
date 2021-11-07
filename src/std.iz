@@ -23,5 +23,16 @@ id = x -> x
 square = x -> x * x
 factorial = n -> if n <= 1 1 else n * factorial@(n - 1)
 
-map = f -> l -> if (x::xs = l) f@x :: xs.map@f else []
+is_empty = l -> (x::xs = l)
+length = l -> if (x::xs = 1) 1 + xs.length else 0
+sum =    l -> if (x::xs = l) x + xs.sum    else 0
+
+range = a -> b -> if a >= b [] else a::range@(a + 1)@b
+
 get = i -> l -> if (x::xs = l) (if i == 0 Some@x else xs.get@(i - 1)) else None
+
+map = f -> l -> if (x::xs = l) f@x :: xs.map@f else []
+filter = f -> l -> if (x::xs = l) {
+	rest = xs.filter@f
+	if f@x x::rest else rest
+} else []

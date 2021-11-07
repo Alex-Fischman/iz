@@ -1,32 +1,29 @@
 #include "src/std.iz"
 
-fizzbuzz = max -> n -> {
-	print if n % 15 == 0 "fizzbuzz"
-	 else if n % 3  == 0 "fizz"
-	 else if n % 5  == 0 "buzz"
-	 else                n
-	if n < max fizzbuzz@max@(n + 1)
+print range@1@100.filter@(n -> n % 3 == 0 || n % 5 == 0).sum
+
+fibonacci_ = l -> {
+	x::y::xs = l
+	if x + y > 4000000 l
+	else fibonacci_@((x + y)::l)
+}
+fibonacci = fibonacci_@[2 1]
+
+print fibonacci.filter@(n -> n % 2 == 0).sum
+
+euler_three = n -> m -> {
+	if n % m == 0       euler_three@(n / m)@3
+	else if m < n^(1/2) euler_three@ n     @(m + 2)
+	else n
 }
 
-sum = l -> if (x::xs = l) x + xs.sum else 0
+print euler_three@13195@3
 
-sum_tco_ = a -> l -> if (x::xs = l) xs.sum_tco_@(a + x) else a
-sum_tco = sum_tco_@0
-
-filter = f -> l -> if (x::xs = l) {
-	rest = xs.filter@f
-	if f@x x::rest else rest
-} else []
-
-filter_tco_ = a -> f -> l -> if (x::xs = l) {
-	filter_tco_@(if f@x x::a else a)@f@xs
-} else a
-filter_tco = f -> l -> filter_tco_@[]
-
-range = a -> b -> if a >= b [] else a::range@(a + 1)@b
-
-print range@1@5.map@(x -> x * x).filter@(x -> x % 2 != 0).sum
-
-print range@1@10.map@factorial
-
-print range@1@1000.filter@(n -> n % 3 == 0 || n % 5 == 0).sum_tco
+is_prime = n -> {
+	is_prime_ = m -> {
+		if m == 1 true
+		else if n % m == 0 false
+		else is_prime_@(m - 1)
+	}
+	is_prime_@(n - 1)
+}
