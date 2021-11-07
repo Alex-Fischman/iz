@@ -39,6 +39,7 @@ fn main() {
         "(set a (set (else_ (if_ 0 b) c) d))",
     );
     parse_test("  \" asdfs sadfasdf \"  ", "\" asdfs sadfasdf \"");
+    parse_test("\"asdf\" # \"comment\"", "\"asdf\"");
 
     run_program("src/test.iz");
     run_program("src/scratch.iz");
@@ -157,38 +158,38 @@ fn preprocess(s: &str) -> (Vec<Token>, Ops) {
     let mut operators = HashMap::new();
     let program = program
         .split(|t| t.0 == "#")
-        .map(|s| {
-            if let Some(i) = s.iter().position(|t| t.0 == "\n") {
-                let (command, rest) = s.split_at(i);
-                let c = command.iter().map(|t| &*t.0).collect::<String>();
-                let c: Vec<&str> = c.split_whitespace().collect();
-                match c.get(0) {
-                    Some(&"op") => {
-                        let t = match c[4] {
-                            "prefix" => Prefix,
-                            "statement" => Prefix2,
-                            "left" => Left,
-                            "right" => Right,
-                            c => panic!("{:?}", c),
-                        };
-                        operators.insert(
-                            (c[1].to_string(), t.is_prefix()),
-                            (c[2].to_string(), false, c[3].parse::<u8>().unwrap(), t),
-                        );
-                        rest.to_vec()
-                    }
-                    Some(&"include") => {
-                        let f = &c[1][1..c[1].len() - 1];
-                        let (mut p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
-                        operators.extend(ops);
-                        p.extend(rest.to_vec());
-                        p
-                    }
-                    Some(c) => panic!("unrecognized command {:?}", c),
-                    None => unreachable!(),
+        .enumerate()
+        .map(|(i, s)| {
+            if i == 0 {
+                return s.to_vec();
+            }
+            let i = s.iter().position(|t| t.0 == "\n").unwrap_or(s.len());
+            let (command, rest) = s.split_at(i);
+            let c = command.iter().map(|t| &*t.0).collect::<String>();
+            let c: Vec<&str> = c.split_whitespace().collect();
+            match c.get(0) {
+                Some(&"op") => {
+                    let t = match c[4] {
+                        "prefix" => Prefix,
+                        "statement" => Prefix2,
+                        "left" => Left,
+                        "right" => Right,
+                        c => panic!("{:?}", c),
+                    };
+                    operators.insert(
+                        (c[1].to_string(), t.is_prefix()),
+                        (c[2].to_string(), false, c[3].parse::<u8>().unwrap(), t),
+                    );
+                    rest.to_vec()
                 }
-            } else {
-                s.to_vec()
+                Some(&"include") => {
+                    let f = &c[1][1..c[1].len() - 1];
+                    let (mut p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+                    operators.extend(ops);
+                    p.extend(rest.to_vec());
+                    p
+                }
+                _ => rest.to_vec(),
             }
         })
         .flatten()

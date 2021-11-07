@@ -1,6 +1,7 @@
 #include "src/std.iz"
 
-print range@1@100.filter@(n -> n % 3 == 0 || n % 5 == 0).sum
+# only works in release build
+# print range@1@1000.filter@(n -> n % 3 == 0 || n % 5 == 0).sum
 
 fibonacci_ = l -> {
 	x::y::xs = l
@@ -17,8 +18,10 @@ euler_three = n -> m -> {
 	else n
 }
 
-print euler_three@13195@3
+# only works in release build
+# print euler_three@600851475143@3
 
+# unused
 is_prime = n -> {
 	is_prime_ = m -> {
 		if m == 1 true
