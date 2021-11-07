@@ -9,11 +9,24 @@ fizzbuzz = max -> n -> {
 }
 
 sum = l -> if (x::xs = l) x + xs.sum else 0
+
+sum_tco_ = a -> l -> if (x::xs = l) xs.sum_tco_@(a + x) else a
+sum_tco = sum_tco_@0
+
 filter = f -> l -> if (x::xs = l) {
 	rest = xs.filter@f
 	if f@x x::rest else rest
 } else []
 
-print [1 2 3 4].map@(x -> x * x).filter@(x -> x % 2 != 0).sum
+filter_tco_ = a -> f -> l -> if (x::xs = l) {
+	filter_tco_@(if f@x x::a else a)@f@xs
+} else a
+filter_tco = f -> l -> filter_tco_@[]
 
-print [1 2 3 4 5 6 7].map@factorial
+range = a -> b -> if a >= b [] else a::range@(a + 1)@b
+
+print range@1@5.map@(x -> x * x).filter@(x -> x % 2 != 0).sum
+
+print range@1@10.map@factorial
+
+print range@1@1000.filter@(n -> n % 3 == 0 || n % 5 == 0).sum_tco

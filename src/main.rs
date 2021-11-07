@@ -47,7 +47,7 @@ fn main() {
 fn run_program(f: &str) {
     let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
     add_std_ops(&mut ops);
-    interpret(&parse(tokenize(p), ops));
+    interpret(&parse(tokenize(p), ops), &mut vec![]);
 }
 
 type Ops = HashMap<(String, bool), (String, bool, u8, OpType)>;
@@ -377,124 +377,116 @@ fn add_var(env: &mut Env, s: String, e: Expr) {
     };
 }
 
-fn interpret(s: &S) -> Expr {
-    fn interpret_(s: &S, c: &mut Env) -> Expr {
-        if s.0 .1 == Numeric {
-            return Num(s.0 .0.parse().unwrap());
-        }
+fn interpret(s: &S, c: &mut Env) -> Expr {
+    if s.0 .1 == Numeric {
+        return Num(s.0 .0.parse().unwrap());
+    }
 
-        let get_arg = |c: &mut Env, i: usize| {
+    let get_arg = |c: &mut Env, i: usize| {
+        c.push((HashMap::new(), s.0 .2, s.0 .3));
+        let out = interpret(&s.1[i], c);
+        c.pop();
+        out
+    };
+    let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
+        (Num(a), Num(b)) => Num(f(a, b)),
+        _ => panic!("{:?} {:?}", s, c),
+    };
+
+    match &*s.0 .0 {
+        "(" => interpret(&s.1[0], c),
+        "{" => {
             c.push((HashMap::new(), s.0 .2, s.0 .3));
-            let out = interpret_(&s.1[i], c);
+            let out = s.1.iter().fold(Unit, |_, s| interpret(s, c));
             c.pop();
             out
-        };
-        let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
-            (Num(a), Num(b)) => Num(f(a, b)),
+        }
+        "[" => s.1.iter().rev().fold(Empty, |acc, s| {
+            Cons(Box::new(interpret(s, c)), Box::new(acc))
+        }),
+        "assert" => {
+            if get_arg(c, 0) != get_arg(c, 1) {
+                panic!(
+                    "{:?} != {:?} @ {:?}:{:?} {:?}",
+                    get_arg(c, 0),
+                    get_arg(c, 1),
+                    s.0 .2,
+                    s.0 .3,
+                    c
+                );
+            }
+            Unit
+        }
+        "print" => {
+            println!("{:?}", get_arg(c, 0));
+            Unit
+        }
+        "set" => {
+            fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
+                match (e, a) {
+                    (Var(s), a) => {
+                        if s.0 != "_" {
+                            add_var(c, s.0.clone(), a);
+                        }
+                        true
+                    }
+                    (Cons(e, f), Cons(a, b)) => destruct(e, *a, c) && destruct(f, *b, c),
+                    (e, a) => e == &a,
+                }
+            }
+            Bool(destruct(&interpret(&s.1[0], &mut vec![]), get_arg(c, 1), c))
+        }
+        "func" => Function(
+            s.1[0].0.clone(),
+            s.1[1].clone(),
+            c.last().unwrap().0.clone(),
+        ),
+        "if_" => match interpret(&s.1[0], c) {
+            Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
+            Bool(false) => Opt(None),
             _ => panic!("{:?} {:?}", s, c),
-        };
-
-        match &*s.0 .0 {
-            "(" => interpret_(&s.1[0], c),
-            "{" => {
-                c.push((HashMap::new(), s.0 .2, s.0 .3));
-                let out = s.1.iter().fold(Unit, |_, s| interpret_(s, c));
+        },
+        "else_" => match get_arg(c, 0) {
+            Opt(Some(a)) => *a,
+            Opt(None) => get_arg(c, 1),
+            _ => panic!("{:?} {:?}", s, c),
+        },
+        "eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
+        "gt" => match (get_arg(c, 0), get_arg(c, 1)) {
+            (Num(a), Num(b)) => Bool(a > b),
+            _ => panic!("{:?} {:?}", s, c),
+        },
+        "lt" => match (get_arg(c, 0), get_arg(c, 1)) {
+            (Num(a), Num(b)) => Bool(a < b),
+            _ => panic!("{:?} {:?}", s, c),
+        },
+        "cons" => Cons(Box::new(get_arg(c, 0)), Box::new(get_arg(c, 1))),
+        "add" => get_num_bin_op(|a, b| a + b),
+        "sub" => get_num_bin_op(|a, b| a - b),
+        "mul" => get_num_bin_op(|a, b| a * b),
+        "div" => get_num_bin_op(|a, b| a / b),
+        "mod" => get_num_bin_op(|a, b| a % b),
+        "pow" => get_num_bin_op(|a, b| a.powf(b)),
+        "call" => match get_arg(c, 0) {
+            Var(Token(t, _, _, _)) if t == "Some" => Opt(Some(Box::new(get_arg(c, 1)))),
+            Function(x, y, mut z) => {
+                z.insert(x.0, get_arg(c, 1));
+                c.push((z, s.0 .2, s.0 .3));
+                let out = interpret(&y, c);
                 c.pop();
                 out
             }
-            "[" => s.1.iter().rev().fold(Empty, |acc, s| {
-                Cons(Box::new(interpret_(s, c)), Box::new(acc))
-            }),
-            "assert" => {
-                if get_arg(c, 0) != get_arg(c, 1) {
-                    panic!(
-                        "{:?} != {:?} @ {:?}:{:?} {:?}",
-                        get_arg(c, 0),
-                        get_arg(c, 1),
-                        s.0 .2,
-                        s.0 .3,
-                        c
-                    );
-                }
-                Unit
-            }
-            "print" => {
-                println!("{:?}", get_arg(c, 0));
-                Unit
-            }
-            "set" => {
-                fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
-                    match (e, a) {
-                        (Var(s), a) => {
-                            if s.0 != "_" {
-                                add_var(c, s.0.clone(), a);
-                            }
-                            true
-                        }
-                        (Cons(e, f), Cons(a, b)) => destruct(e, *a, c) && destruct(f, *b, c),
-                        (e, a) => e == &a,
-                    }
-                }
-                Bool(destruct(
-                    &interpret_(&s.1[0], &mut vec![]),
-                    get_arg(c, 1),
-                    c,
-                ))
-            }
-            "func" => Function(
-                s.1[0].0.clone(),
-                s.1[1].clone(),
-                c.last().unwrap().0.clone(),
-            ),
-            "if_" => match interpret_(&s.1[0], c) {
-                Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
-                Bool(false) => Opt(None),
-                _ => panic!("{:?} {:?}", s, c),
+            o => panic!("{:?} {:?} {:?}", o, s, c),
+        },
+        "false" => Bool(false),
+        "true" => Bool(true),
+        "None" => Opt(None),
+        o => match s.0 .1 {
+            TokenType::Str => Expr::Str(s.0.clone()),
+            _ => match get_var(c, o) {
+                Some(e) => e.clone(),
+                None => Var(s.0.clone()),
             },
-            "else_" => match get_arg(c, 0) {
-                Opt(Some(a)) => *a,
-                Opt(None) => get_arg(c, 1),
-                _ => panic!("{:?} {:?}", s, c),
-            },
-            "eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
-            "gt" => match (get_arg(c, 0), get_arg(c, 1)) {
-                (Num(a), Num(b)) => Bool(a > b),
-                _ => panic!("{:?} {:?}", s, c),
-            },
-            "lt" => match (get_arg(c, 0), get_arg(c, 1)) {
-                (Num(a), Num(b)) => Bool(a < b),
-                _ => panic!("{:?} {:?}", s, c),
-            },
-            "cons" => Cons(Box::new(get_arg(c, 0)), Box::new(get_arg(c, 1))),
-            "add" => get_num_bin_op(|a, b| a + b),
-            "sub" => get_num_bin_op(|a, b| a - b),
-            "mul" => get_num_bin_op(|a, b| a * b),
-            "div" => get_num_bin_op(|a, b| a / b),
-            "mod" => get_num_bin_op(|a, b| a % b),
-            "pow" => get_num_bin_op(|a, b| a.powf(b)),
-            "call" => match get_arg(c, 0) {
-                Var(Token(t, _, _, _)) if t == "Some" => Opt(Some(Box::new(get_arg(c, 1)))),
-                Function(x, y, mut z) => {
-                    z.insert(x.0, get_arg(c, 1));
-                    c.push((z, s.0 .2, s.0 .3));
-                    let out = interpret_(&y, c);
-                    c.pop();
-                    out
-                }
-                o => panic!("{:?} {:?} {:?}", o, s, c),
-            },
-            "false" => Bool(false),
-            "true" => Bool(true),
-            "None" => Opt(None),
-            o => match s.0 .1 {
-                TokenType::Str => Expr::Str(s.0.clone()),
-                _ => match get_var(c, o) {
-                    Some(e) => e.clone(),
-                    None => Var(s.0.clone()),
-                },
-            },
-        }
+        },
     }
-
-    interpret_(s, &mut vec![])
 }
