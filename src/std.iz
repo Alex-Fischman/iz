@@ -41,5 +41,3 @@ filter = f -> l -> if (x::xs = l) {
 	rest = xs.filter@f
 	if f@x x::rest else rest
 } else []
-
-

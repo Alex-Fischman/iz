@@ -28,6 +28,8 @@ assert [[3] 1 2] {
 
 assert 1 {if (a = 1) a else 2}
 assert Some@16 [1 2 3 4 5].map@square.filter@is_even.get@1
+assert 55 range@1@11.foldl@(a -> b -> a + b)@0
+assert 55 range@1@11.foldr@(a -> b -> a + b)@0
 assert 55 range@1@11.sum
 assert 5 [1 5 2 4 3].length
 
