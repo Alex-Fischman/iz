@@ -22,16 +22,14 @@ assert 9 3.square
 assert 5 {x = 2 y->x+y}@3
 assert 24 factorial@4
 assert [[3] 1 2] {
-	x::y::xs = [1 2 3]
+	x::y::xs ?= [1 2 3]
 	[xs x y]
 }
 
-assert 1 {if (a = 1) a else 2}
+assert 1 {if a ?= 1 a else 2}
 assert Some@16 [1 2 3 4 5].map@square.filter@is_even.get@1
 assert 55 range@1@11.foldl@(a -> b -> a + b)@0
 assert 55 range@1@11.foldr@(a -> b -> a + b)@0
 assert 55 range@1@11.sum
 assert 5 [1 5 2 4 3].length
-
-assert _ {_ = 1 _}
 assert 1 {a = 1 x -> a}@5

@@ -87,6 +87,7 @@ fn add_std_ops(ops: &mut Ops) {
     new_op("->", "func", 4, Right);
     new_op("if", "if_", 5, Prefix2);
     new_op("else", "else_", 5, Right);
+    new_op("?=", "try", 9, Left);
     new_op("==", "eq", 9, Left);
     new_op(">", "gt", 9, Left);
     new_op("<", "lt", 9, Left);
@@ -129,7 +130,7 @@ impl Display for Token {
 
 impl Debug for Token {
     fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{}@{:?}", self.0, self.3)
+        write!(f, "{}@{:?}", self.0, self.2)
     }
 }
 
@@ -395,7 +396,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
     };
 
     match &*s.0 .0 {
-        "(" => interpret(&s.1[0], c),
+        "(" => get_arg(c, 0),
         "{" => {
             c.push((HashMap::new(), s.0 .2, s.0 .3));
             let out = s.1.iter().fold(Unit, |_, s| interpret(s, c));
@@ -422,25 +423,13 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
             println!("{:?}", get_arg(c, 0));
             Unit
         }
-        "set" => {
-            fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
-                match (e, a) {
-                    (Var(s), a) => {
-                        if s.0 != "_" {
-                            add_var(c, s.0.clone(), a);
-                        }
-                        true
-                    }
-                    (Cons(e, f), Cons(a, b)) => destruct(e, *a, c) && destruct(f, *b, c),
-                    (e, a) => e == &a,
-                }
+        "set" => match (&interpret(&s.1[0], &mut vec![]), get_arg(c, 1)) {
+            (Var(v), e) => {
+                add_var(c, v.0.clone(), e);
+                Unit
             }
-            Bool(destruct(
-                &interpret(&s.1[0], &mut vec![]),
-                get_arg(c, 1),
-                c,
-            ))
-        }
+            (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
+        },
         "func" => Function(
             s.1[0].0.clone(),
             s.1[1].clone(),
@@ -449,13 +438,28 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "if_" => match interpret(&s.1[0], c) {
             Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
             Bool(false) => Opt(None),
-            _ => panic!("{:?} {:#?}", s, c),
+            a => panic!("{:?} {:?} {:#?}", a, s, c),
         },
         "else_" => match get_arg(c, 0) {
             Opt(Some(a)) => *a,
             Opt(None) => get_arg(c, 1),
             a => panic!("{:?} {:?} {:#?}", a, s, c),
         },
+        "try" => {
+            fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
+                match (e, a) {
+                    (Var(s), a) => {
+                        if s.0 != "_" {
+                            c.last_mut().unwrap().0.insert(s.0.clone(), a);
+                        }
+                        true
+                    }
+                    (Cons(e, f), Cons(a, b)) => destruct(e, *a, c) && destruct(f, *b, c),
+                    _ => false,
+                }
+            }
+            Bool(destruct(&interpret(&s.1[0], &mut vec![]), get_arg(c, 1), c))
+        }
         "eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
         "gt" => match (get_arg(c, 0), get_arg(c, 1)) {
             (Num(a), Num(b)) => Bool(a > b),

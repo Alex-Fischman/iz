@@ -4,7 +4,7 @@
 # print range@1@1000.filter@(n -> n % 3 == 0 || n % 5 == 0).sum
 
 fibonacci_ = l -> {
-	x::y::xs = l
+	x::y::xs ?= l
 	if x + y > 4000000 l
 	else fibonacci_@((x + y)::l)
 }
@@ -30,6 +30,3 @@ is_prime = n -> {
 	}
 	is_prime_@(n - 1)
 }
-
-print range@1@11.foldl@(a -> b -> a + b)@0
-print range@1@11.foldr@(a -> b -> a + b)@0
