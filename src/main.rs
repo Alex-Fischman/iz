@@ -135,7 +135,7 @@ enum TokenType {
     Numeric,
     Opener,
     Closer,
-    Str,
+    Strin,
     Other,
 }
 
@@ -161,7 +161,7 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
             c if c.is_numeric() => Numeric,
             '(' | '{' | '[' => Opener,
             ')' | '}' | ']' => Closer,
-            '\"' => TokenType::Str,
+            '\"' => Strin,
             _ => Other,
         };
         program.push(Token(c.to_string(), t, Some(position.clone())));
@@ -328,7 +328,7 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
 }
 
 use Expr::*;
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 enum Expr {
     Unit,
     Var(Token),
@@ -339,6 +339,22 @@ enum Expr {
     Empty,
     Function(Token, S, Frame),
     Str(Token),
+}
+
+impl PartialEq for Expr {
+    fn eq(&self, other: &Expr) -> bool {
+        match (self, other) {
+            (Unit, Unit) => true,
+            (Var(a), Var(b)) => a == b,
+            (Bool(a), Bool(b)) => a == b,
+            (Num(a), Num(b)) => a == b,
+            (Opt(a), Opt(b)) => a == b,
+            (Cons(a, b), Cons(c, d)) => a == c && b == d,
+            (Empty, Empty) => true,
+            (Str(a), Str(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Debug for Expr {
@@ -361,13 +377,13 @@ impl Debug for Expr {
             }
             Empty => write!(f, "[]"),
             Function(x, y, _) => write!(f, "{:?}->{:?}", x, y),
-            Expr::Str(s) => write!(f, "{}", s.0),
+            Str(s) => write!(f, "{}", s.0),
         }
     }
 }
 
-type Frame = HashMap<String, Expr>;
-struct Env(Vec<(Frame, Option<Position>)>);
+type Frame = (HashMap<String, Expr>, Option<Position>);
+struct Env(Vec<Frame>);
 
 impl Env {
     fn new() -> Env {
@@ -381,8 +397,20 @@ impl Env {
     fn add_var(&mut self, s: String, e: Expr) {
         match self.0.iter_mut().rev().find(|h| h.0.contains_key(&s)) {
             Some(h) => h.0.insert(s, e),
-            None => self.0.last_mut().unwrap().0.insert(s, e),
+            None => self.add_var_in_last(s, e),
         };
+    }
+
+    fn add_var_in_last(&mut self, s: String, e: Expr) -> Option<Expr> {
+        self.0.last_mut().unwrap().0.insert(s, e)
+    }
+
+    fn push(&mut self, f: Frame) {
+        self.0.push(f)
+    }
+
+    fn pop(&mut self) -> Option<Frame> {
+        self.0.pop()
     }
 }
 
@@ -407,9 +435,9 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
     }
 
     let get_arg = |c: &mut Env, i: usize| {
-        c.0.push((HashMap::new(), s.0 .2.clone()));
+        c.push((HashMap::new(), s.0 .2.clone()));
         let out = interpret(&s.1[i], c);
-        c.0.pop();
+        c.pop();
         out
     };
     let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
@@ -420,9 +448,9 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
     match &*s.0 .0 {
         "(" => get_arg(c, 0),
         "{" => {
-            c.0.push((HashMap::new(), s.0 .2.clone()));
+            c.push((HashMap::new(), s.0 .2.clone()));
             let out = s.1.iter().fold(Unit, |_, s| interpret(s, c));
-            c.0.pop();
+            c.pop();
             out
         }
         "[" => s.1.iter().rev().fold(Empty, |acc, s| {
@@ -451,7 +479,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
             }
             (a, b) => panic!("{:?} {:?} {:?} {:?}", a, b, s, c),
         },
-        "func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.0.last().unwrap().0.clone()),
+        "func" => Function(s.1[0].0.clone(), s.1[1].clone(), (c.0.last().unwrap().0.clone(), None)),
         "if_" => match interpret(&s.1[0], c) {
             Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
             Bool(false) => Opt(None),
@@ -467,7 +495,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
                 match (e, a) {
                     (Var(s), a) => {
                         if s.0 != "_" {
-                            c.0.last_mut().unwrap().0.insert(s.0.clone(), a);
+                            c.add_var_in_last(s.0.clone(), a);
                         }
                         true
                     }
@@ -500,10 +528,11 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "call" => match get_arg(c, 0) {
             Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(get_arg(c, 1)))),
             Function(x, y, mut z) => {
-                z.insert(x.0, get_arg(c, 1));
-                c.0.push((z, s.0 .2.clone()));
+                z.0.insert(x.0, get_arg(c, 1));
+                z.1 = s.0.2.clone();
+                c.push(z);
                 let out = interpret(&y, c);
-                c.0.pop();
+                c.pop();
                 out
             }
             o => panic!("{:?} {:?} {:#?}", o, s, c),
@@ -512,7 +541,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "true" => Bool(true),
         "None" => Opt(None),
         o => match s.0 .1 {
-            TokenType::Str => Expr::Str(s.0.clone()),
+            Strin => Str(s.0.clone()),
             _ => match c.get_var(o) {
                 Some(e) => e.clone(),
                 None => Var(s.0.clone()),
