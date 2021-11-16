@@ -3,10 +3,10 @@ use std::fmt::*;
 
 fn main() {
     let parse_test = |a, b| {
-        let (p, mut ops) = preprocess(a);
+        let (p, mut ops) = preprocess(a, "parse test".to_string());
         add_std_ops(&mut ops);
         assert_eq!(
-            format!("{}", parse(tokenize(p), ops)),
+            format!("{:?}", parse(tokenize(p), ops)),
             format!("({{ {})", b)
         )
     };
@@ -45,10 +45,33 @@ fn main() {
     run_program("src/scratch.iz");
 }
 
+#[derive(Clone)]
+struct Position {
+    row: usize,
+    col: usize,
+    file: String,
+}
+
+impl Position {
+    fn new(row: usize, col: usize, file: String) -> Position {
+        Position {
+            row: row,
+            col: col,
+            file: file,
+        }
+    }
+}
+
+impl Debug for Position {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        write!(f, "{}:{}:{}", self.file, self.row, self.col)
+    }
+}
+
 fn run_program(f: &str) {
-    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap(), f.to_string());
     add_std_ops(&mut ops);
-    interpret(&parse(tokenize(p), ops), &mut vec![]);
+    interpret(&parse(tokenize(p), ops), &mut Env::new());
 }
 
 type Ops = HashMap<(String, bool), (String, bool, u8, OpType)>;
@@ -102,7 +125,7 @@ fn add_std_ops(ops: &mut Ops) {
 }
 
 #[derive(Clone)]
-struct Token(String, TokenType, usize, usize);
+struct Token(String, TokenType, Option<Position>);
 
 use TokenType::*;
 #[derive(Clone, Debug, PartialEq)]
@@ -122,21 +145,14 @@ impl PartialEq for Token {
     }
 }
 
-impl Display for Token {
+impl Debug for Token {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl Debug for Token {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "{}@{:?}", self.0, self.2)
-    }
-}
-
-fn preprocess(s: &str) -> (Vec<Token>, Ops) {
-    let mut row = 1;
-    let mut col = 1;
+fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
+    let mut position = Position::new(1, 1, file);
     let mut program = Vec::with_capacity(s.len());
     for c in s.chars() {
         let t = match c {
@@ -148,12 +164,12 @@ fn preprocess(s: &str) -> (Vec<Token>, Ops) {
             '\"' => TokenType::Str,
             _ => Other,
         };
-        program.push(Token(c.to_string(), t, row, col));
+        program.push(Token(c.to_string(), t, Some(position.clone())));
         if c == '\n' {
-            row += 1;
-            col = 1
+            position.row += 1;
+            position.col = 1
         } else {
-            col += 1;
+            position.col += 1;
         }
     }
     let mut operators = HashMap::new();
@@ -185,7 +201,8 @@ fn preprocess(s: &str) -> (Vec<Token>, Ops) {
                 }
                 Some(&"include") => {
                     let f = &c[1][1..c[1].len() - 1];
-                    let (mut p, ops) = preprocess(&std::fs::read_to_string(f).unwrap());
+                    let (mut p, ops) =
+                        preprocess(&std::fs::read_to_string(f).unwrap(), f.to_string());
                     operators.extend(ops);
                     p.extend(rest.to_vec());
                     p
@@ -211,7 +228,7 @@ fn tokenize(s: Vec<Token>) -> Vec<Token> {
                         }
                         false => {
                             in_s = true;
-                            acc.push(Token("\"".to_string(), t.1, t.2, t.3));
+                            acc.push(Token("\"".to_string(), t.1, t.2));
                         }
                     },
                     _ => match acc.last_mut() {
@@ -233,20 +250,6 @@ fn tokenize(s: Vec<Token>) -> Vec<Token> {
 
 #[derive(Clone, PartialEq)]
 struct S(Token, Vec<S>);
-
-impl Display for S {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        if self.1.is_empty() {
-            write!(f, "{}", self.0)
-        } else {
-            write!(f, "({}", self.0)?;
-            for s in &self.1 {
-                write!(f, " {}", s)?;
-            }
-            write!(f, ")")
-        }
-    }
-}
 
 impl Debug for S {
     fn fmt(&self, f: &mut Formatter) -> Result {
@@ -275,12 +278,12 @@ impl<'a> Context<'a> {
 }
 
 fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
-    fn get_lhs(func: &str, row: usize, col: usize, i: bool, v: Vec<S>) -> S {
-        let f = Token(func.to_string(), Other, row, col);
+    fn get_lhs(func: &str, p: Option<Position>, i: bool, v: Vec<S>) -> S {
+        let f = Token(func.to_string(), Other, p);
         match i {
             true => S(f, v),
             false => v.into_iter().fold(S(f, vec![]), |acc, x| {
-                S(Token("call".to_string(), Other, 0, 0), vec![acc, x])
+                S(Token("call".to_string(), Other, None), vec![acc, x])
             }),
         }
     }
@@ -289,10 +292,8 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
         let mut op = c.get().clone();
         c.next();
         let mut lhs = match c.2.get(&(op.0.clone(), true)) {
-            Some((f, i, bp, Prefix)) => get_lhs(f, op.2, op.3, *i, vec![expr(c, *bp)]),
-            Some((f, i, bp, Prefix2)) => {
-                get_lhs(f, op.2, op.3, *i, vec![expr(c, *bp), expr(c, *bp)])
-            }
+            Some((f, i, bp, Prefix)) => get_lhs(f, op.2, *i, vec![expr(c, *bp)]),
+            Some((f, i, bp, Prefix2)) => get_lhs(f, op.2, *i, vec![expr(c, *bp), expr(c, *bp)]),
             Some(_) => unreachable!(),
             None if op.1 == Opener => {
                 let mut v = vec![];
@@ -309,11 +310,11 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
             match c.2.get(&(op.0, false)) {
                 Some((f, i, bp, Right)) if bp > &rbp => {
                     c.next();
-                    lhs = get_lhs(f, op.2, op.3, *i, vec![lhs, expr(c, bp - 1)]);
+                    lhs = get_lhs(f, op.2, *i, vec![lhs, expr(c, bp - 1)]);
                 }
                 Some((f, i, bp, Left)) if bp > &rbp => {
                     c.next();
-                    lhs = get_lhs(f, op.2, op.3, *i, vec![lhs, expr(c, *bp)]);
+                    lhs = get_lhs(f, op.2, *i, vec![lhs, expr(c, *bp)]);
                 }
                 _ => break,
             }
@@ -321,8 +322,8 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
         lhs
     }
 
-    tokens.insert(0, Token("{".to_string(), Opener, 0, 0));
-    tokens.push(Token("}".to_string(), Closer, 0, 0));
+    tokens.insert(0, Token("{".to_string(), Opener, None));
+    tokens.push(Token("}".to_string(), Closer, None));
     expr(&mut Context(0, &tokens, &operators), 0)
 }
 
@@ -366,17 +367,38 @@ impl Debug for Expr {
 }
 
 type Frame = HashMap<String, Expr>;
-type Env = Vec<(Frame, usize, usize)>;
+struct Env(Vec<(Frame, Option<Position>)>);
 
-fn get_var<'a>(env: &'a Env, s: &str) -> Option<&'a Expr> {
-    env.iter().rev().find_map(|f| f.0.get(s))
+impl Env {
+    fn new() -> Env {
+        Env(vec![])
+    }
+
+    fn get_var<'a>(&'a self, s: &str) -> Option<&'a Expr> {
+        self.0.iter().rev().find_map(|f| f.0.get(s))
+    }
+
+    fn add_var(&mut self, s: String, e: Expr) {
+        match self.0.iter_mut().rev().find(|h| h.0.contains_key(&s)) {
+            Some(h) => h.0.insert(s, e),
+            None => self.0.last_mut().unwrap().0.insert(s, e),
+        };
+    }
 }
 
-fn add_var(env: &mut Env, s: String, e: Expr) {
-    match env.iter_mut().rev().find(|h| h.0.contains_key(&s)) {
-        Some(h) => h.0.insert(s, e),
-        None => env.last_mut().unwrap().0.insert(s, e),
-    };
+impl Debug for Env {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        for frame in &self.0 {
+            for v in &frame.0 {
+                writeln!(f, "{}: {:?}", v.0, v.1)?;
+            }
+            if let Some(p) = &frame.1 {
+                write!(f, "\t{:?}", p)?;
+            }
+            writeln!(f, "")?;
+        }
+        writeln!(f, "")
+    }
 }
 
 fn interpret(s: &S, c: &mut Env) -> Expr {
@@ -385,22 +407,22 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
     }
 
     let get_arg = |c: &mut Env, i: usize| {
-        c.push((HashMap::new(), s.0 .2, s.0 .3));
+        c.0.push((HashMap::new(), s.0 .2.clone()));
         let out = interpret(&s.1[i], c);
-        c.pop();
+        c.0.pop();
         out
     };
     let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
         (Num(a), Num(b)) => Num(f(a, b)),
-        (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
+        (a, b) => panic!("{:?} {:?} {:?} {:?}", a, b, s, c),
     };
 
     match &*s.0 .0 {
         "(" => get_arg(c, 0),
         "{" => {
-            c.push((HashMap::new(), s.0 .2, s.0 .3));
+            c.0.push((HashMap::new(), s.0 .2.clone()));
             let out = s.1.iter().fold(Unit, |_, s| interpret(s, c));
-            c.pop();
+            c.0.pop();
             out
         }
         "[" => s.1.iter().rev().fold(Empty, |acc, s| {
@@ -409,11 +431,10 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "assert" => {
             if get_arg(c, 0) != get_arg(c, 1) {
                 panic!(
-                    "{:?} != {:?} @ {:?}:{:?} {:#?}",
+                    "{:?} != {:?} @ {:?} {:?}",
                     get_arg(c, 0),
                     get_arg(c, 1),
                     s.0 .2,
-                    s.0 .3,
                     c
                 );
             }
@@ -423,34 +444,30 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
             println!("{:?}", get_arg(c, 0));
             Unit
         }
-        "set" => match (&interpret(&s.1[0], &mut vec![]), get_arg(c, 1)) {
+        "set" => match (&interpret(&s.1[0], &mut Env::new()), get_arg(c, 1)) {
             (Var(v), e) => {
-                add_var(c, v.0.clone(), e);
+                c.add_var(v.0.clone(), e);
                 Unit
             }
-            (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
+            (a, b) => panic!("{:?} {:?} {:?} {:?}", a, b, s, c),
         },
-        "func" => Function(
-            s.1[0].0.clone(),
-            s.1[1].clone(),
-            c.last().unwrap().0.clone(),
-        ),
+        "func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.0.last().unwrap().0.clone()),
         "if_" => match interpret(&s.1[0], c) {
             Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
             Bool(false) => Opt(None),
-            a => panic!("{:?} {:?} {:#?}", a, s, c),
+            a => panic!("{:?} {:?} {:?}", a, s, c),
         },
         "else_" => match get_arg(c, 0) {
             Opt(Some(a)) => *a,
             Opt(None) => get_arg(c, 1),
-            a => panic!("{:?} {:?} {:#?}", a, s, c),
+            a => panic!("{:?} {:?} {:?}", a, s, c),
         },
         "try" => {
             fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
                 match (e, a) {
                     (Var(s), a) => {
                         if s.0 != "_" {
-                            c.last_mut().unwrap().0.insert(s.0.clone(), a);
+                            c.0.last_mut().unwrap().0.insert(s.0.clone(), a);
                         }
                         true
                     }
@@ -458,7 +475,11 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
                     _ => false,
                 }
             }
-            Bool(destruct(&interpret(&s.1[0], &mut vec![]), get_arg(c, 1), c))
+            Bool(destruct(
+                &interpret(&s.1[0], &mut Env::new()),
+                get_arg(c, 1),
+                c,
+            ))
         }
         "eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
         "gt" => match (get_arg(c, 0), get_arg(c, 1)) {
@@ -477,12 +498,12 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "mod" => get_num_bin_op(|a, b| a % b),
         "pow" => get_num_bin_op(|a, b| a.powf(b)),
         "call" => match get_arg(c, 0) {
-            Var(Token(t, _, _, _)) if t == "Some" => Opt(Some(Box::new(get_arg(c, 1)))),
+            Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(get_arg(c, 1)))),
             Function(x, y, mut z) => {
                 z.insert(x.0, get_arg(c, 1));
-                c.push((z, s.0 .2, s.0 .3));
+                c.0.push((z, s.0 .2.clone()));
                 let out = interpret(&y, c);
-                c.pop();
+                c.0.pop();
                 out
             }
             o => panic!("{:?} {:?} {:#?}", o, s, c),
@@ -492,7 +513,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "None" => Opt(None),
         o => match s.0 .1 {
             TokenType::Str => Expr::Str(s.0.clone()),
-            _ => match get_var(c, o) {
+            _ => match c.get_var(o) {
                 Some(e) => e.clone(),
                 None => Var(s.0.clone()),
             },
