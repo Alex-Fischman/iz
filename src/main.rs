@@ -45,6 +45,12 @@ fn main() {
     run_program("src/scratch.iz");
 }
 
+fn run_program(f: &str) {
+    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap(), f.to_string());
+    add_std_ops(&mut ops);
+    interpret(&parse(tokenize(p), ops), &mut Env::new());
+}
+
 #[derive(Clone)]
 struct Position {
     row: usize,
@@ -66,12 +72,6 @@ impl Debug for Position {
     fn fmt(&self, f: &mut Formatter) -> Result {
         write!(f, "{}:{}:{}", self.file, self.row, self.col)
     }
-}
-
-fn run_program(f: &str) {
-    let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap(), f.to_string());
-    add_std_ops(&mut ops);
-    interpret(&parse(tokenize(p), ops), &mut Env::new());
 }
 
 type Ops = HashMap<(String, bool), (String, bool, u8, OpType)>;
@@ -442,7 +442,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
     };
     let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
         (Num(a), Num(b)) => Num(f(a, b)),
-        (a, b) => panic!("{:?} {:?} {:?} {:?}", a, b, s, c),
+        (a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
     };
 
     match &*s.0 .0 {
@@ -459,7 +459,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "assert" => {
             if get_arg(c, 0) != get_arg(c, 1) {
                 panic!(
-                    "{:?} != {:?} @ {:?} {:?}",
+                    "{:?} != {:?} @ {:?}\n{:?}",
                     get_arg(c, 0),
                     get_arg(c, 1),
                     s.0 .2,
@@ -477,18 +477,18 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
                 c.add_var(v.0.clone(), e);
                 Unit
             }
-            (a, b) => panic!("{:?} {:?} {:?} {:?}", a, b, s, c),
+            (a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
         },
-        "func" => Function(s.1[0].0.clone(), s.1[1].clone(), (c.0.last().unwrap().0.clone(), None)),
+        "func" => Function(s.1[0].0.clone(), s.1[1].clone(), (HashMap::new(), None)),
         "if_" => match interpret(&s.1[0], c) {
             Bool(true) => Opt(Some(Box::new(get_arg(c, 1)))),
             Bool(false) => Opt(None),
-            a => panic!("{:?} {:?} {:?}", a, s, c),
+            a => panic!("{:?} {:?}\n{:?}", a, s, c),
         },
         "else_" => match get_arg(c, 0) {
             Opt(Some(a)) => *a,
             Opt(None) => get_arg(c, 1),
-            a => panic!("{:?} {:?} {:?}", a, s, c),
+            a => panic!("{:?} {:?}\n{:?}", a, s, c),
         },
         "try" => {
             fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
@@ -512,11 +512,11 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
         "eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
         "gt" => match (get_arg(c, 0), get_arg(c, 1)) {
             (Num(a), Num(b)) => Bool(a > b),
-            (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
+            (a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
         },
         "lt" => match (get_arg(c, 0), get_arg(c, 1)) {
             (Num(a), Num(b)) => Bool(a < b),
-            (a, b) => panic!("{:?} {:?} {:?} {:#?}", a, b, s, c),
+            (a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
         },
         "cons" => Cons(Box::new(get_arg(c, 0)), Box::new(get_arg(c, 1))),
         "add" => get_num_bin_op(|a, b| a + b),
@@ -529,13 +529,16 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
             Var(Token(t, _, _)) if t == "Some" => Opt(Some(Box::new(get_arg(c, 1)))),
             Function(x, y, mut z) => {
                 z.0.insert(x.0, get_arg(c, 1));
-                z.1 = s.0.2.clone();
+                z.1 = s.0 .2.clone();
                 c.push(z);
-                let out = interpret(&y, c);
-                c.pop();
+                let mut out = interpret(&y, c);
+                z = c.pop().unwrap();
+                if let Function(_, _, ret_env) = &mut out {
+                    *ret_env = z;
+                }
                 out
             }
-            o => panic!("{:?} {:?} {:#?}", o, s, c),
+            o => panic!("{:?} {:?}\n{:?}", o, s, c),
         },
         "false" => Bool(false),
         "true" => Bool(true),

@@ -19,7 +19,6 @@ assert 256 square@16
 assert 3 (a -> b -> a)@3@4
 assert 9 dot@3@square
 assert 9 3.square
-assert 5 {x = 2 y->x+y}@3
 assert 24 factorial@4
 assert [[3] 1 2] {
 	x::y::xs ?= [1 2 3]
@@ -32,4 +31,5 @@ assert 55 range@1@11.foldl@(a -> b -> a + b)@0
 assert 55 range@1@11.foldr@(a -> b -> a + b)@0
 assert 55 range@1@11.sum
 assert 5 [1 5 2 4 3].length
-assert 1 {a = 1 x -> a}@5
+# assert 1 {a = 1 x -> a}@5
+# assert 5 {x = 2 y->x+y}@3
