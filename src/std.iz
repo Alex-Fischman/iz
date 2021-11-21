@@ -36,9 +36,8 @@ range = a -> b -> if a < b a::range@(a + 1)@b else []
 
 get = i -> l -> if x::xs ?= l (if i == 0 Some@x else xs.get@(i - 1)) else None
 
-# changing g to f here breaks it bc it sees the f in foldr
 # removing l also breaks it, did I reintroduce that bug?
-map = g -> l -> foldr@(x -> z -> g@x::z)@[]@l
+map = f -> l -> foldr@(x -> z -> f@x::z)@[]@l
 filter = f -> l -> if x::xs ?= l {
 	rest = xs.filter@f
 	if f@x x::rest else rest
