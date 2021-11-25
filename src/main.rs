@@ -337,7 +337,6 @@ use Expr::*;
 #[derive(Clone)]
 enum Expr {
 	Unit,
-	Var(Token),
 	Bool(bool),
 	Num(f64),
 	Som(Box<Expr>),
@@ -352,7 +351,6 @@ impl PartialEq for Expr {
 	fn eq(&self, other: &Expr) -> bool {
 		match (self, other) {
 			(Unit, Unit) => true,
-			(Var(a), Var(b)) => a == b,
 			(Bool(a), Bool(b)) => a == b,
 			(Num(a), Num(b)) => a == b,
 			(Som(a), Som(b)) => a == b,
@@ -369,7 +367,6 @@ impl Debug for Expr {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		match self {
 			Unit => write!(f, "{{}}"),
-			Var(s) => write!(f, "v{:?}", s),
 			Bool(b) => write!(f, "{}", b),
 			Num(n) => write!(f, "{}", n),
 			Som(e) => write!(f, "Some({:?})", e),
@@ -392,7 +389,7 @@ impl Debug for Expr {
 
 #[derive(Clone)]
 struct Env(Option<Rc<RefCell<Node>>>);
-struct Node(Frame, Option<Rc<RefCell<Node>>>);
+struct Node(Option<Rc<RefCell<Node>>>, Frame);
 
 #[derive(Clone)]
 struct Frame(String, Expr, Position);
@@ -415,25 +412,25 @@ impl Env {
 	}
 
 	fn push_var(&mut self, f: Frame) {
-		self.0 = Some(Rc::new(RefCell::new(Node(f, self.0.clone()))))
+		self.0 = Some(Rc::new(RefCell::new(Node(self.0.clone(), f))))
 	}
 }
 
 impl Node {
 	fn get_var(&self, s: &str) -> Option<Expr> {
-		if self.0 .0 == s {
-			Some(self.0 .1.clone())
+		if self.1 .0 == s {
+			Some(self.1 .1.clone())
 		} else {
-			self.1.as_ref().and_then(|n| n.borrow().get_var(s))
+			self.0.as_ref().and_then(|n| n.borrow().get_var(s))
 		}
 	}
 
 	fn add_var(&mut self, f: Frame) -> std::result::Result<(), Frame> {
-		if f.0 == self.0 .0 {
-			self.0 = f;
+		if f.0 == self.1 .0 {
+			self.1 = f;
 			Ok(())
 		} else {
-			match &self.1 {
+			match &self.0 {
 				Some(n) => n.borrow_mut().add_var(f),
 				None => Err(f),
 			}
@@ -452,10 +449,10 @@ impl Debug for Env {
 
 impl Debug for Node {
 	fn fmt(&self, f: &mut Formatter) -> Result {
-		if let Some(n) = &self.1 {
+		if let Some(n) = &self.0 {
 			write!(f, "{:?}", n.borrow())?;
 		}
-		writeln!(f, "{:?} \t{}: {:?}", self.0 .2, self.0 .0, self.0 .1)
+		writeln!(f, "{:?} \t{}: {:?}", self.1 .2, self.1 .0, self.1 .1)
 	}
 }
 
@@ -491,16 +488,14 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 			println!("{:?}", get_arg(c, 0));
 			Unit
 		}
-		"set" => match (&interpret(&s.1[0], &mut Env::new()), get_arg(c, 1)) {
-			(Var(v), mut e) => {
-				if let Function(_, _, _, n) = &mut e {
-					*n = Some(v.0.clone());
-				}
-				c.add_var(Frame(v.0.clone(), e, s.0 .2.clone()));
-				Unit
+		"set" => {
+			let mut e = get_arg(c, 1);
+			if let Function(_, _, _, n) = &mut e {
+				*n = Some(s.1[0].0.0.clone());
 			}
-			(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
-		},
+			c.add_var(Frame(s.1[0].0.0.clone(), e, s.0 .2.clone()));
+			Unit
+		}
 		"func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.clone(), None),
 		"if_" => match interpret(&s.1[0], c) {
 			Bool(true) => Som(Box::new(get_arg(c, 1))),
@@ -513,23 +508,20 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 			a => panic!("{:?} {:?}\n{:?}", a, s, c),
 		},
 		"try" => {
-			fn destruct(e: &Expr, a: Expr, c: &mut Env) -> bool {
-				match (e, a) {
-					(Var(s), a) => {
-						if s.0 != "_" {
-							c.push_var(Frame(s.0.clone(), a, s.2.clone()));
-						}
+			fn destruct(s: &S, a: Expr, c: &mut Env) -> bool {
+				match s.0.0.as_str() {
+					"cons" => match a {
+						Cons(a, b) => destruct(&s.1[0], *a, c) && destruct(&s.1[1], *b, c),
+						_ => false,
+					},
+					"_" => true,
+					_ => {
+						c.push_var(Frame(s.0.0.clone(), a, s.0.2.clone()));
 						true
 					}
-					(Cons(e, f), Cons(a, b)) => destruct(e, *a, c) && destruct(f, *b, c),
-					_ => false,
 				}
 			}
-			Bool(destruct(
-				&interpret(&s.1[0], &mut Env::new()),
-				get_arg(c, 1),
-				c,
-			))
+			Bool(destruct(&s.1[0], get_arg(c, 1), c))
 		}
 		"eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
 		"gt" => match (get_arg(c, 0), get_arg(c, 1)) {
@@ -547,8 +539,11 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 		"div" => get_num_bin_op(|a, b| a / b),
 		"mod" => get_num_bin_op(|a, b| a % b),
 		"pow" => get_num_bin_op(|a, b| a.powf(b)),
+		"false" => Bool(false),
+		"true" => Bool(true),
+		"None" => Non,
+		"call" if s.1[0].0.0 == "Some" => Som(Box::new(get_arg(c, 1))),
 		"call" => match get_arg(c, 0) {
-			Var(Token(t, _, _)) if t == "Some" => Som(Box::new(get_arg(c, 1))),
 			Function(x, y, mut z, n) => {
 				if let Some(n) = n {
 					z.push_var(Frame(
@@ -562,16 +557,10 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 			}
 			o => panic!("{:?} {:?}\n{:?}", o, s, c),
 		},
-		"false" => Bool(false),
-		"true" => Bool(true),
-		"None" => Non,
 		o => match s.0 .1 {
-			Numeric => Num(s.0.0.parse().unwrap()),
+			Numeric => Num(s.0 .0.parse().unwrap()),
 			Strin => Str(s.0.clone()),
-			_ => match c.get_var(o) {
-				Some(e) => e,
-				None => Var(s.0.clone()),
-			},
+			_ => c.get_var(o).unwrap(),
 		},
 	}
 }
