@@ -1,57 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::*;
+use std::fs::read_to_string;
 use std::rc::Rc;
-
-fn main() {
-	let parse_test = |a, b| {
-		let (p, mut ops) = preprocess(a, "parse test".to_string());
-		add_std_ops(&mut ops);
-		assert_eq!(
-			format!("{:?}", parse(tokenize(p), ops)),
-			format!("({{ {})", b)
-		)
-	};
-	parse_test("1", "1");
-	parse_test("a + b", "(add a b)");
-	parse_test("if a b", "(if_ a b)");
-	parse_test("a + b + c", "(add (add a b) c)");
-	parse_test("a = b = c", "(set a (set b c))");
-	parse_test("1 + f = g = h * 3", "(set (add 1 f) (set g (mul h 3)))");
-	parse_test("a + b * c * d + e", "(add (add a (mul (mul b c) d)) e)");
-	parse_test("#op . dot 15 left\na . b", "(call (call dot a) b)");
-	parse_test("#op - neg 14 prefix\n-a + b", "(add (call neg a) b)");
-	parse_test(
-		"#op - neg 14 prefix\n- -1 * 2",
-		"(mul (call neg (call neg 1)) 2)",
-	);
-	parse_test(
-		"#op - neg 14 prefix\n- -f + g",
-		"(add (call neg (call neg f)) g)",
-	);
-	parse_test("(0(0))", "(( 0 (( 0))");
-	parse_test("((0)(0))", "(( (( 0) (( 0))");
-	parse_test("(((0)))", "(( (( (( 0)))");
-	parse_test(
-		"if a b else if c d else e",
-		"(else_ (if_ a b) (else_ (if_ c d) e))",
-	);
-	parse_test(
-		"a = if 0 b else c = d",
-		"(set a (set (else_ (if_ 0 b) c) d))",
-	);
-	parse_test("  \" asdfs sadfasdf \"  ", "\" asdfs sadfasdf \"");
-	parse_test("\"asdf\" # \"comment\"", "\"asdf\"");
-
-	run_program("src/test.iz");
-	run_program("src/scratch.iz");
-}
-
-fn run_program(f: &str) {
-	let (p, mut ops) = preprocess(&std::fs::read_to_string(f).unwrap(), f.to_string());
-	add_std_ops(&mut ops);
-	interpret(&parse(tokenize(p), ops), &mut Env::new());
-}
 
 #[derive(Clone)]
 struct Position {
@@ -60,81 +11,16 @@ struct Position {
 	file: String,
 }
 
-impl Position {
-	fn new(row: usize, col: usize, file: String) -> Position {
-		Position {
-			row: row,
-			col: col,
-			file: file,
-		}
-	}
-
-	fn empty() -> Position {
-		Position::new(0, 0, "".to_string())
-	}
-}
-
 impl Debug for Position {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		write!(f, "{}:{}:{}", self.file, self.row, self.col)
 	}
 }
 
-type Ops = HashMap<(String, bool), (String, bool, u8, OpType)>;
-
-use OpType::*;
-#[derive(Debug)]
-enum OpType {
-	Prefix,
-	Prefix2,
-	Left,
-	Right,
-}
-
-impl OpType {
-	fn is_prefix(&self) -> bool {
-		match self {
-			Prefix => true,
-			Prefix2 => true,
-			Left => false,
-			Right => false,
-		}
-	}
-}
-
-fn add_std_ops(ops: &mut Ops) {
-	let mut new_op = |n: &str, f: &str, bp: u8, ty: OpType| {
-		ops.insert(
-			(n.to_string(), ty.is_prefix()),
-			(f.to_string(), true, bp, ty),
-		)
-	};
-	new_op("print", "print", 1, Prefix);
-	new_op("assert", "assert", 1, Prefix2);
-	new_op("=", "set", 2, Right);
-	new_op(":", "type", 3, Right);
-	new_op("->", "func", 4, Right);
-	new_op("if", "if_", 5, Prefix2);
-	new_op("else", "else_", 5, Right);
-	new_op("?=", "try", 9, Left);
-	new_op("==", "eq", 9, Left);
-	new_op(">", "gt", 9, Left);
-	new_op("<", "lt", 9, Left);
-	new_op("::", "cons", 10, Right);
-	new_op("+", "add", 11, Left);
-	new_op("-", "sub", 11, Left);
-	new_op("*", "mul", 12, Left);
-	new_op("/", "div", 12, Left);
-	new_op("%", "mod", 12, Left);
-	new_op("^", "pow", 13, Left);
-	new_op("@", "call", 16, Left);
-}
-
 #[derive(Clone)]
-struct Token(String, TokenType, Position);
+struct Token(String, TokenType, Option<Position>);
 
-use TokenType::*;
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum TokenType {
 	Alphabetic,
 	Whitespace,
@@ -145,32 +31,32 @@ enum TokenType {
 	Other,
 }
 
-impl PartialEq for Token {
-	fn eq(&self, t: &Token) -> bool {
-		self.0 == t.0 && self.1 == t.1
-	}
-}
-
 impl Debug for Token {
 	fn fmt(&self, f: &mut Formatter) -> Result {
 		write!(f, "{}", self.0)
 	}
 }
 
+struct Ops {
+	prefixes: HashMap<String, (String, bool, u8, bool)>,
+	infixes: HashMap<String, (String, bool, u8, bool)>,
+}
+
+// HERE
 fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
-	let mut position = Position::new(1, 1, file);
+	let mut position = Position { row: 1, col: 1, file };
 	let mut program = Vec::with_capacity(s.len());
 	for c in s.chars() {
 		let t = match c {
-			c if c.is_alphabetic() || c == '_' => Alphabetic,
-			c if c.is_whitespace() => Whitespace,
-			c if c.is_numeric() => Numeric,
-			'(' | '{' | '[' => Opener,
-			')' | '}' | ']' => Closer,
-			'\"' => Strin,
-			_ => Other,
+			c if c.is_alphabetic() || c == '_' => TokenType::Alphabetic,
+			c if c.is_whitespace() => TokenType::Whitespace,
+			c if c.is_numeric() => TokenType::Numeric,
+			'(' | '{' | '[' => TokenType::Opener,
+			')' | '}' | ']' => TokenType::Closer,
+			'\"' => TokenType::Strin,
+			_ => TokenType::Other,
 		};
-		program.push(Token(c.to_string(), t, position.clone()));
+		program.push(Token(c.to_string(), t, Some(position.clone())));
 		if c == '\n' {
 			position.row += 1;
 			position.col = 1
@@ -178,7 +64,8 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 			position.col += 1;
 		}
 	}
-	let mut operators = HashMap::new();
+
+	let mut operators = Ops { prefixes: HashMap::new(), infixes: HashMap::new() };
 	let program = program
 		.split(|t| t.0 == "#")
 		.enumerate()
@@ -192,24 +79,33 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 			let c: Vec<&str> = c.split_whitespace().collect();
 			match c.get(0) {
 				Some(&"op") => {
-					let t = match c[4] {
-						"prefix" => Prefix,
-						"statement" => Prefix2,
-						"left" => Left,
-						"right" => Right,
+					match c[4] {
+						"prefix" => operators.prefixes.insert(
+							c[1].to_string(),
+							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), false),
+						),
+						"statement" => operators.prefixes.insert(
+							c[1].to_string(),
+							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), true),
+						),
+						"left" => operators.infixes.insert(
+							c[1].to_string(),
+							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), false),
+						),
+						"right" => operators.infixes.insert(
+							c[1].to_string(),
+							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), true),
+						),
 						c => panic!("{:?}", c),
 					};
-					operators.insert(
-						(c[1].to_string(), t.is_prefix()),
-						(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), t),
-					);
 					rest.to_vec()
 				}
 				Some(&"include") => {
 					let f = &c[1][1..c[1].len() - 1];
 					let (mut p, ops) =
-						preprocess(&std::fs::read_to_string(f).unwrap(), f.to_string());
-					operators.extend(ops);
+						preprocess(&read_to_string(f).unwrap(), f.to_string());
+					operators.prefixes.extend(ops.prefixes);
+					operators.infixes.extend(ops.infixes);
 					p.extend(rest.to_vec());
 					p
 				}
@@ -221,40 +117,7 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 	(program, operators)
 }
 
-fn tokenize(s: Vec<Token>) -> Vec<Token> {
-	s.into_iter()
-		.fold(
-			(false, vec![]),
-			|(mut in_s, mut acc): (bool, Vec<Token>), t| {
-				match &*t.0 {
-					"\"" => match in_s {
-						true => {
-							in_s = false;
-							acc.last_mut().unwrap().0.push('\"');
-						}
-						false => {
-							in_s = true;
-							acc.push(Token("\"".to_string(), t.1, t.2));
-						}
-					},
-					_ => match acc.last_mut() {
-						Some(s) if in_s => s.0.push_str(&t.0),
-						Some(s) if s.1 == t.1 && s.1 != Opener && s.1 != Closer => {
-							s.0.push_str(&t.0)
-						}
-						_ => acc.push(t),
-					},
-				}
-				(in_s, acc)
-			},
-		)
-		.1
-		.into_iter()
-		.filter(|t| t.1 != Whitespace)
-		.collect()
-}
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 struct S(Token, Vec<S>);
 
 impl Debug for S {
@@ -283,13 +146,78 @@ impl<'a> Context<'a> {
 	}
 }
 
-fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
-	fn get_lhs(func: &str, p: Position, i: bool, v: Vec<S>) -> S {
-		let f = Token(func.to_string(), Other, p.clone());
+fn parse(mut p: (Vec<Token>, Ops)) -> S {
+	p.1.prefixes.insert("print".to_string(), ("print".to_string(), true, 1, false));
+	p.1.prefixes.insert("assert".to_string(), ("assert".to_string(), true, 1, true));
+	p.1.infixes.insert("=".to_string(), ("set".to_string(), true, 2, true));
+	p.1.infixes.insert(":".to_string(), ("type".to_string(), true, 3, true));
+	p.1.infixes.insert("->".to_string(), ("func".to_string(), true, 4, true));
+	p.1.prefixes.insert("if".to_string(), ("if_".to_string(), true, 5, true));
+	p.1.infixes.insert("else".to_string(), ("else_".to_string(), true, 5, true));
+	p.1.infixes.insert("?=".to_string(), ("try".to_string(), true, 9, false));
+	p.1.infixes.insert("==".to_string(), ("eq".to_string(), true, 9, false));
+	p.1.infixes.insert(">".to_string(), ("gt".to_string(), true, 9, false));
+	p.1.infixes.insert("<".to_string(), ("lt".to_string(), true, 9, false));
+	p.1.infixes.insert("::".to_string(), ("cons".to_string(), true, 10, true));
+	p.1.infixes.insert("+".to_string(), ("add".to_string(), true, 11, false));
+	p.1.infixes.insert("-".to_string(), ("sub".to_string(), true, 11, false));
+	p.1.infixes.insert("*".to_string(), ("mul".to_string(), true, 12, false));
+	p.1.infixes.insert("/".to_string(), ("div".to_string(), true, 12, false));
+	p.1.infixes.insert("%".to_string(), ("mod".to_string(), true, 12, false));
+	p.1.infixes.insert("^".to_string(), ("pow".to_string(), true, 13, false));
+	p.1.infixes.insert("@".to_string(), ("call".to_string(), true, 16, false));
+
+	let mut tokens: Vec<Token> =
+		p.0.into_iter()
+			.fold(
+				(false, vec![]),
+				|(mut in_s, mut acc): (bool, Vec<Token>), t| {
+					match &*t.0 {
+						"\"" => match in_s {
+							true => {
+								in_s = false;
+								acc.last_mut().unwrap().0.push('\"');
+							}
+							false => {
+								in_s = true;
+								acc.push(Token("\"".to_string(), t.1, t.2));
+							}
+						},
+						_ => match acc.last_mut() {
+							Some(s) if in_s => s.0.push_str(&t.0),
+							Some(s) if s.1 == t.1 && s.1 != TokenType::Opener && s.1 != TokenType::Closer => {
+								s.0.push_str(&t.0)
+							}
+							_ => acc.push(t),
+						},
+					}
+					(in_s, acc)
+				},
+			)
+			.1
+			.into_iter()
+			.filter(|t| t.1 != TokenType::Whitespace)
+			.collect();
+	tokens.insert(
+		0,
+		Token(
+			"{".to_string(),
+			TokenType::Opener,
+			None,
+		),
+	);
+	tokens.push(Token(
+		"}".to_string(),
+		TokenType::Closer,
+		None,
+	));
+
+	fn get_lhs(func: &str, p: Option<Position>, i: bool, v: Vec<S>) -> S {
+		let f = Token(func.to_string(), TokenType::Other, p.clone());
 		match i {
 			true => S(f, v),
 			false => v.into_iter().fold(S(f, vec![]), |acc, x| {
-				S(Token("call".to_string(), Other, p.clone()), vec![acc, x])
+				S(Token("call".to_string(), TokenType::Other, p.clone()), vec![acc, x])
 			}),
 		}
 	}
@@ -297,13 +225,12 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
 	fn expr(c: &mut Context, rbp: u8) -> S {
 		let mut op = c.get().clone();
 		c.next();
-		let mut lhs = match c.2.get(&(op.0.clone(), true)) {
-			Some((f, i, bp, Prefix)) => get_lhs(f, op.2, *i, vec![expr(c, *bp)]),
-			Some((f, i, bp, Prefix2)) => get_lhs(f, op.2, *i, vec![expr(c, *bp), expr(c, *bp)]),
-			Some(_) => unreachable!(),
-			None if op.1 == Opener => {
+		let mut lhs = match c.2.prefixes.get(&op.0) {
+			Some((f, i, bp, false)) => get_lhs(f, op.2, *i, vec![expr(c, *bp)]),
+			Some((f, i, bp, true)) => get_lhs(f, op.2, *i, vec![expr(c, *bp), expr(c, *bp)]),
+			None if op.1 == TokenType::Opener => {
 				let mut v = vec![];
-				while c.get().1 != Closer {
+				while c.get().1 != TokenType::Closer {
 					v.push(expr(c, 0));
 				}
 				c.next();
@@ -313,12 +240,12 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
 		};
 		while c.0 < c.1.len() {
 			op = c.get().clone();
-			match c.2.get(&(op.0, false)) {
-				Some((f, i, bp, Right)) if bp > &rbp => {
+			match c.2.infixes.get(&op.0) {
+				Some((f, i, bp, true)) if bp > &rbp => {
 					c.next();
 					lhs = get_lhs(f, op.2, *i, vec![lhs, expr(c, bp - 1)]);
 				}
-				Some((f, i, bp, Left)) if bp > &rbp => {
+				Some((f, i, bp, false)) if bp > &rbp => {
 					c.next();
 					lhs = get_lhs(f, op.2, *i, vec![lhs, expr(c, *bp)]);
 				}
@@ -328,9 +255,7 @@ fn parse(mut tokens: Vec<Token>, operators: Ops) -> S {
 		lhs
 	}
 
-	tokens.insert(0, Token("{".to_string(), Opener, Position::empty()));
-	tokens.push(Token("}".to_string(), Closer, Position::empty()));
-	expr(&mut Context(0, &tokens, &operators), 0)
+	expr(&mut Context(0, &tokens, &p.1), 0)
 }
 
 use Expr::*;
@@ -357,7 +282,7 @@ impl PartialEq for Expr {
 			(Non, Non) => true,
 			(Cons(a, b), Cons(c, d)) => a == c && b == d,
 			(Empty, Empty) => true,
-			(Str(a), Str(b)) => a == b,
+			(Str(a), Str(b)) => a.0 == b.0,
 			_ => false,
 		}
 	}
@@ -392,7 +317,7 @@ struct Env(Option<Rc<RefCell<Node>>>);
 struct Node(Option<Rc<RefCell<Node>>>, Frame);
 
 #[derive(Clone)]
-struct Frame(String, Expr, Position);
+struct Frame(String, Expr, Option<Position>);
 
 impl Env {
 	fn new() -> Env {
@@ -491,9 +416,9 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 		"set" => {
 			let mut e = get_arg(c, 1);
 			if let Function(_, _, _, n) = &mut e {
-				*n = Some(s.1[0].0.0.clone());
+				*n = Some(s.1[0].0 .0.clone());
 			}
-			c.add_var(Frame(s.1[0].0.0.clone(), e, s.0 .2.clone()));
+			c.add_var(Frame(s.1[0].0 .0.clone(), e, s.0 .2.clone()));
 			Unit
 		}
 		"func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.clone(), None),
@@ -509,14 +434,18 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 		},
 		"try" => {
 			fn destruct(s: &S, a: Expr, c: &mut Env) -> bool {
-				match s.0.0.as_str() {
+				match s.0 .0.as_str() {
 					"cons" => match a {
 						Cons(a, b) => destruct(&s.1[0], *a, c) && destruct(&s.1[1], *b, c),
 						_ => false,
 					},
+					"call" if s.1[0].0 .0 == "Some" => match a {
+						Som(a) => destruct(&s.1[1], *a, c),
+						_ => false,
+					},
 					"_" => true,
 					_ => {
-						c.push_var(Frame(s.0.0.clone(), a, s.0.2.clone()));
+						c.push_var(Frame(s.0 .0.clone(), a, s.0 .2.clone()));
 						true
 					}
 				}
@@ -542,7 +471,7 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 		"false" => Bool(false),
 		"true" => Bool(true),
 		"None" => Non,
-		"call" if s.1[0].0.0 == "Some" => Som(Box::new(get_arg(c, 1))),
+		"call" if s.1[0].0 .0 == "Some" => Som(Box::new(get_arg(c, 1))),
 		"call" => match get_arg(c, 0) {
 			Function(x, y, mut z, n) => {
 				if let Some(n) = n {
@@ -558,9 +487,21 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 			o => panic!("{:?} {:?}\n{:?}", o, s, c),
 		},
 		o => match s.0 .1 {
-			Numeric => Num(s.0 .0.parse().unwrap()),
-			Strin => Str(s.0.clone()),
-			_ => c.get_var(o).unwrap(),
+			TokenType::Numeric => Num(s.0 .0.parse().unwrap()),
+			TokenType::Strin => Str(s.0.clone()),
+			_ => c.get_var(o).unwrap_or_else(|| panic!("{:?} {:?}\n{:?}", o, s, c)),
 		},
 	}
+}
+
+fn run_program_from_file(f: &str) {
+	interpret(
+		&parse(preprocess(&read_to_string(f).unwrap(), f.to_string())),
+		&mut Env::new(),
+	);
+}
+
+fn main() {
+	run_program_from_file("src/test.iz");
+	run_program_from_file("src/scratch.iz");
 }

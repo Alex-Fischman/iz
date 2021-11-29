@@ -24,7 +24,7 @@ floor = x -> x - fract@x
 is_even = n -> n % 2 == 0
 is_odd  = n -> n % 2 == 1
 
-is_empty = l -> x::xs ?= l
+is_empty = l -> !(x::xs ?= l)
 
 foldl = f -> z -> l -> if x::xs ?= l foldl@f@(f@z@x)@xs else z
 foldr = f -> z -> l -> if x::xs ?= l f@x@(foldr@f@z@xs) else z
@@ -36,7 +36,6 @@ range = a -> b -> if a < b a::range@(a + 1)@b else []
 
 get = i -> l -> if x::xs ?= l (if i == 0 Some@x else xs.get@(i - 1)) else None
 
-# removing l also breaks it, did I reintroduce that bug?
 map = f -> l -> foldr@(x -> z -> f@x::z)@[]@l
 filter = f -> l -> if x::xs ?= l {
 	rest = xs.filter@f

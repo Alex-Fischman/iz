@@ -20,12 +20,19 @@ assert 3 (a -> b -> a)@3@4
 assert 9 dot@3@square
 assert 9 3.square
 assert 24 factorial@4
+
+assert false {x::xs ?= []}
+assert [1 []] {x::xs ?= [1] [x xs]}
+assert [1 [2]] {x::xs ?= [1 2] [x xs]}
+assert false {Some@x ?= None}
+assert 3 {Some@x ?= Some@3 x}
 assert [[3] 1 5] {
 	x::y::xs ?= [1 2 3]
 	y = 5
 	[xs x y]
 }
 
+assert true is_empty@[]
 assert 1 {if a ?= 1 a else 2}
 assert [1 4 9 16 25] [1 2 3 4 5].map@square
 assert [4 16] [1 2 3 4 5].map@square.filter@is_even

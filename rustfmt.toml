@@ -1,3 +1,4 @@
 hard_tabs = true
 max_width = 98
 chain_width = 98
+struct_lit_width = 98
