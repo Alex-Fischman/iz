@@ -38,38 +38,41 @@ impl Debug for Token {
 }
 
 struct Ops {
-	prefixes: HashMap<String, (String, bool, u8, bool)>,
-	infixes: HashMap<String, (String, bool, u8, bool)>,
+	prefixes: HashMap<String, (String, u8, bool)>,
+	infixes: HashMap<String, (String, u8, bool)>,
 }
 
-// HERE
 fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 	let mut position = Position { row: 1, col: 1, file };
-	let mut program = Vec::with_capacity(s.len());
-	for c in s.chars() {
-		let t = match c {
-			c if c.is_alphabetic() || c == '_' => TokenType::Alphabetic,
-			c if c.is_whitespace() => TokenType::Whitespace,
-			c if c.is_numeric() => TokenType::Numeric,
-			'(' | '{' | '[' => TokenType::Opener,
-			')' | '}' | ']' => TokenType::Closer,
-			'\"' => TokenType::Strin,
-			_ => TokenType::Other,
-		};
-		program.push(Token(c.to_string(), t, Some(position.clone())));
-		if c == '\n' {
-			position.row += 1;
-			position.col = 1
-		} else {
-			position.col += 1;
-		}
-	}
-
 	let mut operators = Ops { prefixes: HashMap::new(), infixes: HashMap::new() };
-	let program = program
+	let ts = s
+		.chars()
+		.map(|c| {
+			let out = Token(
+				c.to_string(),
+				match c {
+					c if c.is_alphabetic() || c == '_' => TokenType::Alphabetic,
+					c if c.is_whitespace() => TokenType::Whitespace,
+					c if c.is_numeric() => TokenType::Numeric,
+					'(' | '{' | '[' => TokenType::Opener,
+					')' | '}' | ']' => TokenType::Closer,
+					'\"' => TokenType::Strin,
+					_ => TokenType::Other,
+				},
+				Some(position.clone()),
+			);
+			if c == '\n' {
+				position.row += 1;
+				position.col = 1
+			} else {
+				position.col += 1;
+			}
+			out
+		})
+		.collect::<Vec<Token>>()
 		.split(|t| t.0 == "#")
 		.enumerate()
-		.map(|(i, s)| {
+		.flat_map(|(i, s)| {
 			if i == 0 {
 				return s.to_vec();
 			}
@@ -82,19 +85,19 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 					match c[4] {
 						"prefix" => operators.prefixes.insert(
 							c[1].to_string(),
-							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), false),
+							(c[2].to_string(), c[3].parse::<u8>().unwrap(), false),
 						),
 						"statement" => operators.prefixes.insert(
 							c[1].to_string(),
-							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), true),
+							(c[2].to_string(), c[3].parse::<u8>().unwrap(), true),
 						),
 						"left" => operators.infixes.insert(
 							c[1].to_string(),
-							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), false),
+							(c[2].to_string(), c[3].parse::<u8>().unwrap(), false),
 						),
 						"right" => operators.infixes.insert(
 							c[1].to_string(),
-							(c[2].to_string(), false, c[3].parse::<u8>().unwrap(), true),
+							(c[2].to_string(), c[3].parse::<u8>().unwrap(), true),
 						),
 						c => panic!("{:?}", c),
 					};
@@ -102,8 +105,7 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 				}
 				Some(&"include") => {
 					let f = &c[1][1..c[1].len() - 1];
-					let (mut p, ops) =
-						preprocess(&read_to_string(f).unwrap(), f.to_string());
+					let (mut p, ops) = preprocess(&read_to_string(f).unwrap(), f.to_string());
 					operators.prefixes.extend(ops.prefixes);
 					operators.infixes.extend(ops.infixes);
 					p.extend(rest.to_vec());
@@ -112,9 +114,8 @@ fn preprocess(s: &str, file: String) -> (Vec<Token>, Ops) {
 				_ => rest.to_vec(),
 			}
 		})
-		.flatten()
 		.collect();
-	(program, operators)
+	(ts, operators)
 }
 
 #[derive(Clone)]
@@ -144,118 +145,6 @@ impl<'a> Context<'a> {
 	fn next(&mut self) {
 		self.0 += 1;
 	}
-}
-
-fn parse(mut p: (Vec<Token>, Ops)) -> S {
-	p.1.prefixes.insert("print".to_string(), ("print".to_string(), true, 1, false));
-	p.1.prefixes.insert("assert".to_string(), ("assert".to_string(), true, 1, true));
-	p.1.infixes.insert("=".to_string(), ("set".to_string(), true, 2, true));
-	p.1.infixes.insert(":".to_string(), ("type".to_string(), true, 3, true));
-	p.1.infixes.insert("->".to_string(), ("func".to_string(), true, 4, true));
-	p.1.prefixes.insert("if".to_string(), ("if_".to_string(), true, 5, true));
-	p.1.infixes.insert("else".to_string(), ("else_".to_string(), true, 5, true));
-	p.1.infixes.insert("?=".to_string(), ("try".to_string(), true, 9, false));
-	p.1.infixes.insert("==".to_string(), ("eq".to_string(), true, 9, false));
-	p.1.infixes.insert(">".to_string(), ("gt".to_string(), true, 9, false));
-	p.1.infixes.insert("<".to_string(), ("lt".to_string(), true, 9, false));
-	p.1.infixes.insert("::".to_string(), ("cons".to_string(), true, 10, true));
-	p.1.infixes.insert("+".to_string(), ("add".to_string(), true, 11, false));
-	p.1.infixes.insert("-".to_string(), ("sub".to_string(), true, 11, false));
-	p.1.infixes.insert("*".to_string(), ("mul".to_string(), true, 12, false));
-	p.1.infixes.insert("/".to_string(), ("div".to_string(), true, 12, false));
-	p.1.infixes.insert("%".to_string(), ("mod".to_string(), true, 12, false));
-	p.1.infixes.insert("^".to_string(), ("pow".to_string(), true, 13, false));
-	p.1.infixes.insert("@".to_string(), ("call".to_string(), true, 16, false));
-
-	let mut tokens: Vec<Token> =
-		p.0.into_iter()
-			.fold(
-				(false, vec![]),
-				|(mut in_s, mut acc): (bool, Vec<Token>), t| {
-					match &*t.0 {
-						"\"" => match in_s {
-							true => {
-								in_s = false;
-								acc.last_mut().unwrap().0.push('\"');
-							}
-							false => {
-								in_s = true;
-								acc.push(Token("\"".to_string(), t.1, t.2));
-							}
-						},
-						_ => match acc.last_mut() {
-							Some(s) if in_s => s.0.push_str(&t.0),
-							Some(s) if s.1 == t.1 && s.1 != TokenType::Opener && s.1 != TokenType::Closer => {
-								s.0.push_str(&t.0)
-							}
-							_ => acc.push(t),
-						},
-					}
-					(in_s, acc)
-				},
-			)
-			.1
-			.into_iter()
-			.filter(|t| t.1 != TokenType::Whitespace)
-			.collect();
-	tokens.insert(
-		0,
-		Token(
-			"{".to_string(),
-			TokenType::Opener,
-			None,
-		),
-	);
-	tokens.push(Token(
-		"}".to_string(),
-		TokenType::Closer,
-		None,
-	));
-
-	fn get_lhs(func: &str, p: Option<Position>, i: bool, v: Vec<S>) -> S {
-		let f = Token(func.to_string(), TokenType::Other, p.clone());
-		match i {
-			true => S(f, v),
-			false => v.into_iter().fold(S(f, vec![]), |acc, x| {
-				S(Token("call".to_string(), TokenType::Other, p.clone()), vec![acc, x])
-			}),
-		}
-	}
-
-	fn expr(c: &mut Context, rbp: u8) -> S {
-		let mut op = c.get().clone();
-		c.next();
-		let mut lhs = match c.2.prefixes.get(&op.0) {
-			Some((f, i, bp, false)) => get_lhs(f, op.2, *i, vec![expr(c, *bp)]),
-			Some((f, i, bp, true)) => get_lhs(f, op.2, *i, vec![expr(c, *bp), expr(c, *bp)]),
-			None if op.1 == TokenType::Opener => {
-				let mut v = vec![];
-				while c.get().1 != TokenType::Closer {
-					v.push(expr(c, 0));
-				}
-				c.next();
-				S(op, v)
-			}
-			None => S(op, vec![]),
-		};
-		while c.0 < c.1.len() {
-			op = c.get().clone();
-			match c.2.infixes.get(&op.0) {
-				Some((f, i, bp, true)) if bp > &rbp => {
-					c.next();
-					lhs = get_lhs(f, op.2, *i, vec![lhs, expr(c, bp - 1)]);
-				}
-				Some((f, i, bp, false)) if bp > &rbp => {
-					c.next();
-					lhs = get_lhs(f, op.2, *i, vec![lhs, expr(c, *bp)]);
-				}
-				_ => break,
-			}
-		}
-		lhs
-	}
-
-	expr(&mut Context(0, &tokens, &p.1), 0)
 }
 
 use Expr::*;
@@ -382,14 +271,8 @@ impl Debug for Node {
 }
 
 fn interpret(s: &S, c: &mut Env) -> Expr {
-	let get_arg = |c: &mut Env, i: usize| interpret(&s.1[i], &mut c.clone());
-	let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_arg(c, 0), get_arg(c, 1)) {
-		(Num(a), Num(b)) => Num(f(a, b)),
-		(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
-	};
-
 	match &*s.0 .0 {
-		"(" => get_arg(c, 0),
+		"(" => interpret(&s.1[0], &mut c.clone()),
 		"{" => {
 			let mut new_scope = c.clone();
 			s.1.iter().fold(Unit, |_, s| interpret(s, &mut new_scope))
@@ -397,108 +280,251 @@ fn interpret(s: &S, c: &mut Env) -> Expr {
 		"[" => s.1.iter().rev().fold(Empty, |acc, s| {
 			Cons(Box::new(interpret(s, &mut c.clone())), Box::new(acc))
 		}),
-		"assert" => {
-			if get_arg(c, 0) != get_arg(c, 1) {
-				panic!(
-					"{:?} != {:?} @ {:?}\n{:?}",
-					get_arg(c, 0),
-					get_arg(c, 1),
-					s.0 .2,
-					c
-				);
-			}
-			Unit
-		}
-		"print" => {
-			println!("{:?}", get_arg(c, 0));
-			Unit
-		}
-		"set" => {
-			let mut e = get_arg(c, 1);
-			if let Function(_, _, _, n) = &mut e {
-				*n = Some(s.1[0].0 .0.clone());
-			}
-			c.add_var(Frame(s.1[0].0 .0.clone(), e, s.0 .2.clone()));
-			Unit
-		}
-		"func" => Function(s.1[0].0.clone(), s.1[1].clone(), c.clone(), None),
-		"if_" => match interpret(&s.1[0], c) {
-			Bool(true) => Som(Box::new(get_arg(c, 1))),
-			Bool(false) => Non,
-			a => panic!("{:?} {:?}\n{:?}", a, s, c),
-		},
-		"else_" => match get_arg(c, 0) {
-			Som(a) => *a,
-			Non => get_arg(c, 1),
-			a => panic!("{:?} {:?}\n{:?}", a, s, c),
-		},
-		"try" => {
-			fn destruct(s: &S, a: Expr, c: &mut Env) -> bool {
-				match s.0 .0.as_str() {
-					"cons" => match a {
-						Cons(a, b) => destruct(&s.1[0], *a, c) && destruct(&s.1[1], *b, c),
-						_ => false,
-					},
-					"call" if s.1[0].0 .0 == "Some" => match a {
-						Som(a) => destruct(&s.1[1], *a, c),
-						_ => false,
-					},
-					"_" => true,
-					_ => {
-						c.push_var(Frame(s.0 .0.clone(), a, s.0 .2.clone()));
-						true
-					}
-				}
-			}
-			Bool(destruct(&s.1[0], get_arg(c, 1), c))
-		}
-		"eq" => Bool(get_arg(c, 0) == get_arg(c, 1)),
-		"gt" => match (get_arg(c, 0), get_arg(c, 1)) {
-			(Num(a), Num(b)) => Bool(a > b),
-			(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
-		},
-		"lt" => match (get_arg(c, 0), get_arg(c, 1)) {
-			(Num(a), Num(b)) => Bool(a < b),
-			(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
-		},
-		"cons" => Cons(Box::new(get_arg(c, 0)), Box::new(get_arg(c, 1))),
-		"add" => get_num_bin_op(|a, b| a + b),
-		"sub" => get_num_bin_op(|a, b| a - b),
-		"mul" => get_num_bin_op(|a, b| a * b),
-		"div" => get_num_bin_op(|a, b| a / b),
-		"mod" => get_num_bin_op(|a, b| a % b),
-		"pow" => get_num_bin_op(|a, b| a.powf(b)),
 		"false" => Bool(false),
 		"true" => Bool(true),
 		"None" => Non,
-		"call" if s.1[0].0 .0 == "Some" => Som(Box::new(get_arg(c, 1))),
-		"call" => match get_arg(c, 0) {
-			Function(x, y, mut z, n) => {
-				if let Some(n) = n {
+		"call" => {
+			if s.1.len() == 2 {
+				match s.1[0].0 .0.as_str() {
+					"Some" => return Som(Box::new(interpret(&s.1[1], &mut c.clone()))),
+					"print" => {
+						println!("{:?}", interpret(&s.1[1], &mut c.clone()));
+						return Unit;
+					}
+					_ => {}
+				}
+
+				if s.1[0].1.len() == 2 {
+					let get_a = |c: &mut Env| interpret(&s.1[0].1[1], &mut c.clone());
+					let get_b = |c: &mut Env| interpret(&s.1[1], &mut c.clone());
+
+					let mut get_num_bin_op = |f: fn(f64, f64) -> f64| match (get_a(c), get_b(c)) {
+						(Num(a), Num(b)) => Num(f(a, b)),
+						(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
+					};
+
+					match s.1[0].1[0].0 .0.as_str() {
+						"assert" => {
+							if get_a(c) != get_b(c) {
+								panic!(
+									"{:?} != {:?} @ {:?}\n{:?}",
+									get_a(c),
+									get_b(c),
+									s.0 .2,
+									c
+								);
+							}
+							return Unit;
+						}
+						"set" => {
+							let mut e = get_b(c);
+							if let Function(_, _, _, n) = &mut e {
+								*n = Some(s.1[0].1[1].0 .0.clone());
+							}
+							c.add_var(Frame(s.1[0].1[1].0 .0.clone(), e, s.0 .2.clone()));
+							return Unit;
+						}
+						"func" => {
+							return Function(
+								s.1[0].1[1].0.clone(),
+								s.1[1].clone(),
+								c.clone(),
+								None,
+							)
+						}
+						"if_" => match interpret(&s.1[0].1[1], c) {
+							Bool(true) => return Som(Box::new(get_b(c))),
+							Bool(false) => return Non,
+							a => panic!("{:?} {:?}\n{:?}", a, s, c),
+						},
+						"else_" => match get_a(c) {
+							Som(a) => return *a,
+							Non => return get_b(c),
+							a => panic!("{:?} {:?}\n{:?}", a, s, c),
+						},
+						"try" => {
+							fn destruct(s: &S, a: Expr, c: &mut Env) -> bool {
+								match s.0 .0.as_str() {
+									"call"
+										if s.1[0].1.len() > 0 && s.1[0].1[0].0 .0 == "cons" =>
+									{
+										match a {
+											Cons(a, b) => {
+												destruct(&s.1[0].1[1], *a, c)
+													&& destruct(&s.1[1], *b, c)
+											}
+											_ => false,
+										}
+									}
+									"call" if s.1[0].0 .0 == "Some" => match a {
+										Som(a) => destruct(&s.1[1], *a, c),
+										_ => false,
+									},
+									"_" => true,
+									_ => {
+										c.push_var(Frame(s.0 .0.clone(), a, s.0 .2.clone()));
+										true
+									}
+								}
+							}
+							return Bool(destruct(&s.1[0].1[1], get_b(c), c));
+						}
+						"eq" => return Bool(get_a(c) == get_b(c)),
+						"gt" => match (get_a(c), get_b(c)) {
+							(Num(a), Num(b)) => return Bool(a > b),
+							(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
+						},
+						"lt" => match (get_a(c), get_b(c)) {
+							(Num(a), Num(b)) => return Bool(a < b),
+							(a, b) => panic!("{:?} {:?} {:?}\n{:?}", a, b, s, c),
+						},
+						"cons" => return Cons(Box::new(get_a(c)), Box::new(get_b(c))),
+						"add" => return get_num_bin_op(|a, b| a + b),
+						"sub" => return get_num_bin_op(|a, b| a - b),
+						"mul" => return get_num_bin_op(|a, b| a * b),
+						"div" => return get_num_bin_op(|a, b| a / b),
+						"mod" => return get_num_bin_op(|a, b| a % b),
+						"pow" => return get_num_bin_op(|a, b| a.powf(b)),
+						_ => {}
+					}
+				}
+			}
+
+			match interpret(&s.1[0], &mut c.clone()) {
+				Function(x, y, mut z, n) => {
+					if let Some(n) = n {
+						z.push_var(Frame(
+							n.clone(),
+							Function(x.clone(), y.clone(), z.clone(), Some(n)),
+							s.0 .2.clone(),
+						));
+					}
 					z.push_var(Frame(
-						n.clone(),
-						Function(x.clone(), y.clone(), z.clone(), Some(n)),
+						x.0,
+						interpret(&s.1[1], &mut c.clone()),
 						s.0 .2.clone(),
 					));
+					interpret(&y, &mut z)
 				}
-				z.push_var(Frame(x.0, get_arg(c, 1), s.0 .2.clone()));
-				interpret(&y, &mut z)
+				o => panic!("{:?} {:?}\n{:?}", o, s, c),
 			}
-			o => panic!("{:?} {:?}\n{:?}", o, s, c),
-		},
+		}
 		o => match s.0 .1 {
 			TokenType::Numeric => Num(s.0 .0.parse().unwrap()),
 			TokenType::Strin => Str(s.0.clone()),
-			_ => c.get_var(o).unwrap_or_else(|| panic!("{:?} {:?}\n{:?}", o, s, c)),
+			_ => c.get_var(o).unwrap_or_else(|| panic!("unknown variable {}\n{:?}", o, c)),
 		},
 	}
 }
 
 fn run_program_from_file(f: &str) {
-	interpret(
-		&parse(preprocess(&read_to_string(f).unwrap(), f.to_string())),
-		&mut Env::new(),
-	);
+	let mut p = preprocess(&read_to_string(f).unwrap(), f.to_string());
+
+	p.1.prefixes.insert("print".to_string(), ("print".to_string(), 1, false));
+	p.1.prefixes.insert("assert".to_string(), ("assert".to_string(), 1, true));
+	p.1.infixes.insert("=".to_string(), ("set".to_string(), 2, true));
+	p.1.infixes.insert(":".to_string(), ("type".to_string(), 3, true));
+	p.1.infixes.insert("->".to_string(), ("func".to_string(), 4, true));
+	p.1.prefixes.insert("if".to_string(), ("if_".to_string(), 5, true));
+	p.1.infixes.insert("else".to_string(), ("else_".to_string(), 5, true));
+	p.1.infixes.insert("?=".to_string(), ("try".to_string(), 9, false));
+	p.1.infixes.insert("==".to_string(), ("eq".to_string(), 9, false));
+	p.1.infixes.insert(">".to_string(), ("gt".to_string(), 9, false));
+	p.1.infixes.insert("<".to_string(), ("lt".to_string(), 9, false));
+	p.1.infixes.insert("::".to_string(), ("cons".to_string(), 10, true));
+	p.1.infixes.insert("+".to_string(), ("add".to_string(), 11, false));
+	p.1.infixes.insert("-".to_string(), ("sub".to_string(), 11, false));
+	p.1.infixes.insert("*".to_string(), ("mul".to_string(), 12, false));
+	p.1.infixes.insert("/".to_string(), ("div".to_string(), 12, false));
+	p.1.infixes.insert("%".to_string(), ("mod".to_string(), 12, false));
+	p.1.infixes.insert("^".to_string(), ("pow".to_string(), 13, false));
+	p.1.infixes.insert("@".to_string(), ("call".to_string(), 16, false));
+
+	let mut tokens: Vec<Token> =
+		p.0.into_iter()
+			.fold(
+				(false, vec![]),
+				|(mut in_s, mut acc): (bool, Vec<Token>), t| {
+					match &*t.0 {
+						"\"" => match in_s {
+							true => {
+								in_s = false;
+								acc.last_mut().unwrap().0.push('\"');
+							}
+							false => {
+								in_s = true;
+								acc.push(Token("\"".to_string(), t.1, t.2));
+							}
+						},
+						_ => match acc.last_mut() {
+							Some(s) if in_s => s.0.push_str(&t.0),
+							Some(s)
+								if s.1 == t.1
+									&& s.1 != TokenType::Opener && s.1 != TokenType::Closer =>
+							{
+								s.0.push_str(&t.0)
+							}
+							_ => acc.push(t),
+						},
+					}
+					(in_s, acc)
+				},
+			)
+			.1
+			.into_iter()
+			.filter(|t| t.1 != TokenType::Whitespace)
+			.collect();
+	tokens.insert(0, Token("{".to_string(), TokenType::Opener, None));
+	tokens.push(Token("}".to_string(), TokenType::Closer, None));
+
+	fn get_lhs(func: &str, p: Option<Position>, v: Vec<S>) -> S {
+		let f = Token(func.to_string(), TokenType::Other, p.clone());
+		if func == "call" {
+			S(f, v)
+		} else {
+			v.into_iter().fold(S(f, vec![]), |acc, x| {
+				S(
+					Token("call".to_string(), TokenType::Other, p.clone()),
+					vec![acc, x],
+				)
+			})
+		}
+	}
+
+	fn expr(c: &mut Context, rbp: u8) -> S {
+		let mut op = c.get().clone();
+		c.next();
+		let mut lhs = match c.2.prefixes.get(&op.0) {
+			Some((f, bp, false)) => get_lhs(f, op.2, vec![expr(c, *bp)]),
+			Some((f, bp, true)) => get_lhs(f, op.2, vec![expr(c, *bp), expr(c, *bp)]),
+			None if op.1 == TokenType::Opener => {
+				let mut v = vec![];
+				while c.get().1 != TokenType::Closer {
+					v.push(expr(c, 0));
+				}
+				c.next();
+				S(op, v)
+			}
+			None => S(op, vec![]),
+		};
+		while c.0 < c.1.len() {
+			op = c.get().clone();
+			match c.2.infixes.get(&op.0) {
+				Some((f, bp, true)) if bp > &rbp => {
+					c.next();
+					lhs = get_lhs(f, op.2, vec![lhs, expr(c, bp - 1)]);
+				}
+				Some((f, bp, false)) if bp > &rbp => {
+					c.next();
+					lhs = get_lhs(f, op.2, vec![lhs, expr(c, *bp)]);
+				}
+				_ => break,
+			}
+		}
+		lhs
+	}
+
+	interpret(&expr(&mut Context(0, &tokens, &p.1), 0), &mut Env::new());
 }
 
 fn main() {
