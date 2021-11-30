@@ -1,0 +1,43 @@
+#op . dot 15 left
+dot = x -> f -> f@x
+
+#op || or  7 left
+#op && and 8 left
+or  = a -> b -> if a true else b
+and = a -> b -> if a b else false
+
+#op ! not 14 prefix
+not = b -> if b false else true
+
+#op != ne 9 left
+#op >= ge 9 left
+#op <= le 9 left
+ne = a -> b -> not@(a == b)
+ge = a -> b -> a > b || a == b
+le = a -> b -> a < b || a == b
+
+#op - neg 14 prefix
+neg = x -> 0 - x
+
+fract = x -> x % 1
+floor = x -> x - fract@x
+is_even = n -> n % 2 == 0
+is_odd  = n -> n % 2 == 1
+
+is_empty = l -> !(x::xs ?= l)
+
+foldl = f -> z -> l -> if x::xs ?= l foldl@f@(f@z@x)@xs else z
+foldr = f -> z -> l -> if x::xs ?= l f@x@(foldr@f@z@xs) else z
+
+sum    = foldl@(a -> b -> a + b)@0
+length = foldl@(a -> b -> a + 1)@0
+
+range = a -> b -> if a < b a::range@(a + 1)@b else []
+
+get = i -> l -> if x::xs ?= l (if i == 0 Some@x else xs.get@(i - 1)) else None
+
+map = f -> l -> foldr@(x -> z -> f@x::z)@[]@l
+filter = f -> l -> if x::xs ?= l {
+	rest = xs.filter@f
+	if f@x x::rest else rest
+} else []
