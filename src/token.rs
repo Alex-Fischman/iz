@@ -11,12 +11,7 @@ impl Token {
 	}
 }
 
-impl std::fmt::Debug for Token {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.string)
-	}
-}
-
+use TokenType::*;
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenType {
 	Alphabetic,
@@ -26,16 +21,6 @@ pub enum TokenType {
 	Closer,
 	Quote,
 	Other,
-}
-
-impl TokenType {
-	fn is_mergeable(&self) -> bool {
-		use TokenType::*;
-		match self {
-			Alphabetic | Whitespace | Numeric | Other => true,
-			Opener | Closer | Quote => false,
-		}
-	}
 }
 
 #[derive(Clone)]
@@ -52,52 +37,57 @@ impl std::fmt::Debug for FilePosition {
 }
 
 pub fn add_positions_to_characters(s: &str, file: String) -> Vec<Token> {
-	let mut row = 1;
-	let mut col = 1;
 	s.chars()
-		.map(|c| {
+		.scan(FilePosition { row: 1, col: 1, file }, |f, c| {
 			let out = Token {
 				string: c.to_string(),
 				t: match c {
-					c if c.is_alphabetic() || c == '_' => TokenType::Alphabetic,
-					c if c.is_whitespace() => TokenType::Whitespace,
-					c if c.is_numeric() => TokenType::Numeric,
-					'(' | '{' | '[' => TokenType::Opener,
-					')' | '}' | ']' => TokenType::Closer,
-					'\"' => TokenType::Quote,
-					_ => TokenType::Other,
+					c if c.is_alphabetic() || c == '_' => Alphabetic,
+					c if c.is_whitespace() => Whitespace,
+					c if c.is_numeric() => Numeric,
+					'(' | '{' | '[' => Opener,
+					')' | '}' | ']' => Closer,
+					'\"' => Quote,
+					_ => Other,
 				},
-				pos: Some(FilePosition { row, col, file: file.clone() }),
+				pos: Some(f.clone()),
 			};
 			if c == '\n' {
-				row += 1;
-				col = 1
+				f.row += 1;
+				f.col = 1
 			} else {
-				col += 1;
+				f.col += 1;
 			}
-			out
+			Some(out)
 		})
 		.collect()
 }
 
 pub fn merge_matching_token_types(v: Vec<Token>) -> Vec<Token> {
-	let mut out: Vec<Token> = vec![];
-	v.split(|t| t.t == TokenType::Quote)
-		.enumerate()
-		.flat_map(|(i, ts)| {
-			if i % 2 == 0 {
+	v.split(|t| t.t == Quote)
+		.scan(false, |i, ts| {
+			*i = !*i;
+			Some(if *i {
 				ts.to_vec()
 			} else {
 				vec![Token {
 					string: ts.iter().map(|t| t.string.clone()).collect(),
-					t: TokenType::Quote,
+					t: Quote,
 					pos: ts[0].pos.clone(),
 				}]
-			}
+			})
 		})
-		.for_each(|t| match out.last_mut() {
-			Some(s) if s.t == t.t && s.t.is_mergeable() => s.string.push_str(&t.string),
-			_ => out.push(t),
-		});
-	out.into_iter().filter(|t| t.t != TokenType::Whitespace).collect()
+		.flatten()
+		.fold(vec![], |mut out: Vec<Token>, t| {
+			match out.last_mut() {
+				Some(s) if s.t == t.t && s.t != Opener && s.t != Closer && s.t != Quote => {
+					s.string.push_str(&t.string)
+				}
+				_ => out.push(t),
+			}
+			out
+		})
+		.into_iter()
+		.filter(|t| t.t != Whitespace)
+		.collect()
 }

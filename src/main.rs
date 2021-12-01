@@ -1,16 +1,41 @@
-mod env;
 mod expr;
 mod parse;
 mod token;
 
+#[derive(Clone)]
+pub struct S {
+	pub value: token::Token,
+	pub children: Vec<S>,
+}
+
+impl std::fmt::Debug for S {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		if self.children.is_empty() {
+			write!(f, "{}", self.value.string)
+		} else {
+			write!(f, "({}", self.value.string)?;
+			for s in &self.children {
+				write!(f, " {:?}", s)?;
+			}
+			write!(f, ")")
+		}
+	}
+}
+
+use std::collections::HashMap;
+pub struct Ops {
+	pub prefixes: HashMap<String, (String, u8, bool)>,
+	pub infixes: HashMap<String, (String, u8, bool)>,
+}
+
 fn run_program_from_file(f: &str) {
-	let mut ops = parse::Ops::new();
+	let mut ops = Ops { prefixes: HashMap::new(), infixes: HashMap::new() };
 	let mut tokens = preprocess(
 		&std::fs::read_to_string(f).unwrap(),
 		f.to_string(),
 		&mut ops,
 	);
-	fn preprocess(s: &str, file: String, ops: &mut parse::Ops) -> Vec<token::Token> {
+	fn preprocess(s: &str, file: String, ops: &mut Ops) -> Vec<token::Token> {
 		token::add_positions_to_characters(s, file)
 			.split(|t| t.string == "#")
 			.enumerate()
@@ -82,10 +107,7 @@ fn run_program_from_file(f: &str) {
 	ops.infixes.insert("^".to_string(), ("pow".to_string(), 13, false));
 	ops.infixes.insert("@".to_string(), ("call".to_string(), 16, false));
 
-	expr::interpret(
-		&parse::parse(&mut parse::Context::new(&tokens), &ops, 0),
-		&mut env::Env::new(),
-	);
+	expr::interpret(&parse::parse(&tokens, &ops));
 }
 
 fn main() {
