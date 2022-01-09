@@ -2,26 +2,6 @@ mod expr;
 mod parse;
 mod token;
 
-#[derive(Clone)]
-pub struct S {
-	pub value: token::Token,
-	pub children: Vec<S>,
-}
-
-impl std::fmt::Debug for S {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		if self.children.is_empty() {
-			write!(f, "{}", self.value.string)
-		} else {
-			write!(f, "({}", self.value.string)?;
-			for s in &self.children {
-				write!(f, " {:?}", s)?;
-			}
-			write!(f, ")")
-		}
-	}
-}
-
 use std::collections::HashMap;
 pub struct Ops {
 	pub prefixes: HashMap<String, (String, u8, bool)>,
@@ -31,7 +11,7 @@ pub struct Ops {
 fn run_program_from_file(f: &str) {
 	let mut ops = Ops { prefixes: HashMap::new(), infixes: HashMap::new() };
 	let mut tokens = preprocess(
-		&std::fs::read_to_string(f).unwrap(),
+		&std::fs::read_to_string(f).expect(&format!("could not find {:?}", f)),
 		f.to_string(),
 		&mut ops,
 	);
@@ -99,24 +79,25 @@ fn run_program_from_file(f: &str) {
 	ops.infixes.insert("==".to_string(), ("eq".to_string(), 9, false));
 	ops.infixes.insert(">".to_string(), ("gt".to_string(), 9, false));
 	ops.infixes.insert("<".to_string(), ("lt".to_string(), 9, false));
-	ops.infixes.insert("::".to_string(), ("cons".to_string(), 10, true));
-	ops.infixes.insert("+".to_string(), ("add".to_string(), 11, false));
-	ops.infixes.insert("-".to_string(), ("sub".to_string(), 11, false));
-	ops.infixes.insert("*".to_string(), ("mul".to_string(), 12, false));
-	ops.infixes.insert("/".to_string(), ("div".to_string(), 12, false));
-	ops.infixes.insert("%".to_string(), ("mod".to_string(), 12, false));
-	ops.infixes.insert("^".to_string(), ("pow".to_string(), 13, false));
-	ops.infixes.insert("@".to_string(), ("call".to_string(), 16, false));
+	ops.infixes.insert("::".to_string(), ("cons".to_string(), 11, true));
+	ops.infixes.insert("+".to_string(), ("add".to_string(), 12, false));
+	ops.infixes.insert("-".to_string(), ("sub".to_string(), 12, false));
+	ops.infixes.insert("*".to_string(), ("mul".to_string(), 13, false));
+	ops.infixes.insert("/".to_string(), ("div".to_string(), 13, false));
+	ops.infixes.insert("%".to_string(), ("mod".to_string(), 13, false));
+	ops.infixes.insert("^".to_string(), ("pow".to_string(), 14, false));
+	ops.infixes.insert("@".to_string(), ("call".to_string(), 17, false));
 
 	expr::interpret(&parse::parse(&tokens, &ops));
 }
 
+#[cfg(debug_assertions)]
+fn main() {
+	run_program_from_file("examples/test.iz");
+}
+
+#[cfg(not(debug_assertions))]
 fn main() {
 	let args: Vec<String> = std::env::args().collect();
-	if args.len() > 1 {
-		run_program_from_file(&args[1]);
-	} else {
-		run_program_from_file("examples/test.iz");
-		run_program_from_file("examples/scratch.iz");
-	}
+	run_program_from_file(&args[1]);
 }

@@ -1,37 +1,13 @@
-#include "/home/alex/Programming/iz/examples/std.iz"
+#include "std.iz"
 
-# only works in release build
-# print range@1@1000.filter@(n -> n % 3 == 0 || n % 5 == 0).sum
+digit := n -> m -> (m / 10^n).floor % 10
+length := n -> if n < 10 1 else 1 + length@(n / 10)
+is_palidromic := n -> range@0@(floor@(length@n / 2))
+	.map@(i -> digit@i@n == digit@(length@n - i - 1)@n)
+	.all
+three_digit_numbers := range@900@1000
 
-fibonacci_ := l -> {
-	x::y::xs ?= l
-	if x + y > 4000000 l
-	else fibonacci_@((x + y)::l)
-}
-fibonacci := fibonacci_@[2 1]
-
-print fibonacci.filter@is_even.sum
-
-euler_three := n -> m -> {
-	if n % m == 0       euler_three@(n / m)@3
-	else if m < n^(1/2) euler_three@ n     @(m + 2)
-	else n
-}
-
-# only works in release build
-# print euler_three@600851475143@3
-
-# unused
-is_prime := n -> {
-	is_prime_ := m -> {
-		if m == 1 true
-		else if n % m == 0 false
-		else is_prime_@(m - 1)
-	}
-	is_prime_@(n - 1)
-}
-
-print range@0@10.map@(n -> {
-	z := []
-	[n n]
-})
+print three_digit_numbers
+	.map@(n -> three_digit_numbers.map@(m -> n * m).filter@is_palidromic)
+	.foldl@concat@[]
+	.foldl@max@0

@@ -1,4 +1,4 @@
-#op . dot 15 left
+#op . dot 16 left
 dot := x -> f -> f@x
 
 #op || or  7 left
@@ -6,7 +6,7 @@ dot := x -> f -> f@x
 or  := a -> b -> if a true else b
 and := a -> b -> if a b else false
 
-#op ! not 14 prefix
+#op ! not 15 prefix
 not := b -> if b false else true
 
 #op != ne 9 left
@@ -16,13 +16,16 @@ ne := a -> b -> not@(a == b)
 ge := a -> b -> a > b || a == b
 le := a -> b -> a < b || a == b
 
-#op - neg 14 prefix
+#op - neg 15 prefix
 neg := x -> 0 - x
 
 fract := x -> x % 1
 floor := x -> x - fract@x
+ceil  := x -> if fract@x == 0 (floor@x + 1) else x
 is_even := n -> n % 2 == 0
 is_odd  := n -> n % 2 == 1
+max := x -> y -> if x > y x else y
+min := x -> y -> if x < y x else y
 
 is_empty := l -> !(x::xs ?= l)
 
@@ -31,6 +34,9 @@ foldr := f -> z -> l -> if x::xs ?= l f@x@(foldr@f@z@xs) else z
 
 sum    := foldl@(a -> b -> a + b)@0
 length := foldl@(a -> b -> a + 1)@0
+
+all := foldl@(a -> b -> a && b)@true
+any := foldl@(a -> b -> a || b)@false
 
 range := a -> b -> if a < b a::range@(a + 1)@b else []
 
@@ -41,3 +47,8 @@ filter := f -> l -> if x::xs ?= l {
 	rest := xs.filter@f
 	if f@x x::rest else rest
 } else []
+
+#op ++ concat 10 left
+concat := a -> b -> if x::xs ?= a {
+	x :: concat@xs@b
+} else b

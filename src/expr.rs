@@ -1,5 +1,6 @@
 use crate::token::Token;
 use crate::token::TokenType;
+use crate::parse::S;
 
 use Expr::*;
 #[derive(Clone)]
@@ -12,7 +13,7 @@ enum Expr {
 	Cons(Box<Expr>, Box<Expr>),
 	Empty,
 	Str(Token),
-	Function(Token, crate::S, Env, Option<Token>),
+	Function(Token, S, Env, Option<Token>),
 }
 
 impl PartialEq for Expr {
@@ -135,7 +136,7 @@ impl std::fmt::Debug for Env {
 	}
 }
 
-fn destruct(s: &crate::S, a: Expr, c: &mut Env) -> bool {
+fn destruct(s: &S, a: Expr, c: &mut Env) -> bool {
 	match s.value.string.as_str() {
 		"call"
 			if s.children[0].children.len() > 0
@@ -161,8 +162,8 @@ fn destruct(s: &crate::S, a: Expr, c: &mut Env) -> bool {
 	}
 }
 
-pub fn interpret(s: &crate::S) {
-	fn interpret(s: &crate::S, c: &mut Env) -> Expr {
+pub fn interpret(s: &S) {
+	fn interpret(s: &S, c: &mut Env) -> Expr {
 		match s.value.t {
 			TokenType::Numeric => Num(s.value.string.parse().unwrap()),
 			TokenType::Quote => Str(s.value.clone()),
@@ -284,7 +285,7 @@ pub fn interpret(s: &crate::S) {
 						panic!("{:?}\n{:?}", s, c);
 					}
 				}
-				o => c.get_var(o).unwrap_or_else(|| panic!("unknown variable {}\n{:?}", o, c)),
+				o => c.get_var(o).unwrap_or_else(|| panic!("unknown variable {} at {:?}\n{:?}", o, s.value.pos, c)),
 			},
 		}
 	}
