@@ -111,6 +111,11 @@ fn run_program_from_file(f: &str) {
 }
 
 fn main() {
-	run_program_from_file("examples/test.iz");
-	run_program_from_file("examples/scratch.iz");
+	let args: Vec<String> = std::env::args().collect();
+	if args.len() > 1 {
+		run_program_from_file(&args[1]);
+	} else {
+		run_program_from_file("examples/test.iz");
+		run_program_from_file("examples/scratch.iz");
+	}
 }
