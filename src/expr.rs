@@ -100,10 +100,10 @@ impl Env {
 
 		if let Some(h) = &self.head {
 			if add_var(&mut h.borrow_mut(), lhs.clone(), rhs.clone()) {
-				self.push_var(lhs, rhs)
+				panic!("could not find var {:?} in\n{:?}", lhs.string, self);
 			}
 		} else {
-			self.push_var(lhs, rhs)
+			panic!("could not find var {:?} in\n{:?}", lhs.string, self);
 		}
 	}
 
@@ -228,14 +228,22 @@ pub fn interpret(s: &crate::S) {
 								Non => Some(interpret(&s.children[1], c)),
 								a => panic!("{:?} {:?}\n{:?}", a, s, c),
 							},
-							"set" => {
+							"declare" => {
+								let mut e = interpret(&s.children[1], c);
+								if let Function(_, _, _, n) = &mut e {
+									*n = Some(s.children[0].children[1].value.clone());
+								}
+								c.push_var(s.children[0].children[1].value.clone(), e);
+								Some(Unit)
+							},
+							"define" => {
 								let mut e = interpret(&s.children[1], c);
 								if let Function(_, _, _, n) = &mut e {
 									*n = Some(s.children[0].children[1].value.clone());
 								}
 								c.add_var(s.children[0].children[1].value.clone(), e);
 								Some(Unit)
-							}
+							},
 							"try" => Some(Bool(destruct(
 								&s.children[0].children[1],
 								interpret(&s.children[1], c),

@@ -89,7 +89,8 @@ fn run_program_from_file(f: &str) {
 
 	ops.prefixes.insert("print".to_string(), ("print".to_string(), 1, false));
 	ops.prefixes.insert("assert".to_string(), ("assert".to_string(), 1, true));
-	ops.infixes.insert("=".to_string(), ("set".to_string(), 2, true));
+	ops.infixes.insert("=".to_string(), ("define".to_string(), 2, true));
+	ops.infixes.insert(":=".to_string(), ("declare".to_string(), 2, true));
 	ops.infixes.insert(":".to_string(), ("type".to_string(), 3, true));
 	ops.infixes.insert("->".to_string(), ("func".to_string(), 4, true));
 	ops.prefixes.insert("if".to_string(), ("if_".to_string(), 5, true));
