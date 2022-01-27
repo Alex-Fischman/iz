@@ -1,4 +1,3 @@
 hard_tabs = true
-max_width = 97
-chain_width = 97
-struct_lit_width = 97
+max_width = 98
+use_small_heuristics = "Max"
