@@ -6,12 +6,6 @@ pub enum AST {
 	List(Token, Vec<AST>, Token),
 }
 
-impl AST {
-	fn call(a: AST, b: AST) -> AST {
-		AST::Call(Box::new(a), Box::new(b))
-	}
-}
-
 impl std::fmt::Debug for AST {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
@@ -39,6 +33,9 @@ struct Context<'a> {
 }
 
 pub fn parse(tokens: &[Token]) -> AST {
+	fn call(a: AST, b: AST) -> AST {
+		AST::Call(Box::new(a), Box::new(b))
+	}
 	fn parse(c: &mut Context, rbp: u8) -> AST {
 		fn get_op(c: &Context, s: &str) -> AST {
 			AST::Token(Token { string: s.to_string(), ..c.tokens[c.index - 1] })
@@ -47,9 +44,9 @@ pub fn parse(tokens: &[Token]) -> AST {
 		let t = c.tokens[c.index].clone();
 		c.index += 1;
 		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
-			AST::call(get_op(c, s), parse(c, bp))
+			call(get_op(c, s), parse(c, bp))
 		} else if let Some(&(s, bp)) = c.statements.get(&*t.string) {
-			AST::call(AST::call(get_op(c, s), parse(c, bp)), parse(c, bp))
+			call(call(get_op(c, s), parse(c, bp)), parse(c, bp))
 		} else if let Some(end) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
@@ -65,7 +62,7 @@ pub fn parse(tokens: &[Token]) -> AST {
 			match c.infixes.get(&*c.tokens[c.index].string) {
 				Some(&(s, bp, assoc)) if bp > rbp => {
 					c.index += 1;
-					lhs = AST::call(AST::call(get_op(c, s), lhs), parse(c, bp - assoc as u8));
+					lhs = call(call(get_op(c, s), lhs), parse(c, bp - assoc as u8));
 				}
 				_ => break,
 			}
