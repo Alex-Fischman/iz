@@ -8,7 +8,7 @@ fn main() {
 	let tokens = tokenizer::tokenize(file);
 	let ast = parser::parse(&tokens);
 	let typed = typer::annotate(&ast);
-	println!("{:?}", typed);
+	println!("{:#?}", typed);
 }
 
 #[derive(Clone, Copy)]
@@ -18,11 +18,11 @@ pub enum Assoc {
 }
 
 pub const BRACKETS: [(char, char); 3] = [('(', ')'), ('{', '}'), ('[', ']')];
-pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg_int", 4))];
-pub const STATEMENTS: [(&str, (&str, u8)); 1] = [("if", ("if_", 1))];
-pub const INFIXES: [(&str, (&str, u8, Assoc)); 4] = [
-	("+", ("add_int", 2, Assoc::Left)),
-	("-", ("sub_int", 2, Assoc::Left)),
-	("*", ("mul_int", 3, Assoc::Left)),
-	("else", ("else_", 1, Assoc::Right)),
+pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("_ineg_", 4))];
+pub const STATEMENTS: [(&str, (&str, u8)); 0] = [/*("if", ("if_", 1))*/];
+pub const INFIXES: [(&str, (&str, u8, Assoc)); 3] = [
+	("+", ("_iadd_", 2, Assoc::Left)),
+	("-", ("_isub_", 2, Assoc::Left)),
+	("*", ("_imul_", 3, Assoc::Left)),
+	// ("else", ("else_", 1, Assoc::Right)),
 ];

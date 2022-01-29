@@ -1,25 +1,10 @@
 use crate::tokenizer::Token;
 
+#[derive(Debug)]
 pub enum AST {
 	Token(Token),
 	Call(Box<AST>, Box<AST>),
 	List(Token, Vec<AST>, Token),
-}
-
-impl std::fmt::Debug for AST {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			AST::Token(t) => write!(f, "{:?}", t),
-			AST::Call(a, b) => write!(f, "<{:?} {:?}>", a, b),
-			AST::List(a, xs, b) => {
-				write!(
-					f,
-					"{a:?}{}{b:?}",
-					xs.iter().map(|x| format!("{x:?}")).collect::<Vec<String>>().join(" "),
-				)
-			}
-		}
-	}
 }
 
 use std::collections::HashMap;
