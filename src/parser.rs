@@ -47,7 +47,11 @@ pub fn parse(tokens: &[Token]) -> AST {
 			match c.infixes.get(&*c.tokens[c.index].string) {
 				Some(&(s, bp, assoc)) if bp > rbp => {
 					c.index += 1;
-					lhs = call(call(get_op(c, s), lhs), parse(c, bp - assoc as u8));
+					if s == "@" {
+						lhs = call(lhs, parse(c, bp - assoc as u8));
+					} else {
+						lhs = call(call(get_op(c, s), lhs), parse(c, bp - assoc as u8));
+					}
 				}
 				_ => break,
 			}
