@@ -18,20 +18,34 @@ impl TypedAST {
 	}
 }
 
-#[derive(Clone, PartialEq)]
-pub struct Type {
-	name: String,
-	size: usize,
-	args: Vec<Type>,
-}
-
-impl Type {
-	fn new(name: &str, size: usize, args: Vec<Type>) -> Type {
-		Type { name: name.to_string(), size, args }
-	}
+#[derive(Clone)]
+pub enum Type {
+	Data(Data),
+	Generic(Vec<Constraint>),
 }
 
 impl std::fmt::Debug for Type {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Type::Data(data) => write!(f, "{:?}", data),
+			Type::Generic(constraints) => write!(f, "{:?}", constraints),
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct Data {
+	name: String,
+	args: Vec<Type>,
+}
+
+impl Data {
+	fn new(name: &str, args: Vec<Type>) -> Data {
+		Data { name: name.to_string(), args }
+	}
+}
+
+impl std::fmt::Debug for Data {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match &*self.name {
 			"func" => write!(f, "{:?}->{:?}", self.args[0], self.args[1]),
@@ -50,36 +64,59 @@ impl std::fmt::Debug for Type {
 	}
 }
 
+#[derive(Clone)]
+pub enum Constraint {
+	Named(String),
+}
+
+impl std::fmt::Debug for Constraint {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Constraint::Named(s) => write!(f, "{}", s),
+		}
+	}
+}
+
 pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
-	let int = || Type::new("int", 64, vec![]);
-	let unit = || Type::new("unit", 0, vec![]);
-	let unary_func = |a, b| Type::new("func", 64, vec![a, b]);
-	let binary_func = |a, b, c| unary_func(a, unary_func(b, c));
+	let int = || Type::Data(Data::new("int", vec![]));
+	let boolean = || Type::Data(Data::new("bool", vec![]));
+	let unit = || Type::Data(Data::new("unit", vec![]));
+	let option = |a| Type::Data(Data::new("option", vec![a]));
+	let func = |a, b| Type::Data(Data::new("func", vec![a, b]));
+	let named = |s: &str| Type::Generic(vec![Constraint::Named(s.to_string())]);
 	match ast {
 		AST::Token(t) => Ok(TypedAST::Token(
 			t.clone(),
 			match &*t.string {
 				s if s.chars().next().unwrap().is_numeric() => int(),
-				"_iadd_" => binary_func(int(), int(), int()),
-				"_isub_" => binary_func(int(), int(), int()),
-				"_imul_" => binary_func(int(), int(), int()),
-				"_ineg_" => unary_func(int(), int()),
-				s => Err(format!("unknown token: {:?}", s))?,
+				"_iadd_" => func(int(), func(int(), int())),
+				"_isub_" => func(int(), func(int(), int())),
+				"_imul_" => func(int(), func(int(), int())),
+				"_ineg_" => func(int(), int()),
+				"true" => boolean(),
+				"false" => boolean(),
+				"_if_" => func(boolean(), func(named("a"), option(named("a")))),
+				_ => Err(format!("unknown token: {:?}", t))?,
 			},
 		)),
 		AST::Call(f, x) => {
 			let f = annotate(f)?;
 			let x = annotate(x)?;
-			if f.get_type().name == "func" {
-				let a = &f.get_type().args[0];
-				let b = f.get_type().args[1].clone();
-				if a == x.get_type() {
-					Ok(TypedAST::Call(Box::new(f), Box::new(x), b))
-				} else {
-					Err(format!("argument type mismatch: {:?} != {:?}", a, x.get_type()))
+			let f_type = f.get_type();
+			match f_type {
+				Type::Data(Data { name, args }) if name == "func" => {
+					if &args[0] == x.get_type() {
+						let y = args[1].clone();
+						Ok(TypedAST::Call(Box::new(f), Box::new(x), y))
+					} else {
+						Err(format!(
+							"argument type mismatch: {:?} != {:?}",
+							args[0],
+							x.get_type()
+						))
+					}
 				}
-			} else {
-				Err(format!("expected function type: {:?}", f))
+				_ => Err(format!("expected function type: {:?}", f)),
 			}
 		}
 		AST::List(a, xs, b) => {
@@ -97,14 +134,11 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 					None => unit(),
 				}),
 				"[" => match typed_xs.get(0).map(|x| x.get_type().clone()) {
-					Some(t) => {
-						if typed_xs.iter().all(|x| &t == x.get_type()) {
-							Ok(Type::new("array", typed_xs.len() * t.size, vec![t]))
-						} else {
-							Err(format!("array was not heterogenous"))
-						}
-					}
-					_ => todo!(),
+					Some(t) => Ok(Type::Data(Data::new(
+						"collection",
+						typed_xs.iter().map(TypedAST::get_type).map(Clone::clone).collect(),
+					))),
+					None => Ok(Type::Generic(vec![])),
 				},
 				s => Err(format!("unknown bracket: {:?}", s)),
 			}?;

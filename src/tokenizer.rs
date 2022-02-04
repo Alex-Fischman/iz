@@ -7,7 +7,7 @@ pub struct Token {
 
 impl std::fmt::Debug for Token {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "{:?} {}:{}", self.string, self.row, self.col)
+		write!(f, "{:?}@{}:{}", self.string, self.row, self.col)
 	}
 }
 

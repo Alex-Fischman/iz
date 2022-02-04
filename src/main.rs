@@ -7,8 +7,14 @@ fn main() {
 	let file = args.get(1).unwrap();
 	let tokens = tokenizer::tokenize(file);
 	let ast = parser::parse(&tokens);
-	let typed = typer::annotate(&ast);
-	println!("{:#?}", typed);
+	let typed = match typer::annotate(&ast) {
+		Ok(t) => t,
+		Err(e) => {
+			println!("{}", e);
+			return;
+		}
+	};
+	println!("{:?}", typed);
 }
 
 #[derive(Clone, Copy)]
@@ -19,7 +25,7 @@ pub enum Assoc {
 
 pub const BRACKETS: [(char, char); 3] = [('(', ')'), ('{', '}'), ('[', ']')];
 pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("_ineg_", 4))];
-pub const STATEMENTS: [(&str, (&str, u8)); 0] = [/*("if", ("if_", 1))*/];
+pub const STATEMENTS: [(&str, (&str, u8)); 1] = [("if", ("_if_", 1))];
 pub const INFIXES: [(&str, (&str, u8, Assoc)); 4] = [
 	("+", ("_iadd_", 2, Assoc::Left)),
 	("-", ("_isub_", 2, Assoc::Left)),
