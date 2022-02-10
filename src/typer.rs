@@ -18,20 +18,19 @@ impl TypedAST {
 	}
 }
 
-#[derive(Clone)]
-pub enum Type {
-	Data(String, Vec<Type>),
-	Generic(String),
+#[derive(Clone, PartialEq)]
+pub struct Type {
+	name: String,
+	args: Vec<Type>,
 }
 
 impl std::fmt::Debug for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			Type::Generic(s) => write!(f, "{}", s),
-			Type::Data(name, args) if name == "func" => write!(f, "{:?}->{:?}", args[0], args[1]),
-			Type::Data(name, args) => {
-				write!(f, "{}", name)?;
-				for arg in args {
+		match &*self.name {
+			"func" => write!(f, "{:?}->{:?}", self.args[0], self.args[1]),
+			_ => {
+				write!(f, "{}", self.name)?;
+				for arg in &self.args {
 					write!(f, "@{:?}", arg)?;
 				}
 				Ok(())
@@ -40,58 +39,26 @@ impl std::fmt::Debug for Type {
 	}
 }
 
-fn unify(a: &Type, b: &Type) -> Result<Type, String> {
-	fn unify(
-		a: &Type,
-		b: &Type,
-		a_vars: &mut std::collections::HashMap<String, Type>,
-		b_vars: &mut std::collections::HashMap<String, Type>,
-	) -> Result<Type, String> {
-		match (a, b, a_vars, b_vars) {
-			(Type::Data(a_name, a_args), Type::Data(b_name, b_args), a_vars, b_vars) => {
-				if a_name == b_name {
-					let mut args = vec![];
-					for (a, b) in a_args.iter().zip(b_args) {
-						args.push(unify(a, b, a_vars, b_vars)?);
-					}
-					Ok(Type::Data(a_name.clone(), args))
-				} else {
-					Err(format!("type mismatch: {:?} != {:?}", a, b))
-				}
-			}
-			(Type::Generic(alias), data @ Type::Data(_, _), map, alt_map)
-			| (data @ Type::Data(_, _), Type::Generic(alias), alt_map, map) => {
-				let entry = map.entry(alias.to_string());
-				entry.or_insert(data.clone());
-				Ok(unify(&map.get(alias).unwrap().clone(), data, map, alt_map)?)
-			}
-			(Type::Generic(_a_alias), Type::Generic(_b_alias), a_vars, b_vars) => {
-				todo!("\n{:#?}\n{:#?}\n{:#?}\n{:#?}", a, b, a_vars, b_vars)
-			}
-		}
-	}
-	unify(a, b, &mut std::collections::HashMap::new(), &mut std::collections::HashMap::new())
+fn unify(_a: &Type, _b: &Type, _known: &[Type]) -> Result<Type, String> {
+	todo!();
 }
 
 pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
-	let int = || Type::Data("int".to_string(), vec![]);
-	let boolean = || Type::Data("bool".to_string(), vec![]);
-	let unit = || Type::Data("unit".to_string(), vec![]);
-	let option = |a| Type::Data("option".to_string(), vec![a]);
-	let func = |a, b| Type::Data("func".to_string(), vec![a, b]);
-	let named = |s: &str| Type::Generic(s.to_string());
+	let named = |s: &str| Type { name: s.to_string(), args: vec![] };
+	let option = |a| Type { name: "option".to_string(), args: vec![a] };
+	let func = |a, b| Type { name: "func".to_string(), args: vec![a, b] };
 	match ast {
 		AST::Token(t) => Ok(TypedAST::Token(
 			t.clone(),
 			match &*t.string {
-				s if s.chars().next().unwrap().is_numeric() => int(),
-				"_iadd_" => func(int(), func(int(), int())),
-				"_isub_" => func(int(), func(int(), int())),
-				"_imul_" => func(int(), func(int(), int())),
-				"_ineg_" => func(int(), int()),
-				"true" => boolean(),
-				"false" => boolean(),
-				"_if_" => func(boolean(), func(named("a"), option(named("a")))),
+				s if s.chars().next().unwrap().is_numeric() => named("int"),
+				"_iadd_" => func(named("int"), func(named("int"), named("int"))),
+				"_isub_" => func(named("int"), func(named("int"), named("int"))),
+				"_imul_" => func(named("int"), func(named("int"), named("int"))),
+				"_ineg_" => func(named("int"), named("int")),
+				"true" => named("bool"),
+				"false" => named("bool"),
+				"_if_" => func(named("bool"), func(named("a"), option(named("a")))),
 				"_else_" => func(option(named("a")), func(named("a"), named("a"))),
 				_ => Err(format!("unknown token: {:?}", t))?,
 			},
@@ -100,13 +67,23 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 			let f = annotate(f)?;
 			let x = annotate(x)?;
 			let f_type = f.get_type();
-			match f_type {
-				Type::Data(name, args) if name == "func" => {
-					unify(&args[0], x.get_type())?;
-					let y = args[1].clone();
-					Ok(TypedAST::Call(Box::new(f), Box::new(x), y))
-				}
-				_ => Err(format!("expected function type: {:?}", f)),
+			if f_type.name == "func" {
+				unify(
+					&f_type.args[0],
+					x.get_type(),
+					&[
+						named("int"),
+						named("unit"),
+						named("bool"),
+						option(named("a")),
+						Type { name: "array".to_string(), args: vec![named("a")] },
+						func(named("a"), named("b")),
+					],
+				)?;
+				let y = f_type.args[1].clone();
+				Ok(TypedAST::Call(Box::new(f), Box::new(x), y))
+			} else {
+				Err(format!("expected function type: {:?}", f))
 			}
 		}
 		AST::List(a, xs, b) => {
@@ -121,12 +98,17 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 				},
 				"{" => Ok(match typed_xs.last() {
 					Some(x) => x.get_type().clone(),
-					None => unit(),
+					None => named("unit"),
 				}),
-				"[" => Ok(Type::Data(
-					"collection".to_string(),
-					typed_xs.iter().map(TypedAST::get_type).map(Clone::clone).collect(),
-				)),
+				"[" => {
+					let mut args = typed_xs.iter().map(TypedAST::get_type).map(Clone::clone);
+					let first = args.next().unwrap_or(named("a"));
+					if args.all(|t| t == first) {
+						Ok(Type { name: "array".to_string(), args: vec![first] })
+					} else {
+						Err(format!("not all array args were the same"))
+					}
+				}
 				s => Err(format!("unknown bracket: {:?}", s)),
 			}?;
 			Ok(TypedAST::List(a.clone(), typed_xs, b.clone(), t))
