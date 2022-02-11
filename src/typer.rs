@@ -30,7 +30,6 @@ impl TypedAST {
 pub struct Type {
 	name: String,
 	args: Vec<Type>,
-	is_known: bool,
 }
 
 impl std::fmt::Debug for Type {
@@ -48,57 +47,16 @@ impl std::fmt::Debug for Type {
 	}
 }
 
-use Constraint::*;
-#[derive(Debug)]
-enum Constraint<'a> {
-	EqualTo(Type),
-	SameAsVarInOther(&'a str),
-}
-
-use std::collections::HashMap;
-type VarMap<'a> = HashMap<&'a str, Vec<Constraint<'a>>>;
-
-fn unify(a: &Type, b: &Type) -> Result<Type, String> {
-	let mut a_vars = HashMap::new();
-	let mut b_vars = HashMap::new();
-	fn gather_constraints<'a>(
-		a: &'a Type,
-		b: &'a Type,
-		a_vars: &mut VarMap<'a>,
-		b_vars: &mut VarMap<'a>,
-	) -> bool {
-		match (a.is_known, b.is_known) {
-			(true, true) if a.name != b.name => return false,
-			(true, true) => {}
-			(false, true) => {
-				a_vars.entry(&a.name).or_insert(vec![]).push(EqualTo(b.clone()));
-			}
-			(true, false) => {
-				b_vars.entry(&b.name).or_insert(vec![]).push(EqualTo(a.clone()));
-			}
-			(false, false) => {
-				a_vars.entry(&a.name).or_insert(vec![]).push(SameAsVarInOther(&b.name));
-				b_vars.entry(&b.name).or_insert(vec![]).push(SameAsVarInOther(&a.name));
-			}
-		}
-		if a.args.len() != b.args.len() {
-			return false;
-		}
-		a.args.iter().zip(b.args.iter()).all(|(a, b)| gather_constraints(a, b, a_vars, b_vars))
-	}
-	if !gather_constraints(a, b, &mut a_vars, &mut b_vars) {
-		Err(format!("type {:?} is not the same as {:?}", a, b))
-	} else {
-		todo!("\na: {:?}\nb: {:?}\na_vars: {:?}\nb_vars: {:?}\n", a, b, a_vars, b_vars);
-	}
+fn unify(_a: &Type, _b: &Type) -> Result<Type, String> {
+	todo!();
 }
 
 pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
-	let var = |s: &str| Type { name: s.to_string(), args: vec![], is_known: false };
-	let data = |s: &str| Type { name: s.to_string(), args: vec![], is_known: true };
-	let option = |a| Type { name: "option".to_string(), args: vec![a], is_known: true };
-	let array = |a| Type { name: "array".to_string(), args: vec![a], is_known: true };
-	let func = |a, b| Type { name: "func".to_string(), args: vec![a, b], is_known: true };
+	let var = |s: &str| Type { name: s.to_string(), args: vec![]  };
+	let data = |s: &str| Type { name: s.to_string(), args: vec![] };
+	let option = |a| Type { name: "option".to_string(), args: vec![a] };
+	let array = |a| Type { name: "array".to_string(), args: vec![a] };
+	let func = |a, b| Type { name: "func".to_string(), args: vec![a, b] };
 	match ast {
 		AST::Token(t) => Ok(TypedAST::Token(
 			t.clone(),
@@ -119,7 +77,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 			let f = annotate(f)?;
 			let x = annotate(x)?;
 			let f_type = f.get_type();
-			if f_type.name == "func" && f_type.is_known {
+			if f_type.name == "func" {
 				unify(&f_type.args[0], x.get_type())?;
 				let y = f_type.args[1].clone();
 				Ok(TypedAST::Call(Box::new(f), Box::new(x), y))
