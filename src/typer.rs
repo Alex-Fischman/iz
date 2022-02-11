@@ -48,8 +48,49 @@ impl std::fmt::Debug for Type {
 	}
 }
 
-fn unify(_a: &Type, _b: &Type) -> Result<Type, String> {
-	todo!();
+use Constraint::*;
+#[derive(Debug)]
+enum Constraint<'a> {
+	EqualTo(Type),
+	SameAsVarInOther(&'a str),
+}
+
+use std::collections::HashMap;
+type VarMap<'a> = HashMap<&'a str, Vec<Constraint<'a>>>;
+
+fn unify(a: &Type, b: &Type) -> Result<Type, String> {
+	let mut a_vars = HashMap::new();
+	let mut b_vars = HashMap::new();
+	fn gather_constraints<'a>(
+		a: &'a Type,
+		b: &'a Type,
+		a_vars: &mut VarMap<'a>,
+		b_vars: &mut VarMap<'a>,
+	) -> bool {
+		match (a.is_known, b.is_known) {
+			(true, true) if a.name != b.name => return false,
+			(true, true) => {}
+			(false, true) => {
+				a_vars.entry(&a.name).or_insert(vec![]).push(EqualTo(b.clone()));
+			}
+			(true, false) => {
+				b_vars.entry(&b.name).or_insert(vec![]).push(EqualTo(a.clone()));
+			}
+			(false, false) => {
+				a_vars.entry(&a.name).or_insert(vec![]).push(SameAsVarInOther(&b.name));
+				b_vars.entry(&b.name).or_insert(vec![]).push(SameAsVarInOther(&a.name));
+			}
+		}
+		if a.args.len() != b.args.len() {
+			return false;
+		}
+		a.args.iter().zip(b.args.iter()).all(|(a, b)| gather_constraints(a, b, a_vars, b_vars))
+	}
+	if !gather_constraints(a, b, &mut a_vars, &mut b_vars) {
+		Err(format!("type {:?} is not the same as {:?}", a, b))
+	} else {
+		todo!("\na: {:?}\nb: {:?}\na_vars: {:?}\nb_vars: {:?}\n", a, b, a_vars, b_vars);
+	}
 }
 
 pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
