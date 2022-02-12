@@ -3,8 +3,8 @@ use crate::tokenizer::Token;
 #[derive(Debug)]
 pub enum AST {
 	Token(Token),
-	Call(Box<AST>, Box<AST>),
 	List(Token, Vec<AST>, Token),
+	Call(Box<AST>, Box<AST>),
 }
 
 use std::collections::HashMap;

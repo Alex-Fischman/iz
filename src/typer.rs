@@ -4,8 +4,8 @@ use crate::tokenizer::Token;
 #[derive(Debug)]
 pub enum TypedAST {
 	Token(Token, Type),
-	Call(Box<TypedAST>, Box<TypedAST>, Type),
 	List(Token, Vec<TypedAST>, Token, Type),
+	Call(Box<TypedAST>, Box<TypedAST>, Type),
 }
 
 impl TypedAST {
@@ -16,30 +16,22 @@ impl TypedAST {
 			TypedAST::List(_, _, _, t) => t,
 		}
 	}
-
-	fn set_type(&mut self, s: Type) {
-		match self {
-			TypedAST::Token(_, t) => *t = s,
-			TypedAST::Call(_, _, t) => *t = s,
-			TypedAST::List(_, _, _, t) => *t = s,
-		}
-	}
 }
 
 #[derive(Clone)]
-pub struct Type {
-	name: String,
-	args: Vec<Type>,
+pub enum Type {
+	Data(String, Vec<Type>),
+	Func(Box<Type>, Box<Type>),
 }
 
 impl std::fmt::Debug for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match &*self.name {
-			"func" => write!(f, "{:?}->{:?}", self.args[0], self.args[1]),
-			_ => {
-				write!(f, "{}", self.name)?;
-				for arg in &self.args {
-					write!(f, "@{:?}", arg)?;
+		match self {
+			Type::Func(x, y) => write!(f, "{:?}->{:?}", x, y),
+			Type::Data(s, v) => {
+				write!(f, "{}", s)?;
+				for x in v {
+					write!(f, "@{:?}", x)?;
 				}
 				Ok(())
 			}
@@ -48,11 +40,10 @@ impl std::fmt::Debug for Type {
 }
 
 pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
-	let var = |s: &str| Type { name: s.to_string(), args: vec![] };
-	let data = |s: &str| Type { name: s.to_string(), args: vec![] };
-	let option = |a| Type { name: "option".to_string(), args: vec![a] };
-	let array = |a| Type { name: "array".to_string(), args: a };
-	let func = |a, b| Type { name: "func".to_string(), args: vec![a, b] };
+	let data = |s: &str| Type::Data(s.to_string(), vec![]);
+	let func = |x, y| Type::Func(Box::new(x), Box::new(y));
+	let option = |a| Type::Data("option".to_string(), vec![a]);
+	let var = |s: &str| data(s); // todo
 	match ast {
 		AST::Token(t) => Ok(TypedAST::Token(
 			t.clone(),
@@ -69,34 +60,32 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 				_ => Err(format!("unknown token: {:?}", t))?,
 			},
 		)),
+		AST::List(a, xs, b) => match &*a.string {
+			"(" => match xs.get(0) {
+				Some(x) if xs.len() == 1 => Ok(annotate(x)?),
+				_ => Err(format!("paren should only contain one expression")),
+			},
+			"{" => {
+				let mut typed_xs = vec![];
+				for x in xs {
+					typed_xs.push(annotate(x)?);
+				}
+				let t = typed_xs.last().map(|x| x.get_type().clone()).unwrap_or(data("unit"));
+				Ok(TypedAST::List(a.clone(), typed_xs, b.clone(), t))
+			}
+			"[" => todo!("arrays"),
+			s => Err(format!("unknown bracket: {:?}", s)),
+		},
 		AST::Call(f, x) => {
 			let f = annotate(f)?;
-			let x = annotate(x)?;
-			let f_type = f.get_type();
-			if f_type.name != "func" {
-				Err(format!("expected function type but found {:?}", f))
-			} else {
-				todo!("type unification for function types");
+			match f.get_type().clone() {
+				Type::Func(_a, b) => {
+					let x = annotate(x)?;
+					// todo: unify a and x to find b
+					Ok(TypedAST::Call(Box::new(f), Box::new(x), *b.clone()))
+				}
+				t => Err(format!("expected function type but found {:?}", t)),
 			}
-		}
-		AST::List(a, xs, b) => {
-			let mut typed_xs = vec![];
-			for x in xs {
-				typed_xs.push(annotate(x)?);
-			}
-			let t = match &*a.string {
-				"(" => match typed_xs.len() {
-					1 => Ok(typed_xs[0].get_type().clone()),
-					_ => Err(format!("paren should only contain one expression")),
-				},
-				"{" => Ok(match typed_xs.last() {
-					Some(x) => x.get_type().clone(),
-					None => data("unit"),
-				}),
-				"[" => Ok(array(typed_xs.iter().map(|x| x.get_type().clone()).collect())),
-				s => Err(format!("unknown bracket: {:?}", s)),
-			}?;
-			Ok(TypedAST::List(a.clone(), typed_xs, b.clone(), t))
 		}
 	}
 }
