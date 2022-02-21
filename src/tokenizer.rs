@@ -16,10 +16,7 @@ pub fn tokenize(file: &str) -> Vec<Token> {
 		crate::BRACKETS.iter().any(|&(a, b)| a == c || b == c)
 	}
 	fn char_type(c: char) -> u8 {
-		((is_bracket(c) as u8) << 0)
-			+ ((c.is_whitespace() as u8) << 1)
-			+ ((c.is_numeric() as u8) << 2)
-			+ (((c.is_alphabetic() || c == '_') as u8) << 3)
+		((is_bracket(c) as u8) << 0) + ((c.is_whitespace() as u8) << 1)
 	}
 	let mut row = 1;
 	let mut col = 1;

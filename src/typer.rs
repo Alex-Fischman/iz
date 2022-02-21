@@ -18,7 +18,7 @@ impl TypedAST {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Type {
 	Data(String, Vec<Type>),
 	Func(Box<Type>, Box<Type>),
@@ -127,10 +127,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 		constraints: &mut Vec<Vec<Type>>,
 	) -> Result<(), String> {
 		Ok(match (a, b) {
-			(Type::Var(i), Type::Var(j)) => {
-				constraints[*i].push(Type::Var(*j));
-				constraints[*j].push(Type::Var(*i));
-			}
 			(Type::Var(i), t) | (t, Type::Var(i)) => constraints[*i].push(t.clone()),
 			(Type::Data(a, xs), Type::Data(b, ys)) => {
 				if a == b {
@@ -148,7 +144,13 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	}
 
 	// solve constraints
-	println!("{:?}", constraints);
+	{
+		println!("{:?}", constraints);
+		// split constraints into var-type and var-var
+		// find a type for as many vars as possible
+		// check that all var-var are satisfied
+		// check that all vars have a type
+	}
 
 	// update tree
 
