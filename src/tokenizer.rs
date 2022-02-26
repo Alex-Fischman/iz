@@ -11,17 +11,19 @@ impl std::fmt::Debug for Token {
 	}
 }
 
-pub fn tokenize(file: &str) -> Vec<Token> {
+pub fn tokenize(s: &str) -> Vec<Token> {
 	fn is_bracket(c: char) -> bool {
 		crate::BRACKETS.iter().any(|&(a, b)| a == c || b == c)
 	}
 	fn char_type(c: char) -> u8 {
-		((is_bracket(c) as u8) << 0) + ((c.is_whitespace() as u8) << 1)
+		(((c.is_alphabetic() || c.is_numeric() || c == '_') as u8) << 0)
+			+ ((c.is_whitespace() as u8) << 1)
+			+ ((is_bracket(c) as u8) << 2)
 	}
 	let mut row = 1;
 	let mut col = 1;
 	let mut tokens: Vec<Token> = vec![];
-	for c in std::fs::read_to_string(file).unwrap().chars() {
+	for c in s.chars() {
 		if tokens.is_empty()
 			|| is_bracket(c)
 			|| char_type(c) != char_type(tokens.last().unwrap().string.chars().next().unwrap())
