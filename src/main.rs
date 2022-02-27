@@ -45,17 +45,19 @@ fn tokenizer_test() {
 
 #[test]
 fn parser_test() {
-	fn check_ast(a: &parser::AST, b: &parser::AST) {
+	use parser::AST;
+
+	fn check_ast(a: &AST, b: &AST) {
 		match (a, b) {
-			(parser::AST::Token(a), parser::AST::Token(b)) => assert_eq!(a.string, b.string),
-			(parser::AST::List(a, xs, c), parser::AST::List(b, ys, d)) => {
+			(AST::Token(a), AST::Token(b)) => assert_eq!(a.string, b.string),
+			(AST::List(a, xs, c), AST::List(b, ys, d)) => {
 				assert_eq!(a.string, b.string);
 				assert_eq!(c.string, d.string);
 				for (x, y) in xs.iter().zip(ys) {
 					check_ast(x, y);
 				}
 			}
-			(parser::AST::Call(a, c), parser::AST::Call(b, d)) => {
+			(AST::Call(a, c), AST::Call(b, d)) => {
 				check_ast(a, b);
 				check_ast(c, d);
 			}
@@ -63,32 +65,58 @@ fn parser_test() {
 		}
 	}
 
-	fn token(s: &str) -> parser::AST {
-		parser::AST::Token(tokenizer::Token { string: s.to_string(), row: 0, col: 0 })
-	}
-
-	fn list(s: &str, xs: Vec<parser::AST>, t: &str) -> parser::AST {
-		parser::AST::List(
-			tokenizer::Token { string: s.to_string(), row: 0, col: 0 },
-			xs,
-			tokenizer::Token { string: t.to_string(), row: 0, col: 0 },
-		)
-	}
-
-	fn call(f: parser::AST, x: parser::AST) -> parser::AST {
-		parser::AST::Call(Box::new(f), Box::new(x))
-	}
+	let token = |s| AST::Token(tokenizer::Token::new(s));
+	let list = |s, xs, t| AST::List(tokenizer::Token::new(s), xs, tokenizer::Token::new(t));
 
 	let result = parser::parse(&tokenizer::tokenize("1+(2-5)*6"));
-	let target = call(
-		call(token("add"), token("1")),
-		call(
-			call(
+	let target = AST::call(
+		AST::call(token("add"), token("1")),
+		AST::call(
+			AST::call(
 				token("mul"),
-				list("(", vec![call(call(token("sub"), token("2")), token("5"))], ")"),
+				list("(", vec![AST::call(AST::call(token("sub"), token("2")), token("5"))], ")"),
 			),
 			token("6"),
 		),
 	);
 	check_ast(&result, &target);
+}
+
+#[test]
+fn typer_test() {
+	use typer::Type;
+	use typer::TypedAST;
+
+	fn check_types(a: &TypedAST, b: &TypedAST) {
+		assert_eq!(a.get_type(), b.get_type());
+		match (a, b) {
+			(TypedAST::Token(_, _), TypedAST::Token(_, _)) => {}
+			(TypedAST::List(_, xs, _, _), TypedAST::List(_, ys, _, _)) => {
+				xs.iter().zip(ys).for_each(|(x, y)| check_types(x, y))
+			}
+			(TypedAST::Call(a, c, _), TypedAST::Call(b, d, _)) => {
+				check_types(a, b);
+				check_types(c, d);
+			}
+			(a, b) => panic!("{:?} and {:?} have different types", a, b),
+		}
+	}
+
+	let unit = |t| TypedAST::Token(tokenizer::Token::new(""), t);
+
+	let result = typer::annotate(&parser::parse(&tokenizer::tokenize("1+1"))).unwrap();
+	let target = TypedAST::call(
+		TypedAST::call(
+			unit(Type::func(
+				Type::data("int"),
+				Type::func(Type::data("int"), Type::data("int")),
+			)),
+			unit(Type::data("int")),
+			Type::func(Type::data("int"), Type::data("int")),
+		),
+		unit(Type::data("int")),
+		Type::data("int"),
+	);
+
+	check_types(&result, &target)
 }

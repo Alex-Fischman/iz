@@ -5,6 +5,12 @@ pub struct Token {
 	pub col: usize,
 }
 
+impl Token {
+	pub fn new(s: &str) -> Token {
+		Token { string: s.to_string(), row: 0, col: 0 }
+	}
+}
+
 impl std::fmt::Debug for Token {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "{:?}@{}:{}", self.string, self.row, self.col)

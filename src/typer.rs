@@ -9,7 +9,11 @@ pub enum TypedAST {
 }
 
 impl TypedAST {
-	fn get_type(&self) -> &Type {
+	pub fn call(f: TypedAST, x: TypedAST, t: Type) -> TypedAST {
+		TypedAST::Call(Box::new(f), Box::new(x), t)
+	}
+
+	pub fn get_type(&self) -> &Type {
 		match self {
 			TypedAST::Token(_, t) => t,
 			TypedAST::Call(_, _, t) => t,
@@ -33,6 +37,16 @@ pub enum Type {
 	Var(usize),
 }
 
+impl Type {
+	pub fn data(s: &str) -> Type {
+		Type::Data(s.to_string(), vec![])
+	}
+
+	pub fn func(f: Type, x: Type) -> Type {
+		Type::Func(Box::new(f), Box::new(x))
+	}
+}
+
 impl std::fmt::Debug for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
@@ -53,8 +67,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	let mut num_vars = 0;
 	let mut tree = generate_tree(ast, &mut num_vars)?;
 	fn generate_tree(ast: &AST, num_vars: &mut usize) -> Result<TypedAST, String> {
-		let data = |s: &str| Type::Data(s.to_string(), vec![]);
-		let func = |x, y| Type::Func(Box::new(x), Box::new(y));
 		let option = |a| Type::Data("option".to_string(), vec![a]);
 		let cur_var = |num_vars: &mut usize| Type::Var(*num_vars - 1);
 		let mut new_var = || {
@@ -66,17 +78,30 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 			AST::Token(t) => Ok(TypedAST::Token(
 				t.clone(),
 				match &*t.string {
-					s if s.chars().next().unwrap().is_numeric() => data("int"),
-					"_iadd_" => func(data("int"), func(data("int"), data("int"))),
-					"_isub_" => func(data("int"), func(data("int"), data("int"))),
-					"_imul_" => func(data("int"), func(data("int"), data("int"))),
-					"_ineg_" => func(data("int"), data("int")),
-					"true" => data("bool"),
-					"false" => data("bool"),
-					"_if_" => func(data("bool"), func(new_var(), option(cur_var(num_vars)))),
-					"_else_" => {
-						func(option(new_var()), func(cur_var(num_vars), cur_var(num_vars)))
-					}
+					s if s.chars().next().unwrap().is_numeric() => Type::data("int"),
+					"add" => Type::func(
+						Type::data("int"),
+						Type::func(Type::data("int"), Type::data("int")),
+					),
+					"sub" => Type::func(
+						Type::data("int"),
+						Type::func(Type::data("int"), Type::data("int")),
+					),
+					"mul" => Type::func(
+						Type::data("int"),
+						Type::func(Type::data("int"), Type::data("int")),
+					),
+					"neg" => Type::func(Type::data("int"), Type::data("int")),
+					"true" => Type::data("bool"),
+					"false" => Type::data("bool"),
+					"_if_" => Type::func(
+						Type::data("bool"),
+						Type::func(new_var(), option(cur_var(num_vars))),
+					),
+					"_else_" => Type::func(
+						option(new_var()),
+						Type::func(cur_var(num_vars), cur_var(num_vars)),
+					),
 					_ => Err(format!("unknown token: {:?}", t))?,
 				},
 			)),
@@ -90,8 +115,10 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 					for x in xs {
 						typed_xs.push(generate_tree(x, num_vars)?);
 					}
-					let t =
-						typed_xs.last().map(|x| x.get_type().clone()).unwrap_or(data("unit"));
+					let t = typed_xs
+						.last()
+						.map(|x| x.get_type().clone())
+						.unwrap_or(Type::data("unit"));
 					Ok(TypedAST::List(a.clone(), typed_xs, b.clone(), t))
 				}
 				"[" => todo!("arrays"),
@@ -100,11 +127,9 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 			AST::Call(f, x) => {
 				let f = generate_tree(f, num_vars)?;
 				match f.get_type().clone() {
-					Type::Func(_a, b) => Ok(TypedAST::Call(
-						Box::new(f),
-						Box::new(generate_tree(x, num_vars)?),
-						*b.clone(),
-					)),
+					Type::Func(_a, b) => {
+						Ok(TypedAST::call(f, generate_tree(x, num_vars)?, *b.clone()))
+					}
 					t => Err(format!("expected function type but found {:?}", t)),
 				}
 			}

@@ -7,6 +7,12 @@ pub enum AST {
 	Call(Box<AST>, Box<AST>),
 }
 
+impl AST {
+	pub fn call(a: AST, b: AST) -> AST {
+		AST::Call(Box::new(a), Box::new(b))
+	}
+}
+
 use std::collections::HashMap;
 struct Context<'a> {
 	index: usize,
@@ -18,9 +24,6 @@ struct Context<'a> {
 }
 
 pub fn parse(tokens: &[Token]) -> AST {
-	fn call(a: AST, b: AST) -> AST {
-		AST::Call(Box::new(a), Box::new(b))
-	}
 	fn parse(c: &mut Context, rbp: u8) -> AST {
 		fn get_op(c: &Context, s: &str) -> AST {
 			AST::Token(Token { string: s.to_string(), ..c.tokens[c.index - 1] })
@@ -29,9 +32,9 @@ pub fn parse(tokens: &[Token]) -> AST {
 		let t = c.tokens[c.index].clone();
 		c.index += 1;
 		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
-			call(get_op(c, s), parse(c, bp))
+			AST::call(get_op(c, s), parse(c, bp))
 		} else if let Some(&(s, bp)) = c.statements.get(&*t.string) {
-			call(call(get_op(c, s), parse(c, bp)), parse(c, bp))
+			AST::call(AST::call(get_op(c, s), parse(c, bp)), parse(c, bp))
 		} else if let Some(end) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
@@ -48,9 +51,10 @@ pub fn parse(tokens: &[Token]) -> AST {
 				Some(&(s, bp, assoc)) if bp > rbp => {
 					c.index += 1;
 					if s == "@" {
-						lhs = call(lhs, parse(c, bp - assoc as u8));
+						lhs = AST::call(lhs, parse(c, bp - assoc as u8));
 					} else {
-						lhs = call(call(get_op(c, s), lhs), parse(c, bp - assoc as u8));
+						lhs =
+							AST::call(AST::call(get_op(c, s), lhs), parse(c, bp - assoc as u8));
 					}
 				}
 				_ => break,
