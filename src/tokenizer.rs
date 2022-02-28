@@ -5,12 +5,6 @@ pub struct Token {
 	pub col: usize,
 }
 
-impl Token {
-	pub fn new(s: &str) -> Token {
-		Token { string: s.to_string(), row: 0, col: 0 }
-	}
-}
-
 impl std::fmt::Debug for Token {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "{:?}@{}:{}", self.string, self.row, self.col)
@@ -29,8 +23,24 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 	let mut row = 1;
 	let mut col = 1;
 	let mut tokens: Vec<Token> = vec![];
+	let mut in_comment = false;
+	let mut in_string = false;
 	for c in s.chars() {
-		if tokens.is_empty()
+		if in_comment {
+			if c == '\n' {
+				in_comment = false;
+			}
+		} else if c == '#' {
+			in_comment = true;
+		} else if in_string {
+			tokens.last_mut().unwrap().string.push(c);
+			if c == '"' {
+				in_string = false;
+			}
+		} else if c == '"' {
+			in_string = true;
+			tokens.push(Token { string: c.to_string(), row, col });
+		} else if tokens.is_empty()
 			|| is_bracket(c)
 			|| char_type(c) != char_type(tokens.last().unwrap().string.chars().next().unwrap())
 		{

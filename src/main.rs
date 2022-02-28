@@ -36,8 +36,29 @@ pub const INFIXES: [(&str, (&str, u8, Assoc)); 5] = [
 
 #[test]
 fn tokenizer_test() {
-	let result = tokenizer::tokenize("a+5badjf-*sadfjas\n fajsdfl 9jkl- sadf");
-	let target = ["a", "+", "5badjf", "-*", "sadfjas", "fajsdfl", "9jkl", "-", "sadf"];
+	let result = tokenizer::tokenize(
+		"{
+		# Comment
+		\"test string
+		with whitespace\"
+		{ if true 1 else 0 } # another comment
+		asdfj134325jklfjs
+	}",
+	);
+	let target = [
+		"{",
+		"\"test string\n\t\twith whitespace\"",
+		"{",
+		"if",
+		"true",
+		"1",
+		"else",
+		"0",
+		"}",
+		"asdfj134325jklfjs",
+		"}",
+	];
+	assert_eq!(result.len(), target.len());
 	for (t, b) in result.iter().zip(target) {
 		assert_eq!(t.string, b);
 	}
@@ -65,18 +86,19 @@ fn parser_test() {
 		}
 	}
 
-	let token = |s| AST::Token(tokenizer::Token::new(s));
-	let list = |s, xs, t| AST::List(tokenizer::Token::new(s), xs, tokenizer::Token::new(t));
+	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
+	let unit = |s| AST::Token(token(s));
+	let list = |s, xs, t| AST::List(token(s), xs, token(t));
 
 	let result = parser::parse(&tokenizer::tokenize("1+(2-5)*6"));
 	let target = AST::call(
-		AST::call(token("add"), token("1")),
+		AST::call(unit("add"), unit("1")),
 		AST::call(
 			AST::call(
-				token("mul"),
-				list("(", vec![AST::call(AST::call(token("sub"), token("2")), token("5"))], ")"),
+				unit("mul"),
+				list("(", vec![AST::call(AST::call(unit("sub"), unit("2")), unit("5"))], ")"),
 			),
-			token("6"),
+			unit("6"),
 		),
 	);
 	check_ast(&result, &target);
@@ -102,7 +124,8 @@ fn typer_test() {
 		}
 	}
 
-	let unit = |t| TypedAST::Token(tokenizer::Token::new(""), t);
+	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
+	let unit = |t| TypedAST::Token(token(""), t);
 
 	let result = typer::annotate(&parser::parse(&tokenizer::tokenize("1+1"))).unwrap();
 	let target = TypedAST::call(

@@ -79,6 +79,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 				t.clone(),
 				match &*t.string {
 					s if s.chars().next().unwrap().is_numeric() => Type::data("int"),
+					s if s.chars().next().unwrap() == '"' => Type::data("str"),
 					"add" => Type::func(
 						Type::data("int"),
 						Type::func(Type::data("int"), Type::data("int")),
