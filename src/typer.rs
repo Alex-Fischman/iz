@@ -37,16 +37,6 @@ pub enum Type {
 	Var(usize),
 }
 
-impl Type {
-	pub fn data(s: &str) -> Type {
-		Type::Data(s.to_string(), vec![])
-	}
-
-	pub fn func(f: Type, x: Type) -> Type {
-		Type::Func(Box::new(f), Box::new(x))
-	}
-}
-
 impl std::fmt::Debug for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
@@ -63,73 +53,76 @@ impl std::fmt::Debug for Type {
 	}
 }
 
-pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
-	let mut num_vars = 0;
-	let mut tree = generate_tree(ast, &mut num_vars)?;
-	fn generate_tree(ast: &AST, num_vars: &mut usize) -> Result<TypedAST, String> {
-		let option = |a| Type::Data("option".to_string(), vec![a]);
-		let cur_var = |num_vars: &mut usize| Type::Var(*num_vars - 1);
-		let mut new_var = || {
-			*num_vars += 1;
-			cur_var(num_vars)
-		};
+pub fn int() -> Type {
+	Type::Data("int".to_string(), vec![])
+}
 
+pub fn boolean() -> Type {
+	Type::Data("bool".to_string(), vec![])
+}
+
+pub fn string() -> Type {
+	Type::Data("string".to_string(), vec![])
+}
+
+pub fn option(t: Type) -> Type {
+	Type::Data("option".to_string(), vec![t])
+}
+
+pub fn func(f: Type, x: Type) -> Type {
+	Type::Func(Box::new(f), Box::new(x))
+}
+
+pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
+	let mut vars = 0;
+	let mut tree = generate_tree(ast, &mut vars)?;
+	fn generate_tree(ast: &AST, vars: &mut usize) -> Result<TypedAST, String> {
+		let cur_var = |vars: &mut usize| Type::Var(*vars - 1);
+		let mut new_var = || {
+			*vars += 1;
+			cur_var(vars)
+		};
 		match ast {
 			AST::Token(t) => Ok(TypedAST::Token(
 				t.clone(),
 				match &*t.string {
-					s if s.chars().next().unwrap().is_numeric() => Type::data("int"),
-					s if s.chars().next().unwrap() == '"' => Type::data("str"),
-					"add" => Type::func(
-						Type::data("int"),
-						Type::func(Type::data("int"), Type::data("int")),
-					),
-					"sub" => Type::func(
-						Type::data("int"),
-						Type::func(Type::data("int"), Type::data("int")),
-					),
-					"mul" => Type::func(
-						Type::data("int"),
-						Type::func(Type::data("int"), Type::data("int")),
-					),
-					"neg" => Type::func(Type::data("int"), Type::data("int")),
-					"true" => Type::data("bool"),
-					"false" => Type::data("bool"),
-					"_if_" => Type::func(
-						Type::data("bool"),
-						Type::func(new_var(), option(cur_var(num_vars))),
-					),
-					"_else_" => Type::func(
-						option(new_var()),
-						Type::func(cur_var(num_vars), cur_var(num_vars)),
-					),
-					_ => Err(format!("unknown token: {:?}", t))?,
+					s if s.chars().next().unwrap().is_numeric() => int(),
+					s if s.chars().next().unwrap() == '"' => string(),
+					"add" => func(int(), func(int(), int())),
+					"sub" => func(int(), func(int(), int())),
+					"mul" => func(int(), func(int(), int())),
+					"neg" => func(int(), int()),
+					"true" => boolean(),
+					"false" => boolean(),
+					"_if_" => func(boolean(), func(new_var(), option(cur_var(vars)))),
+					"_else_" => func(option(new_var()), func(cur_var(vars), cur_var(vars))),
+					_ => new_var(),
 				},
 			)),
 			AST::List(a, xs, b) => match &*a.string {
 				"(" => match xs.get(0) {
-					Some(x) if xs.len() == 1 => Ok(generate_tree(x, num_vars)?),
+					Some(x) if xs.len() == 1 => Ok(generate_tree(x, vars)?),
 					_ => Err(format!("paren should only contain one expression")),
 				},
 				"{" => {
 					let mut typed_xs = vec![];
 					for x in xs {
-						typed_xs.push(generate_tree(x, num_vars)?);
+						typed_xs.push(generate_tree(x, vars)?);
 					}
 					let t = typed_xs
 						.last()
 						.map(|x| x.get_type().clone())
-						.unwrap_or(Type::data("unit"));
+						.unwrap_or(Type::Data("unit".to_string(), vec![]));
 					Ok(TypedAST::List(a.clone(), typed_xs, b.clone(), t))
 				}
 				"[" => todo!("arrays"),
 				s => Err(format!("unknown bracket: {:?}", s)),
 			},
 			AST::Call(f, x) => {
-				let f = generate_tree(f, num_vars)?;
+				let f = generate_tree(f, vars)?;
 				match f.get_type().clone() {
 					Type::Func(_a, b) => {
-						Ok(TypedAST::call(f, generate_tree(x, num_vars)?, *b.clone()))
+						Ok(TypedAST::call(f, generate_tree(x, vars)?, *b.clone()))
 					}
 					t => Err(format!("expected function type but found {:?}", t)),
 				}
@@ -137,7 +130,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 		}
 	}
 
-	let mut constraints = vec![vec![]; num_vars];
+	let mut constraints = vec![vec![]; vars];
 	find_constraints(&tree, &mut constraints)?;
 	fn find_constraints(ast: &TypedAST, constraints: &mut Vec<Vec<Type>>) -> Result<(), String> {
 		Ok(match ast {
@@ -179,18 +172,18 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 		})
 	}
 
-	let mut vars: Vec<Option<Type>> = vec![None; num_vars];
+	let mut solved_vars: Vec<Option<Type>> = vec![None; vars];
 	let mut unsolved: Vec<(usize, usize)> = vec![];
 	for (i, var) in constraints.into_iter().enumerate() {
 		for constraint in var {
 			if let Type::Var(j) = constraint {
 				unsolved.push((i, j));
-			} else if let Some(t) = &vars[i] {
+			} else if let Some(t) = &solved_vars[i] {
 				if t != &constraint {
 					Err(format!("type error:\n{:?}\n{:?}\n", t, constraint))?;
 				}
 			} else {
-				vars[i] = Some(constraint);
+				solved_vars[i] = Some(constraint);
 			}
 		}
 	}
@@ -201,11 +194,11 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 
 		let mut still_unsolved = vec![];
 		for (i, j) in unsolved {
-			match (&vars[i], &vars[j]) {
+			match (&solved_vars[i], &solved_vars[j]) {
 				(Some(a), Some(b)) if a != b => Err(format!("type error:\n{:?}\n{:?}\n", a, b))?,
 				(Some(_), Some(_)) => (),
-				(None, Some(b)) => vars[i] = Some(b.clone()),
-				(Some(a), None) => vars[j] = Some(a.clone()),
+				(None, Some(b)) => solved_vars[i] = Some(b.clone()),
+				(Some(a), None) => solved_vars[j] = Some(a.clone()),
 				(None, None) => still_unsolved.push((i, j)),
 			}
 		}
@@ -216,7 +209,11 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 		Err(format!("unresolved type constraints"))?
 	}
 
-	let vars: Vec<Type> = vars.into_iter().map(Option::unwrap).collect();
+	if solved_vars.iter().any(Option::is_none) {
+		Err(format!("unsolved type variables"))?
+	}
+
+	let vars: Vec<Type> = solved_vars.into_iter().map(Option::unwrap).collect();
 
 	update_tree(&mut tree, &vars);
 

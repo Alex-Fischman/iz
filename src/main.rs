@@ -39,25 +39,12 @@ fn tokenizer_test() {
 	let result = tokenizer::tokenize(
 		"{
 		# Comment
-		\"test string
-		with whitespace\"
-		{ if true 1 else 0 } # another comment
-		asdfj134325jklfjs
+		\"test string\"
+		if true 1 else 0 # another comment
+		a1s2d
 	}",
 	);
-	let target = [
-		"{",
-		"\"test string\n\t\twith whitespace\"",
-		"{",
-		"if",
-		"true",
-		"1",
-		"else",
-		"0",
-		"}",
-		"asdfj134325jklfjs",
-		"}",
-	];
+	let target = ["{", "\"test string\"", "if", "true", "1", "else", "0", "a1s2d", "}"];
 	assert_eq!(result.len(), target.len());
 	for (t, b) in result.iter().zip(target) {
 		assert_eq!(t.string, b);
@@ -106,8 +93,7 @@ fn parser_test() {
 
 #[test]
 fn typer_test() {
-	use typer::Type;
-	use typer::TypedAST;
+	use typer::*;
 
 	fn check_types(a: &TypedAST, b: &TypedAST) {
 		assert_eq!(a.get_type(), b.get_type());
@@ -127,18 +113,24 @@ fn typer_test() {
 	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
 	let unit = |t| TypedAST::Token(token(""), t);
 
-	let result = typer::annotate(&parser::parse(&tokenizer::tokenize("1+1"))).unwrap();
+	let string = "if true 2 else 4";
+	let result = typer::annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap();
 	let target = TypedAST::call(
 		TypedAST::call(
-			unit(Type::func(
-				Type::data("int"),
-				Type::func(Type::data("int"), Type::data("int")),
-			)),
-			unit(Type::data("int")),
-			Type::func(Type::data("int"), Type::data("int")),
+			unit(func(option(int()), func(int(), int()))),
+			TypedAST::call(
+				TypedAST::call(
+					unit(func(boolean(), func(int(), option(int())))),
+					unit(boolean()),
+					func(int(), option(int())),
+				),
+				unit(int()),
+				option(int()),
+			),
+			func(int(), int()),
 		),
-		unit(Type::data("int")),
-		Type::data("int"),
+		unit(int()),
+		int(),
 	);
 
 	check_types(&result, &target)
