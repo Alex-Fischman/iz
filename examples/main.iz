@@ -1,7 +1,1 @@
-{
-	# Comment
-	"test string
-	with whitespace"
-	{ if true 1 else 0 } # another comment
-	1 + 2
-}
+54 + 5

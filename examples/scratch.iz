@@ -1,0 +1,21 @@
+fib := n -> if (n == 0) 1 else fib@(n-1) + n
+
+# Data : CompTimeInt -> Type
+Int : Type = Data@8
+
+Bool := Data@1
+true  : Bool = 1
+false : Bool = 0
+# if   : Bool     -> a -> Option@a
+# else : Option@a -> a -> a
+or  := a -> b -> if a true else b
+and := a -> b -> if a b    else false
+
+# Struct : [Type] -> Type
+Token := Struct@[String Int Int]
+# Enum : [Type] -> Type
+AST := Enum@[
+	Token
+	Struct@[Token List@AST Token]
+	Struct@[AST AST]
+]

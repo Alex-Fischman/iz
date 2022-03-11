@@ -1,3 +1,4 @@
+mod compiler;
 mod parser;
 mod tokenizer;
 mod typer;
@@ -14,7 +15,16 @@ fn main() {
 			return;
 		}
 	};
-	println!("{:#?}", typed);
+	let program = match compiler::compile(&typed) {
+		Ok(t) => t,
+		Err(e) => {
+			println!("{}", e);
+			return;
+		}
+	};
+	let (registers, stack) = compiler::interpret(&program);
+	println!("{:?}", registers);
+	println!("{:#?}", stack);
 }
 
 #[derive(Clone, Copy)]
@@ -37,12 +47,7 @@ pub const INFIXES: [(&str, (&str, u8, Assoc)); 5] = [
 #[test]
 fn tokenizer_test() {
 	let result = tokenizer::tokenize(
-		"{
-		# Comment
-		\"test string\"
-		if true 1 else 0 # another comment
-		a1s2d
-	}",
+		"# Comment\n\"test string\"\nif true 1 else 0 # another comment\na1s2d",
 	);
 	let target = ["{", "\"test string\"", "if", "true", "1", "else", "0", "a1s2d", "}"];
 	assert_eq!(result.len(), target.len());
@@ -78,16 +83,25 @@ fn parser_test() {
 	let list = |s, xs, t| AST::List(token(s), xs, token(t));
 
 	let result = parser::parse(&tokenizer::tokenize("1+(2-5)*6"));
-	let target = AST::call(
-		AST::call(unit("add"), unit("1")),
-		AST::call(
+	let target = list(
+		"{",
+		vec![AST::call(
+			AST::call(unit("add"), unit("1")),
 			AST::call(
-				unit("mul"),
-				list("(", vec![AST::call(AST::call(unit("sub"), unit("2")), unit("5"))], ")"),
+				AST::call(
+					unit("mul"),
+					list(
+						"(",
+						vec![AST::call(AST::call(unit("sub"), unit("2")), unit("5"))],
+						")",
+					),
+				),
+				unit("6"),
 			),
-			unit("6"),
-		),
+		)],
+		"}",
 	);
+
 	check_ast(&result, &target);
 }
 
@@ -114,24 +128,49 @@ fn typer_test() {
 	let unit = |t| TypedAST::Token(token(""), t);
 
 	let string = "if true 2 else 4";
-	let result = typer::annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap();
-	let target = TypedAST::call(
-		TypedAST::call(
-			unit(func(option(int()), func(int(), int()))),
+	let result = annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap();
+	let target = TypedAST::List(
+		token(""),
+		vec![TypedAST::call(
 			TypedAST::call(
+				unit(func(option(int()), func(int(), int()))),
 				TypedAST::call(
-					unit(func(boolean(), func(int(), option(int())))),
-					unit(boolean()),
-					func(int(), option(int())),
+					TypedAST::call(
+						unit(func(boolean(), func(int(), option(int())))),
+						unit(boolean()),
+						func(int(), option(int())),
+					),
+					unit(int()),
+					option(int()),
 				),
-				unit(int()),
-				option(int()),
+				func(int(), int()),
 			),
-			func(int(), int()),
-		),
-		unit(int()),
+			unit(int()),
+			int(),
+		)],
+		token(""),
 		int(),
 	);
 
 	check_types(&result, &target)
+}
+
+#[test]
+fn interpreter_test() {
+	use compiler::IR::*;
+	let program = [
+		Set(5, 0),
+		Set(7, 1),
+		Add(0, 1, 2),
+		Push(2),
+		Pop(3),
+		Set(2, 4),
+		Beq(2, 3, 4),
+		Set(1, 5),
+		Beq(2, 3, 4),
+		Set(2, 5),
+	];
+	let (registers, stack) = compiler::interpret(&program);
+	assert!(stack.is_empty());
+	assert_eq!(registers[..6], [5, 7, 12, 12, 2, 2]);
 }

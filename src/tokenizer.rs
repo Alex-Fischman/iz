@@ -25,6 +25,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 	let mut tokens: Vec<Token> = vec![];
 	let mut in_comment = false;
 	let mut in_string = false;
+	tokens.push(Token { string: "{".to_string(), row: 0, col: 0 });
 	for c in s.chars() {
 		if in_comment {
 			if c == '\n' {
@@ -55,5 +56,6 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 			col += 1;
 		}
 	}
+	tokens.push(Token { string: "}".to_string(), row: 0, col: 0 });
 	tokens.into_iter().filter(|t| !t.string.chars().next().unwrap().is_whitespace()).collect()
 }
