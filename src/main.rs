@@ -22,8 +22,7 @@ fn main() {
 			return;
 		}
 	};
-	let (registers, stack) = compiler::interpret(&program);
-	println!("{:?}", registers);
+	let stack = compiler::interpret(&program);
 	println!("{:#?}", stack);
 }
 
@@ -34,12 +33,13 @@ pub enum Assoc {
 }
 
 pub const BRACKETS: [(char, char); 3] = [('(', ')'), ('{', '}'), ('[', ']')];
-pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 4))];
+pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 5))];
 pub const STATEMENTS: [(&str, (&str, u8)); 1] = [("if", ("_if_", 1))];
-pub const INFIXES: [(&str, (&str, u8, Assoc)); 5] = [
-	("+", ("add", 2, Assoc::Left)),
-	("-", ("sub", 2, Assoc::Left)),
-	("*", ("mul", 3, Assoc::Left)),
+pub const INFIXES: [(&str, (&str, u8, Assoc)); 6] = [
+	("==", ("eql", 2, Assoc::Left)),
+	("+", ("add", 3, Assoc::Left)),
+	("-", ("sub", 3, Assoc::Left)),
+	("*", ("mul", 4, Assoc::Left)),
 	("@", ("@", 10, Assoc::Left)),
 	("else", ("_else_", 1, Assoc::Right)),
 ];
@@ -156,21 +156,13 @@ fn typer_test() {
 }
 
 #[test]
-fn interpreter_test() {
-	use compiler::IR::*;
-	let program = [
-		Set(5, 0),
-		Set(7, 1),
-		Add(0, 1, 2),
-		Push(2),
-		Pop(3),
-		Set(2, 4),
-		Beq(2, 3, 4),
-		Set(1, 5),
-		Beq(2, 3, 4),
-		Set(2, 5),
-	];
-	let (registers, stack) = compiler::interpret(&program);
-	assert!(stack.is_empty());
-	assert_eq!(registers[..6], [5, 7, 12, 12, 2, 2]);
+fn compiler_test() {
+	let string = "-7 + 8 - 3 == -2";
+	let result = compiler::interpret(
+		&compiler::compile(
+			&typer::annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap(),
+		)
+		.unwrap(),
+	);
+	assert_eq!(result, [1]);
 }
