@@ -2,7 +2,7 @@ use crate::typer::*;
 
 #[derive(Debug)]
 pub enum IR {
-	Push(i64),
+	Push(Frame),
 	Add,
 	Sub,
 	Mul,
@@ -14,17 +14,17 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
 	match ast {
 		TypedAST::Token(token, t) => match t {
 			Type::Data(s, xs) if s == "int" && xs.is_empty() => {
-				out.push(IR::Push(token.string.parse().unwrap()))
+				out.push(IR::Push(Int(token.string.parse().unwrap())))
 			}
 			Type::Data(s, xs) if s == "bool" && xs.is_empty() => match &*token.string {
-				"true" => out.push(IR::Push(1)),
-				"false" => out.push(IR::Push(0)),
+				"true" => out.push(IR::Push(Int(1))),
+				"false" => out.push(IR::Push(Int(0))),
 				s => Err(format!("unknown bool value: {:?}", s))?,
 			},
 			data @ Type::Data(_, _) => Err(format!("unknown data type: {:?}", data))?,
 			t @ Type::Func(_, _) => match &*token.string {
 				"add" if t == &func(int(), func(int(), int())) => out.push(IR::Add),
-				"neg" if t == &func(int(), int()) => out.extend([IR::Push(0), IR::Sub]),
+				"neg" if t == &func(int(), int()) => out.extend([IR::Push(Int(0)), IR::Sub]),
 				"sub" if t == &func(int(), func(int(), int())) => out.push(IR::Sub),
 				"mul" if t == &func(int(), func(int(), int())) => out.push(IR::Mul),
 				"eql" if t == &func(int(), func(int(), boolean())) => out.push(IR::Eql),
@@ -52,24 +52,28 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
 	Ok(out)
 }
 
-pub fn interpret(program: &[IR]) -> Vec<i64> {
-	let mut stack: Vec<i64> = vec![];
+use Frame::*;
+#[derive(Clone, Debug, PartialEq)]
+pub enum Frame {
+	Int(i64),
+	Bool(bool),
+}
+
+pub fn interpret(program: &[IR]) -> Vec<Frame> {
+	let mut stack = vec![];
 	let mut i = 0;
 	while i < program.len() {
-		if let IR::Push(data) = program[i] {
-			stack.push(data);
-			i += 1;
-			continue;
+		if let IR::Push(data) = &program[i] {
+			stack.push(data.clone());
+		} else {
+			match (&program[i], stack.pop().unwrap(), stack.pop().unwrap()) {
+				(IR::Add, Int(a), Int(b)) => stack.push(Int(a + b)),
+				(IR::Sub, Int(a), Int(b)) => stack.push(Int(a - b)),
+				(IR::Mul, Int(a), Int(b)) => stack.push(Int(a * b)),
+				(IR::Eql, a, b) => stack.push(Bool(a == b)),
+				(op, a, b) => panic!("unknown op {:?} with args {:?} and {:?}", op, a, b),
+			}
 		}
-		let a = stack.pop().unwrap();
-		let b = stack.pop().unwrap();
-		stack.push(match program[i] {
-			IR::Push(_) => unreachable!(),
-			IR::Add => a + b,
-			IR::Sub => a - b,
-			IR::Mul => a * b,
-			IR::Eql => (a == b) as i64,
-		});
 		i += 1;
 	}
 	stack

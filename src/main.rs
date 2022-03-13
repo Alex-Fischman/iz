@@ -23,7 +23,7 @@ fn main() {
 		}
 	};
 	let stack = compiler::interpret(&program);
-	println!("{:#?}", stack);
+	println!("{:?}", stack);
 }
 
 #[derive(Clone, Copy)]
@@ -157,6 +157,8 @@ fn typer_test() {
 
 #[test]
 fn compiler_test() {
+	use crate::compiler::Frame::*;
+
 	let string = "-7 + 8 - 3 == -2";
 	let result = compiler::interpret(
 		&compiler::compile(
@@ -164,5 +166,5 @@ fn compiler_test() {
 		)
 		.unwrap(),
 	);
-	assert_eq!(result, [1]);
+	assert_eq!(result, [Bool(true)]);
 }
