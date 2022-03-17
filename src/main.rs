@@ -47,9 +47,9 @@ pub const INFIXES: [(&str, (&str, u8, Assoc)); 6] = [
 #[test]
 fn tokenizer_test() {
 	let result = tokenizer::tokenize(
-		"# Comment\n\"test string\"\nif true 1 else 0 # another comment\na1s2d",
+		"# Comment\n\"test \\\"str#ing\"\nif true 1 else 0 # another comment\na1s2d",
 	);
-	let target = ["{", "\"test string\"", "if", "true", "1", "else", "0", "a1s2d", "}"];
+	let target = ["{", "\"test \"str#ing\"", "if", "true", "1", "else", "0", "a1s2d", "}"];
 	assert_eq!(result.len(), target.len());
 	for (t, b) in result.iter().zip(target) {
 		assert_eq!(t.string, b);

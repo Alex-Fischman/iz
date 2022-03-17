@@ -25,14 +25,14 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 	let mut tokens: Vec<Token> = vec![];
 	let mut in_comment = false;
 	let mut in_string = false;
+	let mut in_escape = false;
 	tokens.push(Token { string: "{".to_string(), row: 0, col: 0 });
 	for c in s.chars() {
-		if in_comment {
-			if c == '\n' {
-				in_comment = false;
-			}
-		} else if c == '#' {
-			in_comment = true;
+		if in_escape {
+			tokens.last_mut().unwrap().string.push(c);
+			in_escape = false;
+		} else if in_string && c == '\\' {
+			in_escape = true;
 		} else if in_string {
 			tokens.last_mut().unwrap().string.push(c);
 			if c == '"' {
@@ -41,6 +41,12 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 		} else if c == '"' {
 			in_string = true;
 			tokens.push(Token { string: c.to_string(), row, col });
+		} else if in_comment {
+			if c == '\n' {
+				in_comment = false;
+			}
+		} else if c == '#' {
+			in_comment = true;
 		} else if tokens.is_empty()
 			|| is_bracket(c)
 			|| char_type(c) != char_type(tokens.last().unwrap().string.chars().next().unwrap())
