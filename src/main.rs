@@ -35,7 +35,8 @@ pub enum Assoc {
 pub const BRACKETS: [(char, char); 3] = [('(', ')'), ('{', '}'), ('[', ']')];
 pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 5))];
 pub const STATEMENTS: [(&str, (&str, u8)); 1] = [("if", ("_if_", 1))];
-pub const INFIXES: [(&str, (&str, u8, Assoc)); 6] = [
+pub const INFIXES: [(&str, (&str, u8, Assoc)); 7] = [
+	("->", ("func", 1, Assoc::Right)),
 	("==", ("eql", 2, Assoc::Left)),
 	("+", ("add", 3, Assoc::Left)),
 	("-", ("sub", 3, Assoc::Left)),

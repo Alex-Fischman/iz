@@ -97,6 +97,10 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 					"eql" => func(new_var(), func(cur_var(vars), boolean())),
 					"_if_" => func(boolean(), func(new_var(), option(cur_var(vars)))),
 					"_else_" => func(option(new_var()), func(cur_var(vars), cur_var(vars))),
+					"func" => func(
+						new_var(),
+						func(new_var(), func(Type::Var(*vars - 2), cur_var(vars))),
+					),
 					_ => new_var(),
 				},
 			)),
@@ -133,19 +137,19 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 
 	let mut constraints = vec![vec![]; vars];
 	find_constraints(&tree, &mut constraints)?;
-	fn find_constraints(ast: &TypedAST, constraints: &mut Vec<Vec<Type>>) -> Result<(), String> {
+	fn find_constraints(ast: &TypedAST, cs: &mut Vec<Vec<Type>>) -> Result<(), String> {
 		Ok(match ast {
 			TypedAST::Token(_, _) => (),
 			TypedAST::List(_, xs, _, _) => {
 				for x in xs {
-					find_constraints(x, constraints)?;
+					find_constraints(x, cs)?;
 				}
 			}
 			TypedAST::Call(f, x, _) => {
-				find_constraints(f, constraints)?;
-				find_constraints(x, constraints)?;
+				find_constraints(f, cs)?;
+				find_constraints(x, cs)?;
 				match f.get_type() {
-					Type::Func(a, _) => get_constraints(a, x.get_type(), constraints)?,
+					Type::Func(a, _) => get_constraints(a, x.get_type(), cs)?,
 					_ => unreachable!(),
 				}
 			}
@@ -192,11 +196,10 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	let mut last_len = unsolved.len() + 1;
 	while last_len > unsolved.len() && !unsolved.is_empty() {
 		last_len = unsolved.len();
-
 		let mut still_unsolved = vec![];
 		for (i, j) in unsolved {
 			match (&solved_vars[i], &solved_vars[j]) {
-				(Some(a), Some(b)) if a != b => Err(format!("type error:\n{:?}\n{:?}\n", a, b))?,
+				(Some(a), Some(b)) if a != b => Err(format!("a != b:\n{:?}\n{:?}\n", a, b))?,
 				(Some(_), Some(_)) => (),
 				(None, Some(b)) => solved_vars[i] = Some(b.clone()),
 				(Some(a), None) => solved_vars[j] = Some(a.clone()),
@@ -207,7 +210,10 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	}
 
 	if !unsolved.is_empty() {
-		Err(format!("unresolved type constraints"))?
+		Err(format!(
+			"unresolved type constraints: {:?}\nin vars: {:?}\n{:#?}",
+			unsolved, solved_vars, tree
+		))?
 	}
 
 	if solved_vars.iter().any(Option::is_none) {
