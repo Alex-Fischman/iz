@@ -1,15 +1,11 @@
 use crate::tokenizer::Token;
+use crate::tree::Tree;
 
-#[derive(Debug)]
-pub enum AST {
-	Token(Token),
-	List(Token, Vec<AST>, Token),
-	Call(Box<AST>, Box<AST>),
-}
+pub type AST = Tree<Token, Token, ()>;
 
 impl AST {
 	pub fn call(a: AST, b: AST) -> AST {
-		AST::Call(Box::new(a), Box::new(b))
+		AST::Call(Box::new(a), Box::new(b), ())
 	}
 }
 
@@ -26,7 +22,7 @@ struct Context<'a> {
 pub fn parse(tokens: &[Token]) -> AST {
 	fn parse(c: &mut Context, rbp: u8) -> AST {
 		fn get_op(c: &Context, s: &str) -> AST {
-			AST::Token(Token { string: s.to_string(), ..c.tokens[c.index - 1] })
+			AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] }, ())
 		}
 
 		let t = c.tokens[c.index].clone();
@@ -41,9 +37,9 @@ pub fn parse(tokens: &[Token]) -> AST {
 				v.push(parse(c, 0));
 			}
 			c.index += 1;
-			AST::List(t, v, c.tokens[c.index - 1].clone())
+			AST::List(t, v, ())
 		} else {
-			AST::Token(t)
+			AST::Leaf(t, ())
 		};
 
 		while c.index < c.tokens.len() {

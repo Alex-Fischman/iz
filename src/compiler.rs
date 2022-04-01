@@ -12,7 +12,7 @@ pub enum IR {
 pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
 	let mut out = vec![];
 	match ast {
-		TypedAST::Token(token, t) => match t {
+		TypedAST::Leaf(token, t) => match t {
 			Type::Data(s, xs) if s == "int" && xs.is_empty() => {
 				out.push(IR::Push(Int(token.string.parse().unwrap())))
 			}
@@ -34,15 +34,14 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
 			},
 			Type::Var(_) => unreachable!(),
 		},
-		TypedAST::List(token, xs, _, _) => match &*token.string {
-			"(" => out.extend(compile(&xs[0])?),
-			"{" => {
+		TypedAST::List(l, xs, _) => match l {
+			Lists::Paren => out.extend(compile(&xs[0])?),
+			Lists::Curly => {
 				for x in xs {
 					out.extend(compile(x)?);
 				}
 			}
-			"[" => todo!(),
-			s => Err(format!("unknown bracket: {:?}", s))?,
+			Lists::Square => todo!(),
 		},
 		TypedAST::Call(f, x, _) => {
 			out.extend(compile(x)?);

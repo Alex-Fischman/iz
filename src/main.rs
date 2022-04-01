@@ -1,6 +1,7 @@
 mod compiler;
 mod parser;
 mod tokenizer;
+mod tree;
 mod typer;
 
 fn main() {
@@ -63,15 +64,14 @@ fn parser_test() {
 
 	fn check_ast(a: &AST, b: &AST) {
 		match (a, b) {
-			(AST::Token(a), AST::Token(b)) => assert_eq!(a.string, b.string),
-			(AST::List(a, xs, c), AST::List(b, ys, d)) => {
+			(AST::Leaf(a, ()), AST::Leaf(b, ())) => assert_eq!(a.string, b.string),
+			(AST::List(a, xs, ()), AST::List(b, ys, ())) => {
 				assert_eq!(a.string, b.string);
-				assert_eq!(c.string, d.string);
 				for (x, y) in xs.iter().zip(ys) {
 					check_ast(x, y);
 				}
 			}
-			(AST::Call(a, c), AST::Call(b, d)) => {
+			(AST::Call(a, c, ()), AST::Call(b, d, ())) => {
 				check_ast(a, b);
 				check_ast(c, d);
 			}
@@ -80,8 +80,8 @@ fn parser_test() {
 	}
 
 	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
-	let unit = |s| AST::Token(token(s));
-	let list = |s, xs, t| AST::List(token(s), xs, token(t));
+	let unit = |s| AST::Leaf(token(s), ());
+	let list = |s, xs, _| AST::List(token(s), xs, ());
 
 	let result = parser::parse(&tokenizer::tokenize("1+(2-5)*6"));
 	let target = list(
@@ -113,8 +113,9 @@ fn typer_test() {
 	fn check_types(a: &TypedAST, b: &TypedAST) {
 		assert_eq!(a.get_type(), b.get_type());
 		match (a, b) {
-			(TypedAST::Token(_, _), TypedAST::Token(_, _)) => {}
-			(TypedAST::List(_, xs, _, _), TypedAST::List(_, ys, _, _)) => {
+			(TypedAST::Leaf(_, _), TypedAST::Leaf(_, _)) => {}
+			(TypedAST::List(a, xs, _), TypedAST::List(b, ys, _)) => {
+				assert_eq!(a, b);
 				xs.iter().zip(ys).for_each(|(x, y)| check_types(x, y))
 			}
 			(TypedAST::Call(a, c, _), TypedAST::Call(b, d, _)) => {
@@ -126,12 +127,12 @@ fn typer_test() {
 	}
 
 	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
-	let unit = |t| TypedAST::Token(token(""), t);
+	let unit = |t| TypedAST::Leaf(token(""), t);
 
 	let string = "if true 2 else 4";
 	let result = annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap();
 	let target = TypedAST::List(
-		token(""),
+		Lists::Curly,
 		vec![TypedAST::call(
 			TypedAST::call(
 				unit(func(option(int()), func(int(), int()))),
@@ -149,7 +150,6 @@ fn typer_test() {
 			unit(int()),
 			int(),
 		)],
-		token(""),
 		int(),
 	);
 
