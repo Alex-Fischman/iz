@@ -31,3 +31,29 @@ impl<I, L, N> Tree<I, L, N> {
 		}
 	}
 }
+
+pub fn compare<I, L, N, Item, List, Node>(
+	a: &Tree<I, L, N>,
+	b: &Tree<I, L, N>,
+	item: Item,
+	list: List,
+	node: Node,
+) -> bool
+where
+	Item: Fn(&I, &I) -> bool + Copy,
+	List: Fn(&L, &L) -> bool + Copy,
+	Node: Fn(&N, &N) -> bool + Copy,
+{
+	match (a, b) {
+		(Tree::Leaf(i, n), Tree::Leaf(j, o)) => item(i, j) && node(n, o),
+		(Tree::List(l, v, n), Tree::List(m, w, o)) => {
+			list(l, m)
+				&& v.iter().zip(w).all(|(a, b)| compare(a, b, item, list, node))
+				&& node(n, o)
+		}
+		(Tree::Call(f, x, n), Tree::Call(g, y, o)) => {
+			compare(f, g, item, list, node) && compare(x, y, item, list, node) && node(n, o)
+		}
+		_ => false,
+	}
+}

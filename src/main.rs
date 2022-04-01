@@ -61,74 +61,41 @@ fn tokenizer_test() {
 #[test]
 fn parser_test() {
 	use parser::AST;
-
-	fn check_ast(a: &AST, b: &AST) {
-		match (a, b) {
-			(AST::Leaf(a, ()), AST::Leaf(b, ())) => assert_eq!(a.string, b.string),
-			(AST::List(a, xs, ()), AST::List(b, ys, ())) => {
-				assert_eq!(a.string, b.string);
-				for (x, y) in xs.iter().zip(ys) {
-					check_ast(x, y);
-				}
-			}
-			(AST::Call(a, c, ()), AST::Call(b, d, ())) => {
-				check_ast(a, b);
-				check_ast(c, d);
-			}
-			(a, b) => panic!("{:?} and {:?} have different types", a, b),
-		}
-	}
-
 	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
 	let unit = |s| AST::Leaf(token(s), ());
-	let list = |s, xs, _| AST::List(token(s), xs, ());
-
 	let result = parser::parse(&tokenizer::tokenize("1+(2-5)*6"));
-	let target = list(
-		"{",
+	let target = AST::List(
+		token("{"),
 		vec![AST::call(
 			AST::call(unit("add"), unit("1")),
 			AST::call(
 				AST::call(
 					unit("mul"),
-					list(
-						"(",
+					AST::List(
+						token("("),
 						vec![AST::call(AST::call(unit("sub"), unit("2")), unit("5"))],
-						")",
+						(),
 					),
 				),
 				unit("6"),
 			),
 		)],
-		"}",
+		(),
 	);
-
-	check_ast(&result, &target);
+	assert!(crate::tree::compare(
+		&result,
+		&target,
+		|a, b| a.string == b.string,
+		|a, b| a.string == b.string,
+		|(), ()| true
+	));
 }
 
 #[test]
 fn typer_test() {
 	use typer::*;
-
-	fn check_types(a: &TypedAST, b: &TypedAST) {
-		assert_eq!(a.get_type(), b.get_type());
-		match (a, b) {
-			(TypedAST::Leaf(_, _), TypedAST::Leaf(_, _)) => {}
-			(TypedAST::List(a, xs, _), TypedAST::List(b, ys, _)) => {
-				assert_eq!(a, b);
-				xs.iter().zip(ys).for_each(|(x, y)| check_types(x, y))
-			}
-			(TypedAST::Call(a, c, _), TypedAST::Call(b, d, _)) => {
-				check_types(a, b);
-				check_types(c, d);
-			}
-			(a, b) => panic!("{:?} and {:?} have different types", a, b),
-		}
-	}
-
-	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
-	let unit = |t| TypedAST::Leaf(token(""), t);
-
+	let unit =
+		|t| TypedAST::Leaf(tokenizer::Token { string: "".to_string(), row: 0, col: 0 }, t);
 	let string = "if true 2 else 4";
 	let result = annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap();
 	let target = TypedAST::List(
@@ -152,14 +119,11 @@ fn typer_test() {
 		)],
 		int(),
 	);
-
-	check_types(&result, &target)
+	assert!(crate::tree::compare(&result, &target, |_, _| true, |a, b| a == b, |a, b| a == b));
 }
 
 #[test]
 fn compiler_test() {
-	use crate::compiler::Frame::*;
-
 	let string = "-7 + 8 - 3 == -2";
 	let result = compiler::interpret(
 		&compiler::compile(
@@ -167,5 +131,5 @@ fn compiler_test() {
 		)
 		.unwrap(),
 	);
-	assert_eq!(result, [Bool(true)]);
+	assert_eq!(result, [crate::compiler::Frame::Bool(true)]);
 }
