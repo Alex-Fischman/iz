@@ -1,6 +1,6 @@
 use crate::typer::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum IR {
 	Push(Frame),
 	Add,
@@ -10,45 +10,45 @@ pub enum IR {
 }
 
 pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
-	let mut out = vec![];
-	match ast {
-		TypedAST::Leaf(token, t) => match t {
-			Type::Data(s, xs) if s == "int" && xs.is_empty() => {
-				out.push(IR::Push(Int(token.string.parse().unwrap())))
-			}
-			Type::Data(s, xs) if s == "bool" && xs.is_empty() => match &*token.string {
-				"true" => out.push(IR::Push(Int(1))),
-				"false" => out.push(IR::Push(Int(0))),
-				s => Err(format!("unknown bool value: {:?}", s))?,
-			},
-			data @ Type::Data(_, _) => Err(format!("unknown data type: {:?}", data))?,
-			t @ Type::Func(_, _) => match &*token.string {
-				"add" if t == &func(int(), func(int(), int())) => out.push(IR::Add),
-				"neg" if t == &func(int(), int()) => out.extend([IR::Push(Int(0)), IR::Sub]),
-				"sub" if t == &func(int(), func(int(), int())) => out.push(IR::Sub),
-				"mul" if t == &func(int(), func(int(), int())) => out.push(IR::Mul),
-				"eql" if t == &func(int(), func(int(), boolean())) => out.push(IR::Eql),
-				"_if_" => todo!(),
-				"_else_" => todo!(),
-				s => Err(format!("unknown function {:?} with type {:?}", s, t))?,
-			},
-			Type::Var(_) => unreachable!(),
-		},
-		TypedAST::List(l, xs, _) => match l {
-			Lists::Paren => out.extend(compile(&xs[0])?),
-			Lists::Curly => {
-				for x in xs {
-					out.extend(compile(x)?);
+	ast.walk(
+		&mut |token, t| {
+			match t {
+				Type::Data(s, xs) if s == "int" && xs.is_empty() => {
+					Ok(vec![IR::Push(Int(token.string.parse().unwrap()))])
 				}
+				Type::Data(s, xs) if s == "bool" && xs.is_empty() => match &*token.string {
+					"true" => Ok(vec![IR::Push(Int(1))]),
+					"false" => Ok(vec![IR::Push(Int(0))]),
+					s => Err(format!("unknown bool value: {:?}", s))?,
+				},
+				data @ Type::Data(_, _) => Err(format!("unknown data type: {:?}", data))?,
+				t @ Type::Func(_, _) => match &*token.string {
+					"add" if t == &func(int(), func(int(), int())) => Ok(vec![IR::Add]),
+					"neg" if t == &func(int(), int()) => Ok(vec![IR::Push(Int(0)), IR::Sub]),
+					"sub" if t == &func(int(), func(int(), int())) => Ok(vec![IR::Sub]),
+					"mul" if t == &func(int(), func(int(), int())) => Ok(vec![IR::Mul]),
+					"eql" if t == &func(int(), func(int(), boolean())) => Ok(vec![IR::Eql]),
+					"_if_" => todo!(),
+					"_else_" => todo!(),
+					s => Err(format!("unknown function {:?} with type {:?}", s, t))?,
+				},
+				Type::Var(_) => unreachable!(),
 			}
+		},
+		&mut |l, xs, _| match l {
+			Lists::Paren => xs[0].clone(),
+			Lists::Curly => xs
+				.into_iter()
+				.collect::<Result<Vec<Vec<IR>>, _>>()
+				.map(|xs: Vec<Vec<IR>>| xs.into_iter().flatten().collect()),
 			Lists::Square => todo!(),
 		},
-		TypedAST::Call(f, x, _) => {
-			out.extend(compile(x)?);
-			out.extend(compile(f)?);
-		}
-	}
-	Ok(out)
+		&mut |f, x, _| {
+			let mut out = x?;
+			out.extend(f?);
+			Ok(out)
+		},
+	)
 }
 
 use Frame::*;

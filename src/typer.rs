@@ -150,45 +150,29 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	)?;
 
 	let mut constraints = vec![vec![]; vars];
-	find_constraints(&tree, &mut constraints)?;
-	fn find_constraints(ast: &TypedAST, cs: &mut Vec<Vec<Type>>) -> Result<(), String> {
-		Ok(match ast {
-			TypedAST::Leaf(_, _) => (),
-			TypedAST::List(_, xs, _) => {
-				for x in xs {
-					find_constraints(x, cs)?;
-				}
-			}
-			TypedAST::Call(f, x, _) => {
-				find_constraints(f, cs)?;
-				find_constraints(x, cs)?;
-				match f.get_type() {
-					Type::Func(a, _) => get_constraints(a, x.get_type(), cs)?,
-					_ => unreachable!(),
-				}
-			}
-		})
-	}
-	fn get_constraints(
-		a: &Type,
-		b: &Type,
-		constraints: &mut Vec<Vec<Type>>,
-	) -> Result<(), String> {
-		Ok(match (a, b) {
+	tree.walk(&mut |_, t| t.clone(), &mut |_, _, t| t.clone(), &mut |f, x, t| match f {
+		Type::Func(a, _) => {
+			get_constraints(&a, &x, &mut constraints);
+			t.clone()
+		}
+		_ => unreachable!(),
+	});
+	fn get_constraints(a: &Type, b: &Type, constraints: &mut Vec<Vec<Type>>) {
+		match (a, b) {
 			(Type::Var(i), t) | (t, Type::Var(i)) => constraints[*i].push(t.clone()),
 			(Type::Data(a, xs), Type::Data(b, ys)) => {
 				if a == b {
 					for (x, y) in xs.iter().zip(ys) {
-						get_constraints(x, y, constraints)?;
+						get_constraints(x, y, constraints);
 					}
 				}
 			}
 			(Type::Func(a, c), Type::Func(b, d)) => {
-				get_constraints(a, b, constraints)?;
-				get_constraints(c, d, constraints)?;
+				get_constraints(a, b, constraints);
+				get_constraints(c, d, constraints);
 			}
-			(a, b) => Err(format!("type error:\n{:?}\n{:?}\n", a, b))?,
-		})
+			_ => unreachable!(),
+		}
 	}
 
 	let mut solved_vars: Vec<Option<Type>> = vec![None; vars];

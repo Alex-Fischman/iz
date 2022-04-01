@@ -32,6 +32,7 @@ impl<I, L, N> Tree<I, L, N> {
 	}
 }
 
+#[cfg(test)]
 pub fn compare<I, L, N, Item, List, Node>(
 	a: &Tree<I, L, N>,
 	b: &Tree<I, L, N>,
