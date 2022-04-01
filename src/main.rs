@@ -60,34 +60,40 @@ fn tokenizer_test() {
 
 #[test]
 fn parser_test() {
-	use parser::AST;
 	let token = |s: &str| tokenizer::Token { string: s.to_string(), row: 0, col: 0 };
-	let unit = |s| AST::Leaf(token(s), ());
+	let unit = |s| parser::AST::Leaf(token(s), ());
 	let result = parser::parse(&tokenizer::tokenize("1+(2-5)*6"));
-	let target = AST::List(
+	let target = parser::AST::List(
 		token("{"),
-		vec![AST::call(
-			AST::call(unit("add"), unit("1")),
-			AST::call(
-				AST::call(
+		vec![parser::AST::call(
+			parser::AST::call(unit("add"), unit("1"), ()),
+			parser::AST::call(
+				parser::AST::call(
 					unit("mul"),
-					AST::List(
+					parser::AST::List(
 						token("("),
-						vec![AST::call(AST::call(unit("sub"), unit("2")), unit("5"))],
+						vec![parser::AST::call(
+							parser::AST::call(unit("sub"), unit("2"), ()),
+							unit("5"),
+							(),
+						)],
 						(),
 					),
+					(),
 				),
 				unit("6"),
+				(),
 			),
+			(),
 		)],
 		(),
 	);
-	assert!(crate::tree::compare(
+	assert!(tree::Tree::compare(
 		&result,
 		&target,
 		|a, b| a.string == b.string,
 		|a, b| a.string == b.string,
-		|(), ()| true
+		PartialEq::eq
 	));
 }
 
@@ -119,17 +125,17 @@ fn typer_test() {
 		)],
 		int(),
 	);
-	assert!(crate::tree::compare(&result, &target, |_, _| true, |a, b| a == b, |a, b| a == b));
+	assert!(tree::Tree::compare(&result, &target, |_, _| true, PartialEq::eq, PartialEq::eq));
 }
 
 #[test]
 fn compiler_test() {
-	let string = "-7 + 8 - 3 == -2";
+	let string = "-7 - (3 - 12) == 2";
 	let result = compiler::interpret(
 		&compiler::compile(
 			&typer::annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap(),
 		)
 		.unwrap(),
 	);
-	assert_eq!(result, [crate::compiler::Frame::Bool(true)]);
+	assert_eq!(result, [compiler::Frame::Bool(true)]);
 }

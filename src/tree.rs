@@ -5,17 +5,22 @@ pub enum Tree<Item, List, Node> {
 	Call(Box<Tree<Item, List, Node>>, Box<Tree<Item, List, Node>>, Node),
 }
 
+impl<Item: PartialEq, List: PartialEq, Node: PartialEq> PartialEq for Tree<Item, List, Node> {
+	fn eq(&self, other: &Self) -> bool {
+		Tree::compare(self, other, PartialEq::eq, PartialEq::eq, PartialEq::eq)
+	}
+}
+
 impl<I, L, N> Tree<I, L, N> {
-	pub fn walk<Leaf, List, Call, R>(
-		&self,
-		leaf: &mut Leaf,
-		list: &mut List,
-		call: &mut Call,
-	) -> R
+	pub fn call(f: Self, x: Self, n: N) -> Self {
+		Tree::Call(Box::new(f), Box::new(x), n)
+	}
+
+	pub fn walk<A, B, C, R>(&self, leaf: &mut A, list: &mut B, call: &mut C) -> R
 	where
-		Leaf: FnMut(&I, &N) -> R,
-		List: FnMut(&L, Vec<R>, &N) -> R,
-		Call: FnMut(R, R, &N) -> R,
+		A: FnMut(&I, &N) -> R,
+		B: FnMut(&L, Vec<R>, &N) -> R,
+		C: FnMut(R, R, &N) -> R,
 	{
 		match self {
 			Tree::Leaf(i, n) => leaf(i, n),
@@ -30,31 +35,26 @@ impl<I, L, N> Tree<I, L, N> {
 			}
 		}
 	}
-}
 
-#[cfg(test)]
-pub fn compare<I, L, N, Item, List, Node>(
-	a: &Tree<I, L, N>,
-	b: &Tree<I, L, N>,
-	item: Item,
-	list: List,
-	node: Node,
-) -> bool
-where
-	Item: Fn(&I, &I) -> bool + Copy,
-	List: Fn(&L, &L) -> bool + Copy,
-	Node: Fn(&N, &N) -> bool + Copy,
-{
-	match (a, b) {
-		(Tree::Leaf(i, n), Tree::Leaf(j, o)) => item(i, j) && node(n, o),
-		(Tree::List(l, v, n), Tree::List(m, w, o)) => {
-			list(l, m)
-				&& v.iter().zip(w).all(|(a, b)| compare(a, b, item, list, node))
-				&& node(n, o)
+	pub fn compare<A, B, C>(a: &Self, b: &Self, item: A, list: B, node: C) -> bool
+	where
+		A: Fn(&I, &I) -> bool + Copy,
+		B: Fn(&L, &L) -> bool + Copy,
+		C: Fn(&N, &N) -> bool + Copy,
+	{
+		match (a, b) {
+			(Tree::Leaf(i, n), Tree::Leaf(j, o)) => item(i, j) && node(n, o),
+			(Tree::List(l, v, n), Tree::List(m, w, o)) => {
+				list(l, m)
+					&& v.iter().zip(w).all(|(a, b)| Tree::compare(a, b, item, list, node))
+					&& node(n, o)
+			}
+			(Tree::Call(f, x, n), Tree::Call(g, y, o)) => {
+				Tree::compare(f, g, item, list, node)
+					&& Tree::compare(x, y, item, list, node)
+					&& node(n, o)
+			}
+			_ => false,
 		}
-		(Tree::Call(f, x, n), Tree::Call(g, y, o)) => {
-			compare(f, g, item, list, node) && compare(x, y, item, list, node) && node(n, o)
-		}
-		_ => false,
 	}
 }

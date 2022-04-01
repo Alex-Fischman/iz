@@ -1,126 +1,62 @@
-use crate::parser::AST;
-use crate::tokenizer::Token;
-use crate::tree::Tree;
-
-#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Lists {
-	Paren,
 	Curly,
-	Square,
 }
 
-pub type TypedAST = Tree<Token, Lists, Type>;
-
-impl TypedAST {
-	pub fn call(f: TypedAST, x: TypedAST, t: Type) -> TypedAST {
-		TypedAST::Call(Box::new(f), Box::new(x), t)
-	}
-
-	pub fn get_type(&self) -> &Type {
-		match self {
-			TypedAST::Leaf(_, t) => t,
-			TypedAST::Call(_, _, t) => t,
-			TypedAST::List(_, _, t) => t,
-		}
-	}
-
-	fn set_type(&mut self, u: Type) {
-		match self {
-			TypedAST::Leaf(_, t) => *t = u,
-			TypedAST::Call(_, _, t) => *t = u,
-			TypedAST::List(_, _, t) => *t = u,
-		}
-	}
-}
-
-#[derive(Clone, PartialEq)]
-pub enum Type {
-	Data(String, Vec<Type>),
-	Func(Box<Type>, Box<Type>),
-	Var(usize),
-}
-
-impl std::fmt::Debug for Type {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			Type::Var(i) => write!(f, "v{:?}", i),
-			Type::Func(x, y) => write!(f, "{:?}->{:?}", x, y),
-			Type::Data(s, v) => {
-				write!(f, "{}", s)?;
-				for x in v {
-					write!(f, "@{:?}", x)?;
-				}
-				Ok(())
-			}
-		}
-	}
-}
+pub type TypedAST = crate::tree::Tree<crate::tokenizer::Token, Lists, Type>;
+pub type Type = crate::tree::Tree<usize, String, ()>;
 
 pub fn int() -> Type {
-	Type::Data("int".to_string(), vec![])
+	Type::List("int".to_string(), vec![], ())
 }
 
 pub fn boolean() -> Type {
-	Type::Data("bool".to_string(), vec![])
+	Type::List("bool".to_string(), vec![], ())
 }
 
 pub fn string() -> Type {
-	Type::Data("string".to_string(), vec![])
+	Type::List("string".to_string(), vec![], ())
 }
 
 pub fn option(t: Type) -> Type {
-	Type::Data("option".to_string(), vec![t])
+	Type::List("option".to_string(), vec![t], ())
 }
 
 pub fn func(f: Type, x: Type) -> Type {
-	Type::Func(Box::new(f), Box::new(x))
+	Type::Call(Box::new(f), Box::new(x), ())
 }
 
-pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
+pub fn annotate(ast: &crate::parser::AST) -> Result<TypedAST, String> {
 	let mut vars = 0;
-	use Type::Var;
-
-	let mut tree = ast.walk(
-		&mut |t: &Token, ()| {
+	let tree = ast.walk(
+		&mut |t: &crate::tokenizer::Token, ()| {
+			vars += match &*t.string {
+				s if s.chars().next().unwrap().is_numeric() => 0,
+				s if s.chars().next().unwrap() == '"' => 0,
+				"add" | "sub" | "mul" | "neg" => 1,
+				"true" | "false" => 0,
+				"eql" | "_if_" | "_else_" => 1,
+				"func" => 2,
+				_ => 1,
+			};
+			let var = || Type::Leaf(vars - 1, ());
 			Ok(TypedAST::Leaf(
 				t.clone(),
 				match &*t.string {
 					s if s.chars().next().unwrap().is_numeric() => int(),
 					s if s.chars().next().unwrap() == '"' => string(),
-					"add" | "sub" | "mul" => {
-						vars += 1;
-						func(Var(vars - 1), func(Var(vars - 1), Var(vars - 1)))
-					}
-					"neg" => {
-						vars += 1;
-						func(Var(vars - 1), Var(vars - 1))
-					}
+					"add" | "sub" | "mul" => func(var(), func(var(), var())),
+					"neg" => func(var(), var()),
 					"true" => boolean(),
 					"false" => boolean(),
-					"eql" => {
-						vars += 1;
-						func(Var(vars - 1), func(Var(vars - 1), boolean()))
-					}
-					"_if_" => {
-						vars += 1;
-						func(boolean(), func(Var(vars - 1), option(Var(vars - 1))))
-					}
-					"_else_" => {
-						vars += 1;
-						func(option(Var(vars - 1)), func(Var(vars - 1), Var(vars - 1)))
-					}
-					"func" => {
-						vars += 2;
-						func(
-							Var(vars - 2),
-							func(Var(vars - 1), func(Type::Var(vars - 2), Var(vars - 1))),
-						)
-					}
-					_ => {
-						vars += 1;
-						Var(vars - 1)
-					}
+					"eql" => func(var(), func(var(), boolean())),
+					"_if_" => func(boolean(), func(var(), option(var()))),
+					"_else_" => func(option(var()), func(var(), var())),
+					"func" => func(
+						Type::Leaf(vars - 2, ()),
+						func(var(), func(Type::Leaf(vars - 2, ()), var())),
+					),
+					_ => var(),
 				},
 			))
 		},
@@ -130,28 +66,33 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 				_ => Err(format!("paren should contain only one expression")),
 			},
 			"{" => {
-				let mut typed_xs = vec![];
-				for x in xs {
-					typed_xs.push(x?);
-				}
+				let typed_xs = xs.into_iter().collect::<Result<Vec<_>, _>>()?;
 				let t = typed_xs
 					.last()
-					.map(|x| x.get_type().clone())
-					.unwrap_or(Type::Data("unit".to_string(), vec![]));
+					.map(|x| match x {
+						TypedAST::Leaf(_, t) => t.clone(),
+						TypedAST::List(_, _, t) => t.clone(),
+						TypedAST::Call(_, _, t) => t.clone(),
+					})
+					.unwrap_or(Type::List("unit".to_string(), vec![], ()));
 				Ok(TypedAST::List(Lists::Curly, typed_xs, t))
 			}
 			"[" => todo!("arrays"),
 			s => Err(format!("unknown bracket: {:?}", s)),
 		},
-		&mut |f, x, ()| match f.clone()?.get_type().clone() {
-			Type::Func(_, b) => Ok(TypedAST::call(f?, x?, *b.clone())),
+		&mut |f, x, ()| match match f.clone()? {
+			TypedAST::Leaf(_, t) => t,
+			TypedAST::List(_, _, t) => t,
+			TypedAST::Call(_, _, t) => t,
+		} {
+			Type::Call(_, b, ()) => Ok(TypedAST::call(f?, x?, *b.clone())),
 			t => Err(format!("expected function type but found {:?}", t)),
 		},
 	)?;
 
 	let mut constraints = vec![vec![]; vars];
 	tree.walk(&mut |_, t| t.clone(), &mut |_, _, t| t.clone(), &mut |f, x, t| match f {
-		Type::Func(a, _) => {
+		Type::Call(a, _, ()) => {
 			get_constraints(&a, &x, &mut constraints);
 			t.clone()
 		}
@@ -159,15 +100,13 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	});
 	fn get_constraints(a: &Type, b: &Type, constraints: &mut Vec<Vec<Type>>) {
 		match (a, b) {
-			(Type::Var(i), t) | (t, Type::Var(i)) => constraints[*i].push(t.clone()),
-			(Type::Data(a, xs), Type::Data(b, ys)) => {
-				if a == b {
-					for (x, y) in xs.iter().zip(ys) {
-						get_constraints(x, y, constraints);
-					}
+			(Type::Leaf(i, ()), t) | (t, Type::Leaf(i, ())) => constraints[*i].push(t.clone()),
+			(Type::List(a, xs, ()), Type::List(b, ys, ())) if a == b => {
+				for (x, y) in xs.iter().zip(ys) {
+					get_constraints(x, y, constraints);
 				}
 			}
-			(Type::Func(a, c), Type::Func(b, d)) => {
+			(Type::Call(a, c, ()), Type::Call(b, d, ())) => {
 				get_constraints(a, b, constraints);
 				get_constraints(c, d, constraints);
 			}
@@ -179,7 +118,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 	let mut unsolved: Vec<(usize, usize)> = vec![];
 	for (i, var) in constraints.into_iter().enumerate() {
 		for constraint in var {
-			if let Type::Var(j) = constraint {
+			if let Type::Leaf(j, ()) = constraint {
 				unsolved.push((i, j));
 			} else if let Some(t) = &solved_vars[i] {
 				if t != &constraint {
@@ -207,39 +146,23 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, String> {
 		unsolved = still_unsolved;
 	}
 
-	if !unsolved.is_empty() || solved_vars.iter().any(Option::is_none) {
+	if !unsolved.is_empty() {
 		Err(format!(
 			"unresolved constraints: {:?}\nvars: {:?}\nast: {:#?}",
 			unsolved, solved_vars, tree
 		))?
 	}
 
-	let vars: Vec<Type> = solved_vars.into_iter().map(Option::unwrap).collect();
-
-	update_tree(&mut tree, &vars);
-
-	fn update_tree(ast: &mut TypedAST, vars: &[Type]) {
-		ast.set_type(update_type(ast.get_type(), vars));
-		match ast {
-			TypedAST::Leaf(_, _) => {}
-			TypedAST::List(_, xs, _) => xs.iter_mut().for_each(|x| update_tree(x, vars)),
-			TypedAST::Call(a, b, _) => {
-				update_tree(a, vars);
-				update_tree(b, vars);
-			}
-		}
-	}
-	fn update_type(t: &Type, vars: &[Type]) -> Type {
-		match t {
-			Type::Var(i) => vars[*i].clone(),
-			Type::Data(s, xs) => {
-				Type::Data(s.to_string(), xs.iter().map(|x| update_type(x, vars)).collect())
-			}
-			Type::Func(a, b) => {
-				Type::Func(Box::new(update_type(a, vars)), Box::new(update_type(b, vars)))
-			}
-		}
-	}
-
-	Ok(tree)
+	let update_type = |t: &Type| {
+		t.walk(
+			&mut |i, ()| solved_vars[*i].clone().unwrap(),
+			&mut |s, xs, ()| Type::List(s.to_string(), xs, ()),
+			&mut |a, b, ()| Type::Call(Box::new(a), Box::new(b), ()),
+		)
+	};
+	Ok(tree.walk(
+		&mut |token, t| TypedAST::Leaf(token.clone(), update_type(t)),
+		&mut |l, xs, t| TypedAST::List(l.clone(), xs, update_type(t)),
+		&mut |a, b, t| TypedAST::Call(Box::new(a), Box::new(b), update_type(t)),
+	))
 }
