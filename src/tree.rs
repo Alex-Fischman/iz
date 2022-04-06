@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Tree<Item, List, Node> {
 	Leaf(Item, Node),
 	List(List, Vec<Tree<Item, List, Node>>, Node),
@@ -8,6 +8,17 @@ pub enum Tree<Item, List, Node> {
 impl<Item: PartialEq, List: PartialEq, Node: PartialEq> PartialEq for Tree<Item, List, Node> {
 	fn eq(&self, other: &Self) -> bool {
 		Tree::compare(self, other, PartialEq::eq, PartialEq::eq, PartialEq::eq)
+	}
+}
+
+use std::fmt::Debug;
+impl<I: Debug, L: Debug, N> Debug for Tree<I, L, N> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			Tree::Leaf(i, _) => write!(f, "({:?})", i),
+			Tree::List(l, xs, _) => write!(f, "{:?}{:#?}", l, xs),
+			Tree::Call(a, b, _) => write!(f, "( {:?} @ {:?} )", **a, **b),
+		}
 	}
 }
 

@@ -1,20 +1,22 @@
-pub type AST = crate::tree::Tree<crate::tokenizer::Token, crate::tokenizer::Token, ()>;
+use crate::tokenizer::Token;
+
+pub type AST = crate::tree::Tree<Token, Token, ()>;
 
 use std::collections::HashMap;
 struct Context<'a> {
 	index: usize,
-	tokens: &'a [crate::tokenizer::Token],
+	tokens: &'a [Token],
 	brackets: &'a HashMap<char, char>,
 	prefixes: &'a HashMap<&'a str, (&'a str, u8)>,
 	statements: &'a HashMap<&'a str, (&'a str, u8)>,
 	infixes: &'a HashMap<&'a str, (&'a str, u8, crate::Assoc)>,
 }
 
-pub fn parse(tokens: &[crate::tokenizer::Token]) -> AST {
+pub fn parse(tokens: &[Token]) -> AST {
 	fn parse(c: &mut Context, rbp: u8) -> AST {
 		fn get_op(c: &Context, s: &str) -> AST {
 			AST::Leaf(
-				crate::tokenizer::Token { string: s.to_string(), ..c.tokens[c.index - 1] },
+				Token { string: s.to_string(), ..c.tokens[c.index - 1] },
 				(),
 			)
 		}

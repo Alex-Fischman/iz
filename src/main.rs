@@ -1,5 +1,6 @@
 mod compiler;
 mod parser;
+mod scoper;
 mod tokenizer;
 mod tree;
 mod typer;
@@ -9,22 +10,22 @@ fn main() {
 	let file = args.get(1).unwrap();
 	let tokens = tokenizer::tokenize(&std::fs::read_to_string(file).unwrap());
 	let ast = parser::parse(&tokens);
-	let typed = match typer::annotate(&ast) {
+	match typer::annotate(&ast) {
+		Err(_) => {}
+		Ok(typed) => match compiler::compile(&typed) {
+			Err(_) => {}
+			Ok(program) => println!("{:?}", compiler::interpret(&program)),
+		},
+	}
+
+	let scoped = match scoper::scope(&ast) {
 		Ok(t) => t,
 		Err(e) => {
 			println!("{}", e);
 			return;
 		}
 	};
-	let program = match compiler::compile(&typed) {
-		Ok(t) => t,
-		Err(e) => {
-			println!("{}", e);
-			return;
-		}
-	};
-	let stack = compiler::interpret(&program);
-	println!("{:?}", stack);
+	println!("{:?}", scoped);
 }
 
 #[derive(Clone, Copy)]
