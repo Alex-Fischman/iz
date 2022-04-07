@@ -1,9 +1,7 @@
-#[derive(Clone, Debug, PartialEq)]
-pub enum Lists {
-	Curly,
-}
+use crate::scoper::Leaf;
+use crate::scoper::Lists;
 
-pub type TypedAST = crate::tree::Tree<crate::tokenizer::Token, Lists, Type>;
+pub type TypedAST = crate::tree::Tree<Leaf, Lists, Type>;
 pub type Type = crate::tree::Tree<usize, String, ()>;
 
 pub fn int() -> Type {
@@ -26,10 +24,14 @@ pub fn func(f: Type, x: Type) -> Type {
 	Type::Call(Box::new(f), Box::new(x), ())
 }
 
-pub fn annotate(ast: &crate::parser::AST) -> Result<TypedAST, String> {
+pub fn annotate(ast: &crate::scoper::ScopedAST) -> Result<TypedAST, String> {
 	let mut vars = 0;
 	let tree = ast.walk(
-		&mut |t: &crate::tokenizer::Token, ()| {
+		&mut |t: &Leaf, ()| {
+			let t = match t {
+				Leaf::Token(t) => t,
+				Leaf::Symbol(s) => Err(format!("found symbol instead of token: {:?}", s))?,
+			};
 			vars += match &*t.string {
 				s if s.chars().next().unwrap().is_numeric() => 0,
 				s if s.chars().next().unwrap() == '"' => 0,
@@ -41,7 +43,7 @@ pub fn annotate(ast: &crate::parser::AST) -> Result<TypedAST, String> {
 			};
 			let var = || Type::Leaf(vars - 1, ());
 			Ok(TypedAST::Leaf(
-				t.clone(),
+				Leaf::Token(t.clone()),
 				match &*t.string {
 					s if s.chars().next().unwrap().is_numeric() => int(),
 					s if s.chars().next().unwrap() == '"' => string(),
@@ -60,12 +62,12 @@ pub fn annotate(ast: &crate::parser::AST) -> Result<TypedAST, String> {
 				},
 			))
 		},
-		&mut |a, xs, ()| match &*a.string {
-			"(" => match xs.len() {
+		&mut |a, xs, ()| match a {
+			Lists::Paren => match xs.len() {
 				1 => Ok(xs[0].clone()?),
 				_ => Err(format!("paren should contain only one expression")),
 			},
-			"{" => {
+			Lists::Curly => {
 				let typed_xs = xs.into_iter().collect::<Result<Vec<_>, _>>()?;
 				let t = typed_xs
 					.last()
@@ -77,8 +79,6 @@ pub fn annotate(ast: &crate::parser::AST) -> Result<TypedAST, String> {
 					.unwrap_or(Type::List("unit".to_string(), vec![], ()));
 				Ok(TypedAST::List(Lists::Curly, typed_xs, t))
 			}
-			"[" => todo!("arrays"),
-			s => Err(format!("unknown bracket: {:?}", s)),
 		},
 		&mut |f, x, ()| match match f.clone()? {
 			TypedAST::Leaf(_, t) => t,

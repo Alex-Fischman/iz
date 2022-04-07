@@ -15,10 +15,7 @@ struct Context<'a> {
 pub fn parse(tokens: &[Token]) -> AST {
 	fn parse(c: &mut Context, rbp: u8) -> AST {
 		fn get_op(c: &Context, s: &str) -> AST {
-			AST::Leaf(
-				Token { string: s.to_string(), ..c.tokens[c.index - 1] },
-				(),
-			)
+			AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] }, ())
 		}
 
 		let t = c.tokens[c.index].clone();

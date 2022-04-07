@@ -6,26 +6,19 @@ mod tree;
 mod typer;
 
 fn main() {
-	let args: Vec<String> = std::env::args().collect();
-	let file = args.get(1).unwrap();
-	let tokens = tokenizer::tokenize(&std::fs::read_to_string(file).unwrap());
-	let ast = parser::parse(&tokens);
-	match typer::annotate(&ast) {
-		Err(_) => {}
-		Ok(typed) => match compiler::compile(&typed) {
-			Err(_) => {}
-			Ok(program) => println!("{:?}", compiler::interpret(&program)),
-		},
-	}
-
-	let scoped = match scoper::scope(&ast) {
-		Ok(t) => t,
-		Err(e) => {
-			println!("{}", e);
-			return;
-		}
+	match (|| {
+		let args: Vec<String> = std::env::args().collect();
+		let file = args.get(1).unwrap();
+		let tokens = tokenizer::tokenize(&std::fs::read_to_string(file).unwrap());
+		let ast = parser::parse(&tokens);
+		let scoped = scoper::scope(&ast)?;
+		let typed = typer::annotate(&scoped)?;
+		let program = compiler::compile(&typed)?;
+		Ok(compiler::interpret(&program))
+	})() {
+		Err::<_, String>(e) => println!("compiler error: {:?}", e),
+		Ok(o) => println!("{:?}", o),
 	};
-	println!("{:?}", scoped);
 }
 
 #[derive(Clone, Copy)]
@@ -101,12 +94,17 @@ fn parser_test() {
 #[test]
 fn typer_test() {
 	use typer::*;
-	let unit =
-		|t| TypedAST::Leaf(tokenizer::Token { string: "".to_string(), row: 0, col: 0 }, t);
+	let unit = |t| {
+		TypedAST::Leaf(
+			scoper::Leaf::Token(tokenizer::Token { string: "".to_string(), row: 0, col: 0 }),
+			t,
+		)
+	};
 	let string = "if true 2 else 4";
-	let result = annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap();
+	let result =
+		annotate(&scoper::scope(&parser::parse(&tokenizer::tokenize(string))).unwrap()).unwrap();
 	let target = TypedAST::List(
-		Lists::Curly,
+		scoper::Lists::Curly,
 		vec![TypedAST::call(
 			TypedAST::call(
 				unit(func(option(int()), func(int(), int()))),
@@ -134,7 +132,10 @@ fn compiler_test() {
 	let string = "-7 - (3 - 12) == 2";
 	let result = compiler::interpret(
 		&compiler::compile(
-			&typer::annotate(&parser::parse(&tokenizer::tokenize(string))).unwrap(),
+			&typer::annotate(
+				&scoper::scope(&parser::parse(&tokenizer::tokenize(string))).unwrap(),
+			)
+			.unwrap(),
 		)
 		.unwrap(),
 	);

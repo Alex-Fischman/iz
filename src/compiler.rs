@@ -1,3 +1,4 @@
+use crate::scoper::Leaf;
 use crate::typer::*;
 
 #[derive(Clone, Debug)]
@@ -11,17 +12,19 @@ pub enum IR {
 
 pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
 	ast.walk(
-		&mut |token, t| match t {
-			Type::List(s, xs, ()) if s == "int" && xs.is_empty() => {
+		&mut |leaf, t| match (leaf, t) {
+			(Leaf::Token(token), Type::List(s, xs, ())) if s == "int" && xs.is_empty() => {
 				Ok(vec![IR::Push(Frame::Int(token.string.parse().unwrap()))])
 			}
-			Type::List(s, xs, ()) if s == "bool" && xs.is_empty() => match &*token.string {
-				"true" => Ok(vec![IR::Push(Frame::Int(1))]),
-				"false" => Ok(vec![IR::Push(Frame::Int(0))]),
-				s => Err(format!("unknown bool value: {:?}", s))?,
-			},
-			data @ Type::List(_, _, ()) => Err(format!("unknown data type: {:?}", data))?,
-			t @ Type::Call(_, _, ()) => match &*token.string {
+			(Leaf::Token(token), Type::List(s, xs, ())) if s == "bool" && xs.is_empty() => {
+				match &*token.string {
+					"true" => Ok(vec![IR::Push(Frame::Int(1))]),
+					"false" => Ok(vec![IR::Push(Frame::Int(0))]),
+					s => Err(format!("unknown bool value: {:?}", s))?,
+				}
+			}
+			(_, data @ Type::List(_, _, ())) => Err(format!("unknown data type: {:?}", data))?,
+			(Leaf::Token(token), t @ Type::Call(_, _, ())) => match &*token.string {
 				"add" if t == &func(int(), func(int(), int())) => Ok(vec![IR::Add]),
 				"neg" if t == &func(int(), int()) => Ok(vec![IR::Push(Frame::Int(0)), IR::Sub]),
 				"sub" if t == &func(int(), func(int(), int())) => Ok(vec![IR::Sub]),
@@ -31,10 +34,11 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<IR>, String> {
 				"_else_" => todo!(),
 				s => Err(format!("unknown function {:?} with type {:?}", s, t))?,
 			},
-			Type::Leaf(_, ()) => unreachable!(),
+			(leaf, t) => Err(format!("not sure how to compile {:?}: {:?}", leaf, t))?,
 		},
 		&mut |l, xs, _| match l {
-			Lists::Curly => xs
+			crate::scoper::Lists::Paren => unreachable!(),
+			crate::scoper::Lists::Curly => xs
 				.into_iter()
 				.collect::<Result<Vec<Vec<IR>>, _>>()
 				.map(|xs: Vec<Vec<IR>>| xs.into_iter().flatten().collect()),
