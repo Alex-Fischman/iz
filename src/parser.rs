@@ -25,6 +25,7 @@ pub const INFIXES: [(&str, (&str, u8, Assoc)); 5] = [
 	("else", ("_else_", 1, Assoc::Right)),
 ];
 
+#[derive(PartialEq)]
 pub enum AST {
 	Leaf(Token),
 	List(Lists, Vec<AST>),
@@ -35,8 +36,8 @@ impl std::fmt::Debug for AST {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			AST::Leaf(t) => write!(f, "{:?}", t),
-			AST::List(l, v) => write!(f, "{:?}{:?}", l, v),
-			AST::Call(a, bs) => write!(f, "{:?} {:?}", a, bs),
+			AST::List(l, v) => write!(f, "{:?}{:#?}", l, v),
+			AST::Call(a, bs) => write!(f, "{:?} {:#?}", a, bs),
 		}
 	}
 }
@@ -54,16 +55,16 @@ struct Context<'a> {
 pub fn parse(tokens: &[Token]) -> AST {
 	fn parse(c: &mut Context, rbp: u8) -> AST {
 		let get_op = |c: &Context, s: &str| {
-			AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] })
+			Box::new(AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] }))
 		};
 
 		let t = c.tokens[c.index].clone();
 		c.index += 1;
 
 		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
-			AST::Call(Box::new(get_op(c, s)), vec![parse(c, bp)])
+			AST::Call(get_op(c, s), vec![parse(c, bp)])
 		} else if let Some(&(s, bp)) = c.statements.get(&*t.string) {
-			AST::Call(Box::new(get_op(c, s)), vec![parse(c, bp), parse(c, bp)])
+			AST::Call(get_op(c, s), vec![parse(c, bp), parse(c, bp)])
 		} else if let Some(&(end, l)) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
@@ -79,8 +80,7 @@ pub fn parse(tokens: &[Token]) -> AST {
 			match c.infixes.get(&*c.tokens[c.index].string) {
 				Some(&(s, bp, assoc)) if bp > rbp => {
 					c.index += 1;
-					lhs =
-						AST::Call(Box::new(get_op(c, s)), vec![lhs, parse(c, bp - assoc as u8)]);
+					lhs = AST::Call(get_op(c, s), vec![lhs, parse(c, bp - assoc as u8)]);
 				}
 				_ => break,
 			}
