@@ -13,7 +13,7 @@ impl std::fmt::Debug for Token {
 
 pub fn tokenize(s: &str) -> Vec<Token> {
 	fn is_bracket(c: char) -> bool {
-		crate::BRACKETS.iter().any(|&(a, b)| a == c || b == c)
+		crate::parser::BRACKETS.iter().any(|&(a, (b, _))| a == c || b == c)
 	}
 	fn char_type(c: char) -> u8 {
 		(((c.is_alphabetic() || c.is_numeric() || c == '_') as u8) << 0)
@@ -26,7 +26,6 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 	let mut in_comment = false;
 	let mut in_string = false;
 	let mut in_escape = false;
-	tokens.push(Token { string: "{".to_string(), row: 0, col: 0 });
 	for c in s.chars() {
 		if in_escape {
 			tokens.last_mut().unwrap().string.push(c);
@@ -62,6 +61,5 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 			col += 1;
 		}
 	}
-	tokens.push(Token { string: "}".to_string(), row: 0, col: 0 });
 	tokens.into_iter().filter(|t| !t.string.chars().next().unwrap().is_whitespace()).collect()
 }
