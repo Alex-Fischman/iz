@@ -11,8 +11,8 @@ fn main() {
 
 #[test]
 fn tokenizer_test() {
-	let result = tokenizer::tokenize("# Comment\n\"test \\\"str#ing\"\nif 1 else 0 # comment\n");
-	let target = ["\"test \"str#ing\"", "if", "1", "else", "0"];
+	let result = tokenizer::tokenize("# Comment\n\"test \\\"str#ing\"\n token1 # comment\n");
+	let target = ["\"test \"str#ing\"", "token1"];
 	assert_eq!(result.iter().map(|t| &t.string).collect::<Vec<_>>(), target);
 }
 

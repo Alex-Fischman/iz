@@ -15,14 +15,14 @@ pub enum Lists {
 
 pub const BRACKETS: [(char, (char, Lists)); 3] =
 	[('(', (')', Lists::Round)), ('{', ('}', Lists::Curly)), ('[', (']', Lists::Square))];
-pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 5))];
-pub const STATEMENTS: [(&str, (&str, u8)); 1] = [("if", ("_if_", 1))];
-pub const INFIXES: [(&str, (&str, u8, Assoc)); 5] = [
-	("==", ("eql", 2, Assoc::Left)),
-	("+", ("add", 3, Assoc::Left)),
-	("-", ("sub", 3, Assoc::Left)),
-	("*", ("mul", 4, Assoc::Left)),
-	("else", ("_else_", 1, Assoc::Right)),
+pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 9))];
+pub const INFIXES: [(&str, (&str, u8, Assoc)); 6] = [
+	("=", ("set", 3, Assoc::Right)),
+	("==", ("eql", 6, Assoc::Left)),
+	("+", ("add", 7, Assoc::Left)),
+	("-", ("sub", 7, Assoc::Left)),
+	("*", ("mul", 8, Assoc::Left)),
+	("@", ("call", 15, Assoc::Left)),
 ];
 
 #[derive(PartialEq)]
@@ -48,7 +48,6 @@ struct Context<'a> {
 	tokens: &'a [Token],
 	brackets: &'a HashMap<char, (char, Lists)>,
 	prefixes: &'a HashMap<&'a str, (&'a str, u8)>,
-	statements: &'a HashMap<&'a str, (&'a str, u8)>,
 	infixes: &'a HashMap<&'a str, (&'a str, u8, Assoc)>,
 }
 
@@ -63,8 +62,6 @@ pub fn parse(tokens: &[Token]) -> AST {
 
 		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
 			AST::Call(get_op(c, s), vec![parse(c, bp)])
-		} else if let Some(&(s, bp)) = c.statements.get(&*t.string) {
-			AST::Call(get_op(c, s), vec![parse(c, bp), parse(c, bp)])
 		} else if let Some(&(end, l)) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
@@ -94,7 +91,6 @@ pub fn parse(tokens: &[Token]) -> AST {
 		index: 0,
 		brackets: &HashMap::from(BRACKETS),
 		prefixes: &HashMap::from(PREFIXES),
-		statements: &HashMap::from(STATEMENTS),
 		infixes: &HashMap::from(INFIXES),
 	};
 
