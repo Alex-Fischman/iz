@@ -1,6 +1,7 @@
 use crate::parser::*;
 use std::io::{Error, ErrorKind};
 
+#[derive(PartialEq)]
 pub enum TypedAST {
 	Leaf(crate::tokenizer::Token, (Vec<Type>, Vec<Type>)),
 	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),

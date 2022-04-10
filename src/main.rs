@@ -27,7 +27,6 @@ fn tokenizer_test() {
 #[test]
 fn parser_test() {
 	let unit = |s: &str, col| AST::Leaf(Token { string: s.to_string(), row: 1, col });
-	println!("{:?}", tokenize("1+(2-5)*6"));
 	let result = parse(&tokenize("1+(2-5)*6"));
 	let target = AST::List(
 		Lists::Block,
@@ -58,5 +57,20 @@ fn parser_test() {
 
 #[test]
 fn typer_test() {
-	todo!();
+	let unit = |s: &str, col, t| TypedAST::Leaf(Token { string: s.to_string(), row: 1, col }, t);
+	let result = annotate(&parse(&tokenize("1 - 5"))).unwrap();
+	let target = TypedAST::List(
+		Lists::Block,
+		vec![TypedAST::List(
+			Lists::Block,
+			vec![
+				unit("1", 1, (vec![], vec![Type::Int])),
+				unit("5", 5, (vec![], vec![Type::Int])),
+				unit("sub", 3, (vec![Type::Int, Type::Int], vec![Type::Int])),
+			],
+			(vec![], vec![Type::Int]),
+		)],
+		(vec![], vec![Type::Int]),
+	);
+	assert_eq!(result, target);
 }
