@@ -1,7 +1,7 @@
-Token = Struct@(
-	str = String
-	row = Uint
-	col = Uint
-)
+4 - {2 2 add} * 1
 
-test1 = Token@("asdf" 1 2)
+# groups and blocks with one member are the same as just the member
+
+# `->` should mean pop value and assign it to a name
+# it takes a lazy argument, but it's not the deepest way to do that
+# if `->` is user-definable then the whole language will be
