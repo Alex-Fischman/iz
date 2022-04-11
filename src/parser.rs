@@ -2,12 +2,10 @@ use crate::tokenizer::Token;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Lists {
-	Group,
 	Block,
 }
 
-pub const BRACKETS: [(char, (char, Lists)); 2] =
-	[('(', (')', Lists::Group)), ('{', ('}', Lists::Block))];
+pub const BRACKETS: [(char, (char, Lists)); 1] = [('{', ('}', Lists::Block))];
 pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 9))];
 // last arg is 0 for left assoc, 1 for right assoc
 pub const INFIXES: [(&str, (&str, u8, u8)); 3] =

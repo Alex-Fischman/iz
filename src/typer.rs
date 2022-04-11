@@ -10,7 +10,6 @@ pub enum TypedAST {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
 	Int,
-	Bool,
 }
 
 impl std::fmt::Debug for TypedAST {
@@ -28,7 +27,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 			token.clone(),
 			match token.string.as_str() {
 				s if s.chars().next().unwrap().is_numeric() => (vec![], vec![Type::Int]),
-				"true" | "false" => (vec![], vec![Type::Bool]),
 				"add" | "sub" | "mul" => (vec![Type::Int, Type::Int], vec![Type::Int]),
 				"neg" => (vec![Type::Int], vec![Type::Int]),
 				t => todo!("unknown token: {:?}", t),
@@ -56,7 +54,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					}
 					(vec![], stack) // todo: recognize inputs while getting outputs
 				}
-				Lists::Group => todo!(),
 			};
 			Ok(TypedAST::List(*l, typed_xs, t))
 		}

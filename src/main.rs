@@ -1,7 +1,9 @@
+mod compiler;
 mod parser;
 mod tokenizer;
 mod typer;
 
+use compiler::*;
 use parser::*;
 use std::io::{Error, ErrorKind};
 use tokenizer::*;
@@ -13,7 +15,9 @@ fn main() -> Result<(), Error> {
 	let tokens = tokenize(&std::fs::read_to_string(file)?);
 	let ast = parse(&tokens);
 	let typed = annotate(&ast)?;
-	println!("{:?}", typed);
+	let program = compile(&typed)?;
+	let output = interpret(&program);
+	println!("{:?}", output);
 	Ok(())
 }
 
@@ -27,7 +31,7 @@ fn tokenizer_test() {
 #[test]
 fn parser_test() {
 	let unit = |s: &str, col| AST::Leaf(Token { string: s.to_string(), row: 1, col });
-	let result = parse(&tokenize("1+(2-5)*6"));
+	let result = parse(&tokenize("1+{2-5}*6"));
 	let target = AST::List(
 		Lists::Block,
 		vec![AST::List(
@@ -38,7 +42,7 @@ fn parser_test() {
 					Lists::Block,
 					vec![
 						AST::List(
-							Lists::Group,
+							Lists::Block,
 							vec![AST::List(
 								Lists::Block,
 								vec![unit("2", 4), unit("5", 6), unit("sub", 5)],
@@ -72,5 +76,15 @@ fn typer_test() {
 		)],
 		(vec![], vec![Type::Int]),
 	);
+	assert_eq!(result, target);
+}
+
+#[test]
+fn compiler_test() {
+	let result = compile(&annotate(&parse(&tokenize("5*2-19"))).unwrap()).unwrap();
+	let target = [Op::PushI(5), Op::PushI(2), Op::MulI, Op::PushI(19), Op::SubI];
+	assert_eq!(result, target);
+	let result = interpret(&result);
+	let target = [Value::Int(-9)];
 	assert_eq!(result, target);
 }
