@@ -29,7 +29,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 				s if s.chars().next().unwrap().is_numeric() => (vec![], vec![Type::Int]),
 				"add" | "sub" | "mul" => (vec![Type::Int, Type::Int], vec![Type::Int]),
 				"neg" => (vec![Type::Int], vec![Type::Int]),
-				t => todo!("unknown token: {:?}", t),
+				t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 			},
 		)),
 		AST::List(l, xs) => {
