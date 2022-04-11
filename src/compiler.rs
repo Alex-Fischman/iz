@@ -29,42 +29,29 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 	})
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Value {
-	Int(i64),
-}
-
-impl Value {
-	fn unwrap_int(self) -> i64 {
-		match self {
-			Value::Int(int) => int,
-		}
-	}
-}
-
-pub fn interpret(program: &Vec<Op>) -> Vec<Value> {
+pub fn interpret(program: &Vec<Op>) -> Vec<i64> {
 	let mut stack = vec![];
 	for op in program {
 		match op {
-			Op::PushI(int) => stack.push(Value::Int(*int)),
+			Op::PushI(int) => stack.push(*int),
 			Op::NegI => {
-				let a = stack.pop().unwrap().unwrap_int();
-				stack.push(Value::Int(-a));
-			}
+				let a = stack.pop().unwrap();
+				stack.push(-a);
+			},
 			Op::AddI => {
-				let a = stack.pop().unwrap().unwrap_int();
-				let b = stack.pop().unwrap().unwrap_int();
-				stack.push(Value::Int(a + b));
+				let a = stack.pop().unwrap();
+				let b = stack.pop().unwrap();
+				stack.push(a + b);
 			}
 			Op::SubI => {
-				let a = stack.pop().unwrap().unwrap_int();
-				let b = stack.pop().unwrap().unwrap_int();
-				stack.push(Value::Int(b - a));
+				let a = stack.pop().unwrap();
+				let b = stack.pop().unwrap();
+				stack.push(b - a);
 			}
 			Op::MulI => {
-				let a = stack.pop().unwrap().unwrap_int();
-				let b = stack.pop().unwrap().unwrap_int();
-				stack.push(Value::Int(a * b));
+				let a = stack.pop().unwrap();
+				let b = stack.pop().unwrap();
+				stack.push(a * b);
 			}
 		}
 	}

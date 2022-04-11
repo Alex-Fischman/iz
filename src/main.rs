@@ -85,6 +85,6 @@ fn compiler_test() {
 	let target = [Op::PushI(5), Op::PushI(2), Op::MulI, Op::PushI(19), Op::SubI];
 	assert_eq!(result, target);
 	let result = interpret(&result);
-	let target = [Value::Int(-9)];
+	let target = [-9];
 	assert_eq!(result, target);
 }
