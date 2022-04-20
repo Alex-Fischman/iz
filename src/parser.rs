@@ -6,10 +6,6 @@ pub enum Lists {
 }
 
 pub const BRACKETS: [(char, (char, Lists)); 1] = [('{', ('}', Lists::Block))];
-pub const PREFIXES: [(&str, (&str, u8)); 1] = [("-", ("neg", 9))];
-// last arg is 0 for left assoc, 1 for right assoc
-pub const INFIXES: [(&str, (&str, u8, u8)); 3] =
-	[("+", ("add", 7, 0)), ("-", ("sub", 7, 0)), ("*", ("mul", 8, 0))];
 
 #[derive(PartialEq)]
 pub enum AST {
@@ -68,8 +64,13 @@ pub fn parse(tokens: &[Token]) -> AST {
 		tokens,
 		index: 0,
 		brackets: &HashMap::from(BRACKETS),
-		prefixes: &HashMap::from(PREFIXES),
-		infixes: &HashMap::from(INFIXES),
+		prefixes: &HashMap::from([("-", ("neg", 9))]),
+		infixes: &HashMap::from([
+			("==", ("eql", 5, 0)),
+			("+", ("add", 7, 0)),
+			("-", ("sub", 7, 0)),
+			("*", ("mul", 8, 0)),
+		]),
 	};
 	let mut v = vec![];
 	while c.index < c.tokens.len() {
