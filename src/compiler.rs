@@ -39,38 +39,3 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			.collect(),
 	})
 }
-
-pub fn interpret(program: &Vec<Op>) -> Vec<i64> {
-	let mut stack = vec![];
-	for op in program {
-		match op {
-			Op::PushI(i) => stack.push(*i),
-			Op::NegI => {
-				let a = stack.pop().unwrap();
-				stack.push(-a);
-			}
-			Op::AddI => {
-				let a = stack.pop().unwrap();
-				let b = stack.pop().unwrap();
-				stack.push(a + b);
-			}
-			Op::SubI => {
-				let a = stack.pop().unwrap();
-				let b = stack.pop().unwrap();
-				stack.push(b - a);
-			}
-			Op::MulI => {
-				let a = stack.pop().unwrap();
-				let b = stack.pop().unwrap();
-				stack.push(a * b);
-			}
-			Op::EqlI | Op::EqlB => {
-				let a = stack.pop().unwrap();
-				let b = stack.pop().unwrap();
-				stack.push((a == b) as i64);
-			}
-			Op::PushB(b) => stack.push(*b as i64),
-		}
-	}
-	stack
-}

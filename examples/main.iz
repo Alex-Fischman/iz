@@ -1,4 +1,4 @@
-1 {2 {add}} - 4 5 {sub}
+256 + 1 {2 {add}} - 4 5 {sub} + 100
 
 # groups and blocks with one member are the same as just the member
 

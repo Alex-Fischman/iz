@@ -1,9 +1,11 @@
 mod compiler;
+mod interpreter;
 mod parser;
 mod tokenizer;
 mod typer;
 
 use compiler::*;
+use interpreter::*;
 use parser::*;
 use std::io::{Error, ErrorKind};
 use tokenizer::*;
@@ -17,7 +19,6 @@ fn main() -> Result<(), Error> {
 	let typed = annotate(&ast)?;
 	let program = compile(&typed)?;
 	let output = interpret(&program);
-	println!("{:?}", typed);
 	println!("{:?}", output);
 	Ok(())
 }
@@ -96,12 +97,12 @@ fn typer_test() {
 }
 
 #[test]
-fn compiler_test() {
+fn compiler_and_interpreter_test() {
 	let result = compile(&annotate(&parse(&tokenize("5*2-19== -9"))).unwrap()).unwrap();
 	use Op::*;
 	let target = [PushI(5), PushI(2), MulI, PushI(19), SubI, PushI(9), NegI, EqlI];
 	assert_eq!(result, target);
 	let result = interpret(&result);
-	let target = [1];
+	let target = [true as u8];
 	assert_eq!(result, target);
 }
