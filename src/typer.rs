@@ -52,37 +52,43 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 				let typed_xs = typed_xs?;
 				let t = match l {
 					Lists::Block => {
-						let mut stack: Vec<Type> = vec![];
+						let mut input_stack: Vec<Type> = vec![];
+						let mut output_stack: Vec<Type> = vec![];
 						for x in &typed_xs {
 							let (input, output) = match x {
 								TypedAST::Leaf(_, t) => t,
 								TypedAST::List(_, _, t) => t,
 							};
-							let args = stack.split_off(stack.len() - input.len());
+							let mut input = input.clone();
+							if input.len() > output_stack.len() {
+								let to_remove = input.len() - output_stack.len();
+								input_stack.extend(input.drain(..to_remove));
+							}
+							let args = output_stack.split_off(output_stack.len() - input.len());
 							for (arg, input) in args.iter().zip(input) {
 								match (arg, input) {
-									(arg, Type::Var(v)) if vars[*v] == None => {
-										vars[*v] = Some(arg.clone());
+									(arg, Type::Var(v)) if vars[v] == None => {
+										vars[v] = Some(arg.clone());
 									}
-									(arg, Type::Var(v)) if vars[*v].as_ref() == Some(arg) => {}
+									(arg, Type::Var(v)) if vars[v].as_ref() == Some(arg) => {}
 									(arg, Type::Var(v)) => Err(Error::new(
 										ErrorKind::Other,
 										format!(
 											"type error: {:?} != {:?}",
 											arg,
-											vars[*v].as_ref().unwrap()
+											vars[v].as_ref().unwrap()
 										),
 									))?,
-									(a, b) if a == b => {}
+									(a, b) if a == &b => {}
 									(a, b) => Err(Error::new(
 										ErrorKind::Other,
 										format!("type error: {:?} != {:?}", a, b),
 									))?,
 								}
 							}
-							stack.extend_from_slice(&output);
+							output_stack.extend_from_slice(&output);
 						}
-						(vec![], stack) // todo: recognize inputs while getting outputs?
+						(input_stack, output_stack)
 					}
 				};
 				Ok(TypedAST::List(*l, typed_xs, t))

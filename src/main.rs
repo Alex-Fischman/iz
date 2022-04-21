@@ -17,6 +17,7 @@ fn main() -> Result<(), Error> {
 	let typed = annotate(&ast)?;
 	let program = compile(&typed)?;
 	let output = interpret(&program);
+	println!("{:?}", typed);
 	println!("{:?}", output);
 	Ok(())
 }
