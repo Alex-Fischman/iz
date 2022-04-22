@@ -97,12 +97,17 @@ fn typer_test() {
 }
 
 #[test]
-fn compiler_and_interpreter_test() {
+fn compiler_test() {
 	let result = compile(&annotate(&parse(&tokenize("5*2-19== -9"))).unwrap()).unwrap();
 	use Op::*;
 	let target = [PushI(5), PushI(2), MulI, PushI(19), SubI, PushI(9), NegI, EqlI];
 	assert_eq!(result, target);
-	let result = interpret(&result);
-	let target = [true as u8];
+}
+
+#[test]
+fn interpreter_test() {
+	let program = "true 1 branch true true true true";
+	let result = interpret(&compile(&annotate(&parse(&tokenize(program))).unwrap()).unwrap());
+	let target = [1, 1, 1];
 	assert_eq!(result, target);
 }

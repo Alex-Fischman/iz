@@ -7,8 +7,10 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 			stack.drain((stack.len() - 8)..).collect::<Vec<u8>>().try_into().unwrap(),
 		)
 	};
-	for op in program {
-		match op {
+
+	let mut i = 0;
+	while i < program.len() {
+		match program[i] {
 			Op::PushI(i) => stack.extend_from_slice(&i.to_be_bytes()),
 			Op::NegI => {
 				let a = pop_int(&mut stack);
@@ -32,15 +34,23 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 			Op::EqlI => {
 				let a = pop_int(&mut stack);
 				let b = pop_int(&mut stack);
-				stack.push((a == b) as u8);
+				stack.push(u8::from(a == b));
 			}
-			Op::PushB(b) => stack.push(*b as u8),
+			Op::PushB(b) => stack.push(u8::from(b)),
 			Op::EqlB => {
-				let a = stack.pop();
-				let b = stack.pop();
-				stack.push((a == b) as u8);
+				let a = stack.pop().unwrap();
+				let b = stack.pop().unwrap();
+				stack.push(u8::from(a == b));
+			}
+			Op::BranchBI => {
+				let a = pop_int(&mut stack);
+				let b = stack.pop().unwrap();
+				if b == 1 {
+					i = ((i as i64) + a) as usize;
+				}
 			}
 		}
+		i += 1;
 	}
 	stack
 }

@@ -43,6 +43,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						vec![Type::Bool],
 					),
 					"neg" => (vec![Type::Int], vec![Type::Int]),
+					"branch" => (vec![Type::Bool, Type::Int], vec![]),
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
