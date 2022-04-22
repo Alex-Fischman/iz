@@ -1,5 +1,4 @@
-true  3 branch 1 2 3 4 5
-false 3 branch 1 2 3 4 5
+1 {2 add} == 3
 
 # groups and blocks with one member are the same as just the member
 

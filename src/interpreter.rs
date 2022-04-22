@@ -42,13 +42,6 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 				let b = stack.pop().unwrap();
 				stack.push(u8::from(a == b));
 			}
-			Op::BranchBI => {
-				let a = pop_int(&mut stack);
-				let b = stack.pop().unwrap();
-				if b == 1 {
-					i = ((i as i64) + a) as usize;
-				}
-			}
 		}
 		i += 1;
 	}
