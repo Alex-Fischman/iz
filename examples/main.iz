@@ -1,6 +1,6 @@
 1 {2 add} == 3
 
-# groups and blocks with one member are the same as just the member
+# groups with one member are the same as just the member
 
 # `->` should mean pop value and assign it to a name
 # it takes a lazy argument, but it's not the deepest way to do that

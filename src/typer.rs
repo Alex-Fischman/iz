@@ -7,7 +7,7 @@ pub enum TypedAST {
 	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Type {
 	Int,
 	Bool,
@@ -21,6 +21,27 @@ impl std::fmt::Debug for TypedAST {
 			TypedAST::List(l, v, t) => write!(f, "{:?}{:#?}:{:?}", l, v, t),
 		}
 	}
+}
+
+fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<(), Error> {
+	Ok(match (a, b) {
+		(Type::Var(u), Type::Var(v)) => match (vars[*u], vars[*v]) {
+			(None, None) => todo!(),
+			(Some(a), None) => vars[*v] = Some(a),
+			(None, Some(b)) => vars[*u] = Some(b),
+			(Some(a), Some(b)) => equalize_types(&a, &b, vars)?,
+		},
+		(a, Type::Var(v)) | (Type::Var(v), a) => match (a, vars[*v]) {
+			(a, None) => vars[*v] = Some(*a),
+			(a, Some(b)) => equalize_types(&a, &b, vars)?,
+		},
+		(a, b) => match a == b {
+			true => {}
+			false => {
+				Err(Error::new(ErrorKind::Other, format!("type error: {:?} != {:?}", a, b)))?
+			}
+		},
+	})
 }
 
 pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
@@ -43,6 +64,13 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						vec![Type::Bool],
 					),
 					"neg" => (vec![Type::Int], vec![Type::Int]),
+					"quote" => (
+						vec![Type::Var({
+							vars.push(None);
+							vars.len() - 1
+						})],
+						vec![Type::Var(vars.len() - 1)],
+					),
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
@@ -66,25 +94,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 							}
 							let args = output_stack.split_off(output_stack.len() - input.len());
 							for (arg, input) in args.iter().zip(input) {
-								match (arg, input) {
-									(arg, Type::Var(v)) if vars[v] == None => {
-										vars[v] = Some(arg.clone());
-									}
-									(arg, Type::Var(v)) if vars[v].as_ref() == Some(arg) => {}
-									(arg, Type::Var(v)) => Err(Error::new(
-										ErrorKind::Other,
-										format!(
-											"type error: {:?} != {:?}",
-											arg,
-											vars[v].as_ref().unwrap()
-										),
-									))?,
-									(a, b) if a == &b => {}
-									(a, b) => Err(Error::new(
-										ErrorKind::Other,
-										format!("type error: {:?} != {:?}", a, b),
-									))?,
-								}
+								equalize_types(arg, &input, vars)?;
 							}
 							output_stack.extend_from_slice(&output);
 						}
@@ -115,7 +125,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 		};
 		for t in input.iter_mut().chain(output.iter_mut()) {
 			if let Type::Var(v) = t {
-				*t = vars[*v].clone();
+				*t = vars[*v];
 			}
 		}
 	}
