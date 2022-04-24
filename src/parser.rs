@@ -64,7 +64,7 @@ pub fn parse(tokens: &[Token]) -> AST {
 		tokens,
 		index: 0,
 		brackets: &HashMap::from(BRACKETS),
-		prefixes: &HashMap::from([("-", ("neg", 9)), ("'", ("quote", 15))]),
+		prefixes: &HashMap::from([("-", ("neg", 9))]),
 		infixes: &HashMap::from([
 			("==", ("eql", 5, 0)),
 			("+", ("add", 7, 0)),
