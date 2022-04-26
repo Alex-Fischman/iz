@@ -18,6 +18,7 @@ fn main() -> Result<(), Error> {
 	let ast = parse(&tokens);
 	let typed = annotate(&ast)?;
 	let program = compile(&typed)?;
+	println!("{:?}", program);
 	let output = interpret(&program);
 	println!("{:?}", output);
 	Ok(())

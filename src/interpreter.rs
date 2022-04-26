@@ -8,9 +8,9 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 		)
 	};
 
-	let mut i = 0;
-	while i < program.len() {
-		match program[i] {
+	let mut ip: i64 = 0;
+	while ip < program.len().try_into().unwrap() {
+		match program[ip as usize] {
 			Op::PushI(i) => stack.extend_from_slice(&i.to_be_bytes()),
 			Op::NegI => {
 				let a = pop_int(&mut stack);
@@ -42,8 +42,10 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 				let b = stack.pop().unwrap();
 				stack.push(u8::from(a == b));
 			}
+			Op::Ip => stack.extend_from_slice(&ip.to_be_bytes()),
+			Op::Jump => ip = pop_int(&mut stack),
 		}
-		i += 1;
+		ip += 1;
 	}
 	stack
 }

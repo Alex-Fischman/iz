@@ -1,4 +1,4 @@
-1 {2 add} == 3
+{1 2 add} call
 
 # groups with one member are the same as just the member
 

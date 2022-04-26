@@ -7,10 +7,11 @@ pub enum TypedAST {
 	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
 	Int,
 	Bool,
+	Block(Vec<Type>, Vec<Type>),
 	Var(usize),
 }
 
@@ -25,14 +26,14 @@ impl std::fmt::Debug for TypedAST {
 
 fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<(), Error> {
 	Ok(match (a, b) {
-		(Type::Var(u), Type::Var(v)) => match (vars[*u], vars[*v]) {
+		(Type::Var(u), Type::Var(v)) => match (vars[*u].clone(), vars[*v].clone()) {
 			(None, None) => todo!(),
-			(Some(a), None) => vars[*v] = Some(a),
-			(None, Some(b)) => vars[*u] = Some(b),
+			(Some(a), None) => vars[*v] = Some(a.clone()),
+			(None, Some(b)) => vars[*u] = Some(b.clone()),
 			(Some(a), Some(b)) => equalize_types(&a, &b, vars)?,
 		},
-		(a, Type::Var(v)) | (Type::Var(v), a) => match (a, vars[*v]) {
-			(a, None) => vars[*v] = Some(*a),
+		(a, Type::Var(v)) | (Type::Var(v), a) => match (a, vars[*v].clone()) {
+			(a, None) => vars[*v] = Some(a.clone()),
 			(a, Some(b)) => equalize_types(&a, &b, vars)?,
 		},
 		(a, b) => match a == b {
@@ -64,6 +65,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						vec![Type::Bool],
 					),
 					"neg" => (vec![Type::Int], vec![Type::Int]),
+					"call" => todo!(),
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
@@ -71,28 +73,26 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 				let typed_xs: Result<Vec<TypedAST>, Error> =
 					xs.iter().map(|x| annotate(x, vars)).collect();
 				let typed_xs = typed_xs?;
-				let t = match l {
-					Lists::Block => {
-						let mut input_stack: Vec<Type> = vec![];
-						let mut output_stack: Vec<Type> = vec![];
-						for x in &typed_xs {
-							let (input, output) = match x {
-								TypedAST::Leaf(_, t) => t,
-								TypedAST::List(_, _, t) => t,
-							};
-							let mut input = input.clone();
-							if input.len() > output_stack.len() {
-								let to_remove = input.len() - output_stack.len();
-								input_stack.extend(input.drain(..to_remove));
-							}
-							let args = output_stack.split_off(output_stack.len() - input.len());
-							for (arg, input) in args.iter().zip(input) {
-								equalize_types(arg, &input, vars)?;
-							}
-							output_stack.extend_from_slice(&output);
-						}
-						(input_stack, output_stack)
+				let mut input_stack: Vec<Type> = vec![];
+				let mut output_stack: Vec<Type> = vec![];
+				for x in &typed_xs {
+					let (input, output) = match x {
+						TypedAST::Leaf(_, t) => t,
+						TypedAST::List(_, _, t) => t,
+					};
+					let mut input = input.clone();
+					if input.len() > output_stack.len() {
+						input_stack.extend(input.drain(..input.len() - output_stack.len()));
 					}
+					let args = output_stack.split_off(output_stack.len() - input.len());
+					for (arg, input) in args.iter().zip(input) {
+						equalize_types(arg, &input, vars)?;
+					}
+					output_stack.extend_from_slice(&output);
+				}
+				let t = match l {
+					Lists::Block => (vec![], vec![Type::Block(input_stack, output_stack)]),
+					Lists::Op => (input_stack, output_stack),
 				};
 				Ok(TypedAST::List(*l, typed_xs, t))
 			}
@@ -118,7 +118,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 		};
 		for t in input.iter_mut().chain(output.iter_mut()) {
 			if let Type::Var(v) = t {
-				*t = vars[*v];
+				*t = vars[*v].clone();
 			}
 		}
 	}
