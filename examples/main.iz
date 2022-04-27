@@ -1,4 +1,4 @@
-{1 2 add} call
+1 {2 add}
 
 # groups with one member are the same as just the member
 

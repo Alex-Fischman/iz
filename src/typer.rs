@@ -11,7 +11,6 @@ pub enum TypedAST {
 pub enum Type {
 	Int,
 	Bool,
-	Block(Vec<Type>, Vec<Type>),
 	Var(usize),
 }
 
@@ -65,7 +64,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						vec![Type::Bool],
 					),
 					"neg" => (vec![Type::Int], vec![Type::Int]),
-					"call" => todo!(),
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
@@ -91,8 +89,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					output_stack.extend_from_slice(&output);
 				}
 				let t = match l {
-					Lists::Block => (vec![], vec![Type::Block(input_stack, output_stack)]),
-					Lists::Op => (input_stack, output_stack),
+					Lists::Block => (input_stack, output_stack),
 				};
 				Ok(TypedAST::List(*l, typed_xs, t))
 			}
