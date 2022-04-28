@@ -30,12 +30,19 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			}
 			s => Err(Error::new(ErrorKind::Other, format!("unknown op {:?} {:?}", s, t)))?,
 		},
-		TypedAST::List(Lists::Block, xs, _) => xs
-			.iter()
-			.map(|x| compile(x))
-			.collect::<Result<Vec<Vec<Op>>, Error>>()?
-			.into_iter()
-			.flatten()
-			.collect(),
+		TypedAST::List(l, xs, _) => {
+			let code = xs
+				.iter()
+				.map(|x| compile(x))
+				.collect::<Result<Vec<Vec<Op>>, Error>>()?
+				.into_iter()
+				.flatten()
+				.collect();
+			match l {
+				None => code,
+				Some(Lists::Group) => todo!(),
+				Some(Lists::Block) => todo!(),
+			}
+		}
 	})
 }

@@ -3,14 +3,16 @@ use crate::tokenizer::Token;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Lists {
 	Block,
+	Group,
 }
 
-pub const BRACKETS: [(char, (char, Lists)); 1] = [('{', ('}', Lists::Block))];
+pub const BRACKETS: [(char, (char, Lists)); 2] =
+	[('(', (')', Lists::Group)), ('{', ('}', Lists::Block))];
 
 #[derive(PartialEq)]
 pub enum AST {
 	Leaf(Token),
-	List(Lists, Vec<AST>),
+	List(Option<Lists>, Vec<AST>),
 }
 
 impl std::fmt::Debug for AST {
@@ -37,14 +39,14 @@ pub fn parse(tokens: &[Token]) -> AST {
 		c.index += 1;
 		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
 			let op = AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] });
-			AST::List(Lists::Block, vec![parse(c, bp), op])
+			AST::List(None, vec![parse(c, bp), op])
 		} else if let Some(&(end, l)) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
 				v.push(parse(c, 0));
 			}
 			c.index += 1;
-			AST::List(l, v)
+			AST::List(Some(l), v)
 		} else {
 			AST::Leaf(t)
 		};
@@ -53,7 +55,7 @@ pub fn parse(tokens: &[Token]) -> AST {
 				Some(&(s, bp, assoc)) if bp > rbp => {
 					c.index += 1;
 					let op = AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] });
-					lhs = AST::List(Lists::Block, vec![lhs, parse(c, bp - assoc), op]);
+					lhs = AST::List(None, vec![lhs, parse(c, bp - assoc), op]);
 				}
 				_ => break,
 			}
@@ -76,5 +78,5 @@ pub fn parse(tokens: &[Token]) -> AST {
 	while c.index < c.tokens.len() {
 		v.push(parse(&mut c, 0));
 	}
-	AST::List(Lists::Block, v)
+	AST::List(None, v)
 }

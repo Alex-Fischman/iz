@@ -4,7 +4,7 @@ use std::io::{Error, ErrorKind};
 #[derive(PartialEq)]
 pub enum TypedAST {
 	Leaf(crate::tokenizer::Token, (Vec<Type>, Vec<Type>)),
-	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
+	List(Option<Lists>, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -12,6 +12,8 @@ pub enum Type {
 	Int,
 	Bool,
 	Var(usize),
+	Group(Vec<Type>),
+	Block(Vec<Type>, Vec<Type>),
 }
 
 impl std::fmt::Debug for TypedAST {
@@ -35,6 +37,19 @@ fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<()
 			(a, None) => vars[*v] = Some(a.clone()),
 			(a, Some(b)) => equalize_types(&a, &b, vars)?,
 		},
+		(Type::Group(a), Type::Group(b)) => {
+			for (a, b) in a.iter().zip(b) {
+				equalize_types(a, b, vars)?;
+			}
+		}
+		(Type::Block(a, c), Type::Block(b, d)) => {
+			for (a, b) in a.iter().zip(b) {
+				equalize_types(a, b, vars)?;
+			}
+			for (c, d) in c.iter().zip(d) {
+				equalize_types(c, d, vars)?;
+			}
+		}
 		(a, b) => match a == b {
 			true => {}
 			false => {
@@ -88,10 +103,17 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					}
 					output_stack.extend_from_slice(&output);
 				}
-				let t = match l {
-					Lists::Block => (input_stack, output_stack),
-				};
-				Ok(TypedAST::List(*l, typed_xs, t))
+				Ok(TypedAST::List(
+					*l,
+					typed_xs,
+					match l {
+						None => (input_stack, output_stack),
+						Some(Lists::Group) => (input_stack, vec![Type::Group(output_stack)]),
+						Some(Lists::Block) => {
+							(vec![], vec![Type::Block(input_stack, output_stack)])
+						}
+					},
+				))
 			}
 		}
 	}
