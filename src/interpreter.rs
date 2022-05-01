@@ -10,7 +10,7 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 	};
 
 	let mut ip: usize = 0;
-	while ip < program.len().try_into().unwrap() {
+	while ip < program.len() {
 		match program[ip] {
 			Op::PushI(i) => data_stack.extend(&i.to_be_bytes()),
 			Op::NegI => {
@@ -48,6 +48,10 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 				ip += a as usize;
 			}
 			Op::Ip => data_stack.extend(&ip.to_be_bytes()),
+			Op::Call => {
+				call_stack.push(ip);
+				ip = pop_int(&mut data_stack) as usize;
+			}
 			Op::Return => ip = call_stack.pop().unwrap(),
 		}
 		ip += 1;

@@ -14,6 +14,7 @@ pub enum Op {
 	EqlB,
 	Jump,
 	Ip,
+	Call,
 	Return,
 }
 
