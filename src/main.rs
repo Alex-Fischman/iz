@@ -107,7 +107,7 @@ fn compiler_test() {
 
 #[test]
 fn interpreter_test() {
-	let program = "5 * 2 - 19 == -9";
+	let program = "((1) {2 add} call) == 3";
 	let result = interpret(&compile(&annotate(&parse(&tokenize(program))).unwrap()).unwrap());
 	let target = [1];
 	assert_eq!(result, target);

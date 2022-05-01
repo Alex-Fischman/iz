@@ -19,12 +19,12 @@ pub enum Type {
 impl PartialEq for Type {
 	fn eq(&self, other: &Type) -> bool {
 		match (self, other) {
+			(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => &a[0] == b,
 			(Type::Int, Type::Int) => true,
 			(Type::Bool, Type::Bool) => true,
 			(Type::Var(_), Type::Var(_)) => unreachable!(),
 			(Type::Block(a, c), Type::Block(b, d)) => a == b && c == d,
 			(Type::Group(a), Type::Group(b)) => a.iter().zip(b).all(|(a, b)| a == b),
-			(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => &a[0] == b,
 			_ => false,
 		}
 	}
@@ -41,6 +41,9 @@ impl std::fmt::Debug for TypedAST {
 
 fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<(), Error> {
 	Ok(match (a, b) {
+		(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => {
+			equalize_types(&a[0], b, vars)?;
+		}
 		(Type::Var(u), Type::Var(v)) => match (vars[*u].clone(), vars[*v].clone()) {
 			(None, None) => todo!(),
 			(Some(a), None) => vars[*v] = Some(a.clone()),
@@ -60,9 +63,6 @@ fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<()
 				equalize_types(a, b, vars)?;
 			}
 		}
-		(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => {
-			equalize_types(&a[0], b, vars)?;
-		}
 		(a, b) => match a == b {
 			true => {}
 			false => {
@@ -81,6 +81,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					s if s.chars().next().unwrap().is_numeric() => (vec![], vec![Type::Int]),
 					"true" | "false" => (vec![], vec![Type::Bool]),
 					"add" | "sub" | "mul" => (vec![Type::Int, Type::Int], vec![Type::Int]),
+					"neg" => (vec![Type::Int], vec![Type::Int]),
 					"eql" => (
 						vec![
 							Type::Var({
@@ -91,7 +92,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						],
 						vec![Type::Bool],
 					),
-					"neg" => (vec![Type::Int], vec![Type::Int]),
 					"call" => {
 						vars.push(None);
 						vars.push(None);
@@ -156,22 +156,31 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 			Err(Error::new(ErrorKind::Other, format!("type error: unsolved var")))?
 		}
 	}
-	fn replace_vars(ast: &mut TypedAST, vars: &Vec<Type>) {
+	fn replace_vars_in_ast(ast: &mut TypedAST, vars: &Vec<Type>) {
 		if let TypedAST::List(_, xs, _) = ast {
-			for x in xs {
-				replace_vars(x, vars);
-			}
+			xs.iter_mut().for_each(|x| replace_vars_in_ast(x, vars));
 		}
 		let (input, output) = &mut match ast {
 			TypedAST::Leaf(_, t) => t,
 			TypedAST::List(_, _, t) => t,
 		};
-		for t in input.iter_mut().chain(output.iter_mut()) {
-			if let Type::Var(v) = t {
-				*t = vars[*v].clone();
+		println!("{:?}", input);
+		println!("{:?}", output);
+		println!("");
+		input.iter_mut().chain(output.iter_mut()).for_each(|t| replace_vars_in_type(t, vars));
+	}
+	fn replace_vars_in_type(t: &mut Type, vars: &Vec<Type>) {
+		match t {
+			Type::Int => {}
+			Type::Bool => {}
+			Type::Var(v) => *t = vars[*v].clone(),
+			Type::Block(a, b) => {
+				replace_vars_in_type(a, vars);
+				replace_vars_in_type(b, vars);
 			}
+			Type::Group(xs) => xs.iter_mut().for_each(|x| replace_vars_in_type(x, vars)),
 		}
 	}
-	replace_vars(&mut out, &vars.into_iter().map(Option::unwrap).collect());
+	replace_vars_in_ast(&mut out, &vars.into_iter().map(Option::unwrap).collect());
 	Ok(out)
 }

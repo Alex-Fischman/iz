@@ -33,7 +33,7 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			s if t == &(vec![], vec![Type::Int]) && s.chars().next().unwrap().is_numeric() => {
 				vec![Op::PushI(s.parse::<i64>().unwrap())]
 			}
-			s => Err(Error::new(ErrorKind::Other, format!("unknown op {:?} {:?}", s, t)))?,
+			s => Err(Error::new(ErrorKind::Other, format!("unknown op {} {:?}", s, t)))?,
 		},
 		TypedAST::List(l, xs, _) => {
 			let code: Vec<Op> = xs
