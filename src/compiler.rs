@@ -29,6 +29,7 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			"true" if t == &(vec![], vec![Type::Bool]) => vec![Op::PushB(true)],
 			"false" if t == &(vec![], vec![Type::Bool]) => vec![Op::PushB(false)],
 			"eql" if t == &(vec![Type::Bool, Type::Bool], vec![Type::Bool]) => vec![Op::EqlB],
+			"call" => vec![Op::Call],
 			s if t == &(vec![], vec![Type::Int]) && s.chars().next().unwrap().is_numeric() => {
 				vec![Op::PushI(s.parse::<i64>().unwrap())]
 			}
@@ -43,8 +44,7 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 				.flatten()
 				.collect();
 			match l {
-				None => code,
-				Some(Lists::Group) => todo!(),
+				None | Some(Lists::Group) => code,
 				Some(Lists::Block) => {
 					let code_len = code.len() as i64;
 					let mut block = vec![];

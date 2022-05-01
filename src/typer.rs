@@ -7,13 +7,27 @@ pub enum TypedAST {
 	List(Option<Lists>, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Type {
 	Int,
 	Bool,
 	Var(usize),
+	Block(Box<Type>, Box<Type>),
 	Group(Vec<Type>),
-	Block(Vec<Type>, Vec<Type>),
+}
+
+impl PartialEq for Type {
+	fn eq(&self, other: &Type) -> bool {
+		match (self, other) {
+			(Type::Int, Type::Int) => true,
+			(Type::Bool, Type::Bool) => true,
+			(Type::Var(_), Type::Var(_)) => unreachable!(),
+			(Type::Block(a, c), Type::Block(b, d)) => a == b && c == d,
+			(Type::Group(a), Type::Group(b)) => a.iter().zip(b).all(|(a, b)| a == b),
+			(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => &a[0] == b,
+			_ => false,
+		}
+	}
 }
 
 impl std::fmt::Debug for TypedAST {
@@ -37,18 +51,17 @@ fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<()
 			(a, None) => vars[*v] = Some(a.clone()),
 			(a, Some(b)) => equalize_types(&a, &b, vars)?,
 		},
+		(Type::Block(a, c), Type::Block(b, d)) => {
+			equalize_types(a, b, vars)?;
+			equalize_types(c, d, vars)?;
+		}
 		(Type::Group(a), Type::Group(b)) => {
 			for (a, b) in a.iter().zip(b) {
 				equalize_types(a, b, vars)?;
 			}
 		}
-		(Type::Block(a, c), Type::Block(b, d)) => {
-			for (a, b) in a.iter().zip(b) {
-				equalize_types(a, b, vars)?;
-			}
-			for (c, d) in c.iter().zip(d) {
-				equalize_types(c, d, vars)?;
-			}
+		(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => {
+			equalize_types(&a[0], b, vars)?;
 		}
 		(a, b) => match a == b {
 			true => {}
@@ -79,6 +92,20 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						vec![Type::Bool],
 					),
 					"neg" => (vec![Type::Int], vec![Type::Int]),
+					"call" => {
+						vars.push(None);
+						vars.push(None);
+						(
+							vec![
+								Type::Var(vars.len() - 1),
+								Type::Block(
+									Box::new(Type::Var(vars.len() - 1)),
+									Box::new(Type::Var(vars.len() - 2)),
+								),
+							],
+							vec![Type::Var(vars.len() - 2)],
+						)
+					}
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
@@ -109,9 +136,13 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					match l {
 						None => (input_stack, output_stack),
 						Some(Lists::Group) => (input_stack, vec![Type::Group(output_stack)]),
-						Some(Lists::Block) => {
-							(vec![], vec![Type::Block(input_stack, output_stack)])
-						}
+						Some(Lists::Block) => (
+							vec![],
+							vec![Type::Block(
+								Box::new(Type::Group(input_stack)),
+								Box::new(Type::Group(output_stack)),
+							)],
+						),
 					},
 				))
 			}
