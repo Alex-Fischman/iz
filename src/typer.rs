@@ -101,7 +101,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					for (arg, input) in args.iter().zip(input) {
 						equalize_types(arg, &input, vars)?;
 					}
-					output_stack.extend_from_slice(&output);
+					output_stack.extend_from_slice(output);
 				}
 				Ok(TypedAST::List(
 					*l,

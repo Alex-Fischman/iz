@@ -12,6 +12,9 @@ pub enum Op {
 	EqlI,
 	PushB(bool),
 	EqlB,
+	Jump,
+	Ip,
+	Return,
 }
 
 pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
@@ -31,7 +34,7 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			s => Err(Error::new(ErrorKind::Other, format!("unknown op {:?} {:?}", s, t)))?,
 		},
 		TypedAST::List(l, xs, _) => {
-			let code = xs
+			let code: Vec<Op> = xs
 				.iter()
 				.map(|x| compile(x))
 				.collect::<Result<Vec<Vec<Op>>, Error>>()?
@@ -41,7 +44,14 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			match l {
 				None => code,
 				Some(Lists::Group) => todo!(),
-				Some(Lists::Block) => todo!(),
+				Some(Lists::Block) => {
+					let code_len = code.len() as i64;
+					let mut block = vec![];
+					block.extend([Op::PushI(1 + code_len), Op::Jump]);
+					block.extend(code);
+					block.extend([Op::Return, Op::Ip, Op::PushI(1 + code_len), Op::SubI]);
+					block
+				}
 			}
 		}
 	})
