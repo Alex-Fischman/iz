@@ -74,25 +74,25 @@ fn typer_test() {
 				TypedAST::List(
 					Lists::Group,
 					vec![
-						unit("1", 1, (vec![], Type::Int)),
-						unit("5", 5, (vec![], Type::Int)),
-						unit("sub", 3, (vec![Type::Int, Type::Int], Type::Int)),
+						unit("1", 1, (Type::unit(), Type::Int)),
+						unit("5", 5, (Type::unit(), Type::Int)),
+						unit("sub", 3, (Type::two_ints(), Type::Int)),
 					],
-					(vec![], Type::Int),
+					(Type::unit(), Type::Int),
 				),
 				TypedAST::List(
 					Lists::Group,
 					vec![
-						unit("4", 11, (vec![], Type::Int)),
-						unit("neg", 10, (vec![Type::Int], Type::Int)),
+						unit("4", 11, (Type::unit(), Type::Int)),
+						unit("neg", 10, (Type::Int, Type::Int)),
 					],
-					(vec![], Type::Int),
+					(Type::unit(), Type::Int),
 				),
-				unit("eql", 7, (vec![Type::Int, Type::Int], Type::Bool)),
+				unit("eql", 7, (Type::two_ints(), Type::Bool)),
 			],
-			(vec![], Type::Bool),
+			(Type::unit(), Type::Bool),
 		)],
-		(vec![], Type::Bool),
+		(Type::unit(), Type::Bool),
 	);
 	assert_eq!(result, target);
 }
@@ -107,7 +107,7 @@ fn compiler_test() {
 
 #[test]
 fn interpreter_test() {
-	let program = "((1) {2 add} call) == 3";
+	let program = "((1) {2 (add)} call) == 3";
 	let result = interpret(&compile(&annotate(&parse(&tokenize(program))).unwrap()).unwrap());
 	let target = [1];
 	assert_eq!(result, target);

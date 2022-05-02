@@ -82,18 +82,6 @@ fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<()
 	})
 }
 
-fn flatten(ts: Vec<Type>) -> Vec<Type> {
-	let mut out = vec![];
-	for t in ts {
-		if let Type::Group(ts) = t {
-			out.extend(flatten(ts));
-		} else {
-			out.push(t.clone());
-		}
-	}
-	out
-}
-
 pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 	fn annotate(ast: &AST, vars: &mut Vec<Option<Type>>) -> Result<TypedAST, Error> {
 		match ast {
@@ -143,26 +131,32 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						TypedAST::Leaf(_, t) => t,
 						TypedAST::List(_, _, t) => t,
 					};
-					let mut input = flatten(vec![input.clone()]);
-					let output = flatten(vec![output.clone()]);
-					while !input.is_empty() && !output_stack.is_empty() {
-						let i = input.pop().unwrap();
-						let mut args = vec![output_stack.pop().unwrap()];
-						while let Err(_) = equalize_types(&i, &Type::Group(args.clone()), vars) {
-							match output_stack.pop() {
-								Some(o) => args.insert(0, o),
-								None => Err(Error::new(
-									ErrorKind::Other,
-									format!(
-										"could not equalize input {:?} with stack {:?}",
-										input, args
-									),
-								))?,
-							}
+					fn flatten(t: &Type) -> Vec<Type> {
+						if let Type::Group(ts) = t {
+							ts.iter().map(flatten).flatten().collect()
+						} else {
+							vec![t.clone()]
 						}
 					}
+					let mut input = flatten(input);
+					'a: while !output_stack.is_empty() && !input.is_empty() {
+						for i in (0..output_stack.len()).rev() {
+							for j in 1..=input.len() {
+								if let Ok(()) = equalize_types(
+									&Type::Group(output_stack[i..].to_vec()),
+									&Type::Group(input[..j].to_vec()),
+									vars,
+								) {
+									output_stack.splice(i.., []);
+									input.splice(..j, []);
+									continue 'a;
+								}
+							}
+						}
+						break;
+					}
 					input_stack.extend(input);
-					output_stack.extend(output);
+					output_stack.extend(flatten(output));
 				}
 				Ok(TypedAST::List(
 					*l,
