@@ -74,25 +74,25 @@ fn typer_test() {
 				TypedAST::List(
 					Lists::Group,
 					vec![
-						unit("1", 1, (vec![], vec![Type::Int])),
-						unit("5", 5, (vec![], vec![Type::Int])),
-						unit("sub", 3, (vec![Type::Int, Type::Int], vec![Type::Int])),
+						unit("1", 1, (vec![], Type::Int)),
+						unit("5", 5, (vec![], Type::Int)),
+						unit("sub", 3, (vec![Type::Int, Type::Int], Type::Int)),
 					],
-					(vec![], vec![Type::Int]),
+					(vec![], Type::Int),
 				),
 				TypedAST::List(
 					Lists::Group,
 					vec![
-						unit("4", 11, (vec![], vec![Type::Int])),
-						unit("neg", 10, (vec![Type::Int], vec![Type::Int])),
+						unit("4", 11, (vec![], Type::Int)),
+						unit("neg", 10, (vec![Type::Int], Type::Int)),
 					],
-					(vec![], vec![Type::Int]),
+					(vec![], Type::Int),
 				),
-				unit("eql", 7, (vec![Type::Int, Type::Int], vec![Type::Bool])),
+				unit("eql", 7, (vec![Type::Int, Type::Int], Type::Bool)),
 			],
-			(vec![], vec![Type::Bool]),
+			(vec![], Type::Bool),
 		)],
-		(vec![], vec![Type::Bool]),
+		(vec![], Type::Bool),
 	);
 	assert_eq!(result, target);
 }
