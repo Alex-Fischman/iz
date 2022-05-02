@@ -21,18 +21,18 @@ pub enum Op {
 pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 	Ok(match ast {
 		TypedAST::Leaf(token, t) => match token.string.as_str() {
-			"neg" if t == &(Type::Int, Type::Int) => vec![Op::NegI],
-			"add" if t == &(Type::two_ints(), Type::Int) => vec![Op::AddI],
-			"sub" if t == &(Type::two_ints(), Type::Int) => vec![Op::SubI],
-			"mul" if t == &(Type::two_ints(), Type::Int) => vec![Op::MulI],
-			"eql" if t == &(Type::two_ints(), Type::Bool) => vec![Op::EqlI],
-			"true" if t == &(Type::unit(), Type::Bool) => vec![Op::PushB(true)],
-			"false" if t == &(Type::unit(), Type::Bool) => vec![Op::PushB(false)],
-			"eql" if t == &(Type::Group(vec![Type::Bool, Type::Bool]), Type::Bool) => {
+			"neg" if t == &(vec![Type::Int], vec![Type::Int]) => vec![Op::NegI],
+			"add" if t == &(vec![Type::Int, Type::Int], vec![Type::Int]) => vec![Op::AddI],
+			"sub" if t == &(vec![Type::Int, Type::Int], vec![Type::Int]) => vec![Op::SubI],
+			"mul" if t == &(vec![Type::Int, Type::Int], vec![Type::Int]) => vec![Op::MulI],
+			"eql" if t == &(vec![Type::Int, Type::Int], vec![Type::Bool]) => vec![Op::EqlI],
+			"true" if t == &(vec![], vec![Type::Bool]) => vec![Op::PushB(true)],
+			"false" if t == &(vec![], vec![Type::Bool]) => vec![Op::PushB(false)],
+			"eql" if t == &(vec![Type::Bool, Type::Bool], vec![Type::Bool]) => {
 				vec![Op::EqlB]
 			}
 			"call" => vec![Op::Call],
-			s if t == &(Type::unit(), Type::Int) && s.chars().next().unwrap().is_numeric() => {
+			s if t == &(vec![], vec![Type::Int]) && s.chars().next().unwrap().is_numeric() => {
 				vec![Op::PushI(s.parse::<i64>().unwrap())]
 			}
 			s => Err(Error::new(ErrorKind::Other, format!("unknown op {} {:?}", s, t)))?,

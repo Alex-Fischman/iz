@@ -3,8 +3,8 @@ use std::io::{Error, ErrorKind};
 
 #[derive(PartialEq)]
 pub enum TypedAST {
-	Leaf(crate::tokenizer::Token, (Type, Type)),
-	List(Lists, Vec<TypedAST>, (Type, Type)),
+	Leaf(crate::tokenizer::Token, (Vec<Type>, Vec<Type>)),
+	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
 #[derive(Clone, Debug)]
@@ -12,29 +12,18 @@ pub enum Type {
 	Int,
 	Bool,
 	Var(usize),
-	Block(Box<Type>, Box<Type>),
-	Group(Vec<Type>),
-}
-
-impl Type {
-	pub fn unit() -> Type {
-		Type::Group(vec![])
-	}
-
-	pub fn two_ints() -> Type {
-		Type::Group(vec![Type::Int, Type::Int])
-	}
+	Block(Vec<Type>, Vec<Type>),
 }
 
 impl PartialEq for Type {
 	fn eq(&self, other: &Type) -> bool {
 		match (self, other) {
-			(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => &a[0] == b,
 			(Type::Int, Type::Int) => true,
 			(Type::Bool, Type::Bool) => true,
 			(Type::Var(_), Type::Var(_)) => unreachable!(),
-			(Type::Block(a, c), Type::Block(b, d)) => a == b && c == d,
-			(Type::Group(a), Type::Group(b)) => a.iter().zip(b).all(|(a, b)| a == b),
+			(Type::Block(a, c), Type::Block(b, d)) => {
+				a.iter().zip(b).all(|(a, b)| a == b) && c.iter().zip(d).all(|(c, d)| c == d)
+			}
 			_ => false,
 		}
 	}
@@ -51,9 +40,6 @@ impl std::fmt::Debug for TypedAST {
 
 fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<(), Error> {
 	Ok(match (a, b) {
-		(Type::Group(a), b) | (b, Type::Group(a)) if a.len() == 1 => {
-			equalize_types(&a[0], b, vars)?;
-		}
 		(Type::Var(u), Type::Var(v)) => match (vars[*u].clone(), vars[*v].clone()) {
 			(None, None) => todo!(),
 			(Some(a), None) => vars[*v] = Some(a.clone()),
@@ -65,12 +51,11 @@ fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<()
 			(a, Some(b)) => equalize_types(&a, &b, vars)?,
 		},
 		(Type::Block(a, c), Type::Block(b, d)) => {
-			equalize_types(a, b, vars)?;
-			equalize_types(c, d, vars)?;
-		}
-		(Type::Group(a), Type::Group(b)) => {
 			for (a, b) in a.iter().zip(b) {
 				equalize_types(a, b, vars)?;
+			}
+			for (c, d) in c.iter().zip(d) {
+				equalize_types(c, d, vars)?;
 			}
 		}
 		(a, b) => match a == b {
@@ -88,34 +73,21 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 			AST::Leaf(token) => Ok(TypedAST::Leaf(
 				token.clone(),
 				match token.string.as_str() {
-					s if s.chars().next().unwrap().is_numeric() => (Type::unit(), Type::Int),
-					"true" | "false" => (Type::unit(), Type::Bool),
-					"add" | "sub" | "mul" => (Type::two_ints(), Type::Int),
-					"neg" => (Type::Int, Type::Int),
+					s if s.chars().next().unwrap().is_numeric() => (vec![], vec![Type::Int]),
+					"true" | "false" => (vec![], vec![Type::Bool]),
+					"add" | "sub" | "mul" => (vec![Type::Int, Type::Int], vec![Type::Int]),
+					"neg" => (vec![Type::Int], vec![Type::Int]),
 					"eql" => (
-						Type::Group(vec![
+						vec![
 							Type::Var({
 								vars.push(None);
 								vars.len() - 1
 							}),
 							Type::Var(vars.len() - 1),
-						]),
-						Type::Bool,
+						],
+						vec![Type::Bool],
 					),
-					"call" => {
-						vars.push(None);
-						vars.push(None);
-						(
-							Type::Group(vec![
-								Type::Var(vars.len() - 1),
-								Type::Block(
-									Box::new(Type::Var(vars.len() - 1)),
-									Box::new(Type::Var(vars.len() - 2)),
-								),
-							]),
-							Type::Var(vars.len() - 2),
-						)
-					}
+					"call" => todo!(),
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
@@ -131,45 +103,19 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						TypedAST::Leaf(_, t) => t,
 						TypedAST::List(_, _, t) => t,
 					};
-					fn flatten(t: &Type) -> Vec<Type> {
-						if let Type::Group(ts) = t {
-							ts.iter().map(flatten).flatten().collect()
-						} else {
-							vec![t.clone()]
-						}
-					}
-					let mut input = flatten(input);
-					'a: while !output_stack.is_empty() && !input.is_empty() {
-						for i in (0..output_stack.len()).rev() {
-							for j in 1..=input.len() {
-								if let Ok(()) = equalize_types(
-									&Type::Group(output_stack[i..].to_vec()),
-									&Type::Group(input[..j].to_vec()),
-									vars,
-								) {
-									output_stack.splice(i.., []);
-									input.splice(..j, []);
-									continue 'a;
-								}
-							}
-						}
-						break;
+					let mut input = input.clone();
+					while !output_stack.is_empty() && !input.is_empty() {
+						equalize_types(&output_stack.pop().unwrap(), &input.remove(0), vars)?;
 					}
 					input_stack.extend(input);
-					output_stack.extend(flatten(output));
+					output_stack.extend(output.clone());
 				}
 				Ok(TypedAST::List(
 					*l,
 					typed_xs,
 					match l {
-						Lists::Group => (Type::Group(input_stack), Type::Group(output_stack)),
-						Lists::Block => (
-							Type::unit(),
-							Type::Block(
-								Box::new(Type::Group(input_stack)),
-								Box::new(Type::Group(output_stack)),
-							),
-						),
+						Lists::Group => (input_stack, output_stack),
+						Lists::Block => (vec![], vec![Type::Block(input_stack, output_stack)]),
 					},
 				))
 			}
@@ -194,16 +140,17 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 		replace_vars_in_type(input, vars);
 		replace_vars_in_type(output, vars);
 	}
-	fn replace_vars_in_type(t: &mut Type, vars: &Vec<Type>) {
-		match t {
-			Type::Int => {}
-			Type::Bool => {}
-			Type::Var(v) => *t = vars[*v].clone(),
-			Type::Block(a, b) => {
-				replace_vars_in_type(a, vars);
-				replace_vars_in_type(b, vars);
+	fn replace_vars_in_type(ts: &mut Vec<Type>, vars: &Vec<Type>) {
+		for t in ts {
+			match t {
+				Type::Int => {}
+				Type::Bool => {}
+				Type::Var(v) => *t = vars[*v].clone(),
+				Type::Block(a, b) => {
+					replace_vars_in_type(a, vars);
+					replace_vars_in_type(b, vars);
+				}
 			}
-			Type::Group(xs) => xs.iter_mut().for_each(|x| replace_vars_in_type(x, vars)),
 		}
 	}
 	replace_vars_in_ast(&mut out, &vars.into_iter().map(Option::unwrap).collect());
