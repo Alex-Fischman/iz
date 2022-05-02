@@ -51,7 +51,6 @@ pub fn interpret(program: &Vec<Op>) -> Vec<u8> {
 			}
 			Op::Return => ip = call_stack.pop().unwrap(),
 		}
-		println!("{:?}", data_stack);
 		ip += 1;
 	}
 	assert!(call_stack.is_empty());

@@ -12,7 +12,7 @@ pub const BRACKETS: [(char, (char, Lists)); 2] =
 #[derive(PartialEq)]
 pub enum AST {
 	Leaf(Token),
-	List(Option<Lists>, Vec<AST>),
+	List(Lists, Vec<AST>),
 }
 
 impl std::fmt::Debug for AST {
@@ -39,14 +39,14 @@ pub fn parse(tokens: &[Token]) -> AST {
 		c.index += 1;
 		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
 			let op = AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] });
-			AST::List(None, vec![parse(c, bp), op])
+			AST::List(Lists::Group, vec![parse(c, bp), op])
 		} else if let Some(&(end, l)) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
 				v.push(parse(c, 0));
 			}
 			c.index += 1;
-			AST::List(Some(l), v)
+			AST::List(l, v)
 		} else {
 			AST::Leaf(t)
 		};
@@ -55,7 +55,7 @@ pub fn parse(tokens: &[Token]) -> AST {
 				Some(&(s, bp, assoc)) if bp > rbp => {
 					c.index += 1;
 					let op = AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] });
-					lhs = AST::List(None, vec![lhs, parse(c, bp - assoc), op]);
+					lhs = AST::List(Lists::Group, vec![lhs, parse(c, bp - assoc), op]);
 				}
 				_ => break,
 			}
@@ -78,5 +78,5 @@ pub fn parse(tokens: &[Token]) -> AST {
 	while c.index < c.tokens.len() {
 		v.push(parse(&mut c, 0));
 	}
-	AST::List(None, v)
+	AST::List(Lists::Group, v)
 }

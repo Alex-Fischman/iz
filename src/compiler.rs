@@ -44,8 +44,8 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 				.flatten()
 				.collect();
 			match l {
-				None | Some(Lists::Group) => code,
-				Some(Lists::Block) => {
+				Lists::Group => code,
+				Lists::Block => {
 					let code_len = code.len() as i64;
 					let mut block = vec![];
 					block.extend([Op::PushI(1 + code_len), Op::Jump]);

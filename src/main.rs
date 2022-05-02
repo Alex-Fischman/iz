@@ -36,18 +36,18 @@ fn parser_test() {
 	let unit = |s: &str, col| AST::Leaf(Token { string: s.to_string(), row: 1, col });
 	let result = parse(&tokenize("1+(2-5)*6"));
 	let target = AST::List(
-		None,
+		Lists::Group,
 		vec![AST::List(
-			None,
+			Lists::Group,
 			vec![
 				unit("1", 1),
 				AST::List(
-					None,
+					Lists::Group,
 					vec![
 						AST::List(
-							Some(Lists::Group),
+							Lists::Group,
 							vec![AST::List(
-								None,
+								Lists::Group,
 								vec![unit("2", 4), unit("5", 6), unit("sub", 5)],
 							)],
 						),
@@ -67,12 +67,12 @@ fn typer_test() {
 	let unit = |s: &str, col, t| TypedAST::Leaf(Token { string: s.to_string(), row: 1, col }, t);
 	let result = annotate(&parse(&tokenize("1 - 5 == -4"))).unwrap();
 	let target = TypedAST::List(
-		None,
+		Lists::Group,
 		vec![TypedAST::List(
-			None,
+			Lists::Group,
 			vec![
 				TypedAST::List(
-					None,
+					Lists::Group,
 					vec![
 						unit("1", 1, (vec![], vec![Type::Int])),
 						unit("5", 5, (vec![], vec![Type::Int])),
@@ -81,7 +81,7 @@ fn typer_test() {
 					(vec![], vec![Type::Int]),
 				),
 				TypedAST::List(
-					None,
+					Lists::Group,
 					vec![
 						unit("4", 11, (vec![], vec![Type::Int])),
 						unit("neg", 10, (vec![Type::Int], vec![Type::Int])),

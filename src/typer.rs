@@ -4,7 +4,7 @@ use std::io::{Error, ErrorKind};
 #[derive(PartialEq)]
 pub enum TypedAST {
 	Leaf(crate::tokenizer::Token, (Vec<Type>, Vec<Type>)),
-	List(Option<Lists>, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
+	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
 #[derive(Clone, Debug)]
@@ -134,9 +134,8 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 					*l,
 					typed_xs,
 					match l {
-						None => (input_stack, output_stack),
-						Some(Lists::Group) => (input_stack, vec![Type::Group(output_stack)]),
-						Some(Lists::Block) => (
+						Lists::Group => (input_stack, vec![Type::Group(output_stack)]),
+						Lists::Block => (
 							vec![],
 							vec![Type::Block(
 								Box::new(Type::Group(input_stack)),
@@ -164,9 +163,6 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 			TypedAST::Leaf(_, t) => t,
 			TypedAST::List(_, _, t) => t,
 		};
-		println!("{:?}", input);
-		println!("{:?}", output);
-		println!("");
 		input.iter_mut().chain(output.iter_mut()).for_each(|t| replace_vars_in_type(t, vars));
 	}
 	fn replace_vars_in_type(t: &mut Type, vars: &Vec<Type>) {
