@@ -3,8 +3,8 @@ use std::io::{Error, ErrorKind};
 
 #[derive(PartialEq)]
 pub enum TypedAST {
-	Leaf(crate::tokenizer::Token, (Vec<Type>, Type)),
-	List(Lists, Vec<TypedAST>, (Vec<Type>, Type)),
+	Leaf(crate::tokenizer::Token, (Type, Type)),
+	List(Lists, Vec<TypedAST>, (Type, Type)),
 }
 
 #[derive(Clone, Debug)]
@@ -14,6 +14,16 @@ pub enum Type {
 	Var(usize),
 	Block(Box<Type>, Box<Type>),
 	Group(Vec<Type>),
+}
+
+impl Type {
+	pub fn unit() -> Type {
+		Type::Group(vec![])
+	}
+
+	pub fn two_ints() -> Type {
+		Type::Group(vec![Type::Int, Type::Int])
+	}
 }
 
 impl PartialEq for Type {
@@ -72,37 +82,49 @@ fn equalize_types(a: &Type, b: &Type, vars: &mut Vec<Option<Type>>) -> Result<()
 	})
 }
 
+fn flatten(ts: Vec<Type>) -> Vec<Type> {
+	let mut out = vec![];
+	for t in ts {
+		if let Type::Group(ts) = t {
+			out.extend(flatten(ts));
+		} else {
+			out.push(t.clone());
+		}
+	}
+	out
+}
+
 pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 	fn annotate(ast: &AST, vars: &mut Vec<Option<Type>>) -> Result<TypedAST, Error> {
 		match ast {
 			AST::Leaf(token) => Ok(TypedAST::Leaf(
 				token.clone(),
 				match token.string.as_str() {
-					s if s.chars().next().unwrap().is_numeric() => (vec![], Type::Int),
-					"true" | "false" => (vec![], Type::Bool),
-					"add" | "sub" | "mul" => (vec![Type::Int, Type::Int], Type::Int),
-					"neg" => (vec![Type::Int], Type::Int),
+					s if s.chars().next().unwrap().is_numeric() => (Type::unit(), Type::Int),
+					"true" | "false" => (Type::unit(), Type::Bool),
+					"add" | "sub" | "mul" => (Type::two_ints(), Type::Int),
+					"neg" => (Type::Int, Type::Int),
 					"eql" => (
-						vec![
+						Type::Group(vec![
 							Type::Var({
 								vars.push(None);
 								vars.len() - 1
 							}),
 							Type::Var(vars.len() - 1),
-						],
+						]),
 						Type::Bool,
 					),
 					"call" => {
 						vars.push(None);
 						vars.push(None);
 						(
-							vec![
+							Type::Group(vec![
 								Type::Var(vars.len() - 1),
 								Type::Block(
 									Box::new(Type::Var(vars.len() - 1)),
 									Box::new(Type::Var(vars.len() - 2)),
 								),
-							],
+							]),
 							Type::Var(vars.len() - 2),
 						)
 					}
@@ -110,33 +132,45 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 				},
 			)),
 			AST::List(l, xs) => {
-				let typed_xs: Result<Vec<TypedAST>, Error> =
-					xs.iter().map(|x| annotate(x, vars)).collect();
-				let typed_xs = typed_xs?;
-				let mut input_stack: Vec<Type> = vec![];
-				let mut output_stack: Vec<Type> = vec![];
+				let typed_xs = xs
+					.iter()
+					.map(|x| annotate(x, vars))
+					.collect::<Result<Vec<TypedAST>, Error>>()?;
+				let mut input_stack = vec![];
+				let mut output_stack = vec![];
 				for x in &typed_xs {
 					let (input, output) = match x {
 						TypedAST::Leaf(_, t) => t,
 						TypedAST::List(_, _, t) => t,
 					};
-					let mut input = input.clone();
-					if input.len() > output_stack.len() {
-						input_stack.extend(input.drain(..input.len() - output_stack.len()));
+					let mut input = flatten(vec![input.clone()]);
+					let output = flatten(vec![output.clone()]);
+					while !input.is_empty() && !output_stack.is_empty() {
+						let i = input.pop().unwrap();
+						let mut args = vec![output_stack.pop().unwrap()];
+						while let Err(_) = equalize_types(&i, &Type::Group(args.clone()), vars) {
+							match output_stack.pop() {
+								Some(o) => args.insert(0, o),
+								None => Err(Error::new(
+									ErrorKind::Other,
+									format!(
+										"could not equalize input {:?} with stack {:?}",
+										input, args
+									),
+								))?,
+							}
+						}
 					}
-					let args = output_stack.split_off(output_stack.len() - input.len());
-					for (arg, input) in args.iter().zip(input) {
-						equalize_types(arg, &input, vars)?;
-					}
-					output_stack.push(output.clone());
+					input_stack.extend(input);
+					output_stack.extend(output);
 				}
 				Ok(TypedAST::List(
 					*l,
 					typed_xs,
 					match l {
-						Lists::Group => (input_stack, Type::Group(output_stack)),
+						Lists::Group => (Type::Group(input_stack), Type::Group(output_stack)),
 						Lists::Block => (
-							vec![],
+							Type::unit(),
 							Type::Block(
 								Box::new(Type::Group(input_stack)),
 								Box::new(Type::Group(output_stack)),
@@ -163,7 +197,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 			TypedAST::Leaf(_, t) => t,
 			TypedAST::List(_, _, t) => t,
 		};
-		input.iter_mut().for_each(|t| replace_vars_in_type(t, vars));
+		replace_vars_in_type(input, vars);
 		replace_vars_in_type(output, vars);
 	}
 	fn replace_vars_in_type(t: &mut Type, vars: &Vec<Type>) {
