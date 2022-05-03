@@ -31,7 +31,7 @@ pub fn compile(ast: &TypedAST) -> Result<Vec<Op>, Error> {
 			"eql" if t == &(vec![Type::Bool, Type::Bool], vec![Type::Bool]) => {
 				vec![Op::EqlB]
 			}
-			"call" => vec![Op::Call],
+			"call" if t == &(vec![Type::Call], vec![Type::Call]) => vec![Op::Call],
 			s if t == &(vec![], vec![Type::Int]) && s.chars().next().unwrap().is_numeric() => {
 				vec![Op::PushI(s.parse::<i64>().unwrap())]
 			}

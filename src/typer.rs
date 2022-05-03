@@ -7,26 +7,13 @@ pub enum TypedAST {
 	List(Lists, Vec<TypedAST>, (Vec<Type>, Vec<Type>)),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
 	Int,
 	Bool,
 	Var(usize),
+	Call,
 	Block(Vec<Type>, Vec<Type>),
-}
-
-impl PartialEq for Type {
-	fn eq(&self, other: &Type) -> bool {
-		match (self, other) {
-			(Type::Int, Type::Int) => true,
-			(Type::Bool, Type::Bool) => true,
-			(Type::Var(_), Type::Var(_)) => unreachable!(),
-			(Type::Block(a, c), Type::Block(b, d)) => {
-				a.iter().zip(b).all(|(a, b)| a == b) && c.iter().zip(d).all(|(c, d)| c == d)
-			}
-			_ => false,
-		}
-	}
 }
 
 impl std::fmt::Debug for TypedAST {
@@ -87,7 +74,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 						],
 						vec![Type::Bool],
 					),
-					"call" => todo!(),
+					"call" => (vec![Type::Call], vec![Type::Call]),
 					t => Err(Error::new(ErrorKind::Other, format!("unknown token {:?}", t)))?,
 				},
 			)),
@@ -99,16 +86,27 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 				let mut input_stack = vec![];
 				let mut output_stack = vec![];
 				for x in &typed_xs {
-					let (input, output) = match x {
+					let t = match x {
 						TypedAST::Leaf(_, t) => t,
 						TypedAST::List(_, _, t) => t,
 					};
-					let mut input = input.clone();
+					let (mut input, output) = if t == &(vec![Type::Call], vec![Type::Call]) {
+						match output_stack.pop() {
+							Some(Type::Block(input, output)) => (input, output).clone(),
+							_ => Err(Error::new(
+								ErrorKind::Other,
+								format!("expected block, found {:?}", t),
+							))?,
+						}
+					} else {
+						t.clone()
+					};
+					// input_stack (output_stack input) output
 					while !output_stack.is_empty() && !input.is_empty() {
 						equalize_types(&output_stack.pop().unwrap(), &input.remove(0), vars)?;
 					}
 					input_stack.extend(input);
-					output_stack.extend(output.clone());
+					output_stack.extend(output);
 				}
 				Ok(TypedAST::List(
 					*l,
@@ -146,6 +144,7 @@ pub fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 				Type::Int => {}
 				Type::Bool => {}
 				Type::Var(v) => *t = vars[*v].clone(),
+				Type::Call => {}
 				Type::Block(a, b) => {
 					replace_vars_in_type(a, vars);
 					replace_vars_in_type(b, vars);
