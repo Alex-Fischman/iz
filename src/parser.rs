@@ -29,54 +29,31 @@ struct Context<'a> {
 	index: usize,
 	tokens: &'a [Token],
 	brackets: &'a HashMap<char, (char, Lists)>,
-	prefixes: &'a HashMap<&'a str, (&'a str, u8)>,
-	infixes: &'a HashMap<&'a str, (&'a str, u8, u8)>,
 }
 
 pub fn parse(tokens: &[Token]) -> AST {
-	fn parse(c: &mut Context, rbp: u8) -> AST {
+	fn parse(c: &mut Context) -> AST {
 		let t = c.tokens[c.index].clone();
 		c.index += 1;
-		let mut lhs = if let Some(&(s, bp)) = c.prefixes.get(&*t.string) {
-			let op = AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] });
-			AST::List(Lists::Group, vec![parse(c, bp), op])
-		} else if let Some(&(end, l)) = c.brackets.get(&t.string.chars().next().unwrap()) {
+		if let Some(&(end, l)) = c.brackets.get(&t.string.chars().next().unwrap()) {
 			let mut v = vec![];
 			while c.tokens[c.index].string != end.to_string() {
-				v.push(parse(c, 0));
+				v.push(parse(c));
 			}
 			c.index += 1;
 			AST::List(l, v)
 		} else {
 			AST::Leaf(t)
-		};
-		while c.index < c.tokens.len() {
-			match c.infixes.get(&*c.tokens[c.index].string) {
-				Some(&(s, bp, assoc)) if bp > rbp => {
-					c.index += 1;
-					let op = AST::Leaf(Token { string: s.to_string(), ..c.tokens[c.index - 1] });
-					lhs = AST::List(Lists::Group, vec![lhs, parse(c, bp - assoc), op]);
-				}
-				_ => break,
-			}
 		}
-		lhs
 	}
 	let mut c = Context {
 		tokens,
 		index: 0,
 		brackets: &HashMap::from(BRACKETS),
-		prefixes: &HashMap::from([("-", ("neg", 9))]),
-		infixes: &HashMap::from([
-			("==", ("eql", 5, 0)),
-			("+", ("add", 7, 0)),
-			("-", ("sub", 7, 0)),
-			("*", ("mul", 8, 0)),
-		]),
 	};
 	let mut v = vec![];
 	while c.index < c.tokens.len() {
-		v.push(parse(&mut c, 0));
+		v.push(parse(&mut c));
 	}
 	AST::List(Lists::Group, v)
 }
