@@ -1,6 +1,7 @@
 enum Error {
 	MissingArgument,
 	CouldNotReadFile(String),
+	MissingEndQuote,
 }
 
 impl std::fmt::Debug for Error {
@@ -8,6 +9,7 @@ impl std::fmt::Debug for Error {
 		match self {
 			Error::MissingArgument => write!(f, "pass a file name as a command line argument"),
 			Error::CouldNotReadFile(file) => write!(f, "could not read file \"{}\"", file),
+			Error::MissingEndQuote => write!(f, "the file ends with an unclosed string"),
 		}
 	}
 }
@@ -18,16 +20,17 @@ fn main() -> Result<(), Error> {
 	let text =
 		std::fs::read_to_string(file).or(Err(Error::CouldNotReadFile(file.to_string())))?;
 
-	let tokens = tokenize(&text);
+	let tokens = tokenize(&text)?;
+	// todo: proper errors below this line
 	let ast = parse(&tokens);
 	let typed = annotate(&ast);
 	let stack = interpret(&typed);
-	println!("{:#?}", stack);
+	println!("{:?}", stack);
 
 	Ok(())
 }
 
-fn tokenize(s: &str) -> Vec<String> {
+fn tokenize(s: &str) -> Result<Vec<String>, Error> {
 	fn is_splitter(c: char) -> bool {
 		c == '(' || c == ')' || c == '{' || c == '}' || c.is_whitespace()
 	}
@@ -66,12 +69,16 @@ fn tokenize(s: &str) -> Vec<String> {
 			_ => tokens.last_mut().unwrap().push(c),
 		}
 	}
-	tokens.into_iter().filter(|t| !t.chars().next().unwrap().is_whitespace()).collect()
+	if in_string {
+		Err(Error::MissingEndQuote)
+	} else {
+		Ok(tokens.into_iter().filter(|t| !t.chars().next().unwrap().is_whitespace()).collect())
+	}
 }
 
 #[test]
 fn tokenizer_test() {
-	let result = tokenize("# Comment\n\"test \\\"str#ing\"\n toke)n1 # comment\n");
+	let result = tokenize("# Comment\n\"test \\\"str#ing\"\n toke)n1 # comment\n").unwrap();
 	let target = ["\"test \"str#ing\"", "toke", ")", "n1"];
 	assert_eq!(result, target);
 }
@@ -80,7 +87,6 @@ fn tokenizer_test() {
 enum List {
 	Group,
 	Block,
-	Array,
 }
 
 #[derive(Debug, PartialEq)]
@@ -97,7 +103,6 @@ fn parse(tokens: &[String]) -> AST {
 			v.push(match &*tokens[*index - 1] {
 				"(" => AST::List(List::Group, consume(tokens, index, ")")),
 				"{" => AST::List(List::Block, consume(tokens, index, "}")),
-				"[" => AST::List(List::Array, consume(tokens, index, "]")),
 				_ => AST::Token(tokens[*index - 1].clone()),
 			});
 		}
@@ -120,30 +125,33 @@ fn parser_test() {
 			leaf("mul"),
 		],
 	);
-	assert_eq!(parse(&tokenize("1 (2 5 sub) add 6 mul")), target);
+	assert_eq!(parse(&tokenize("1 (2 5 sub) add 6 mul").unwrap()), target);
 }
 
 #[derive(Clone, Debug)]
 enum Type {
 	Type,
 	Int,
-	Str,
-	Bool,
 	Group(Vec<Type>),
 	Block(Box<Type>, Box<Type>),
-	// Array(Box<Type>), todo
 }
 
 impl PartialEq for Type {
 	fn eq(&self, other: &Type) -> bool {
 		use crate::Type::*;
 		match (self, other) {
-			(Type, Type) | (Int, Int) | (Str, Str) | (Bool, Bool) => true,
+			(Type, Type) | (Int, Int) => true,
 			(Group(a), Group(b)) => a == b,
 			(Block(a, c), Block(b, d)) => a == b && c == d,
 			(Group(v), y) | (y, Group(v)) if v.len() == 1 && v[0] == *y => true,
 			_ => false,
 		}
+	}
+}
+
+impl std::fmt::Display for Type {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "{:?}", self)
 	}
 }
 
@@ -168,8 +176,6 @@ fn annotate(ast: &AST) -> TypedAST {
 			s.clone(),
 			match s.as_str() {
 				s if s.chars().all(|c| c.is_numeric() || c == '-' || c == '_') => Type::Int,
-				s if s.chars().next().unwrap() == '"' => Type::Str,
-				"true" | "false" => Type::Bool,
 				"add" | "sub" | "mul" => Type::Block(
 					Box::new(Type::Group(vec![Type::Int, Type::Int])),
 					Box::new(Type::Int),
@@ -184,7 +190,6 @@ fn annotate(ast: &AST) -> TypedAST {
 			let t = match l {
 				List::Group => Type::Group(v.iter().map(|x| x.get_type().clone()).collect()),
 				List::Block => todo!(),
-				List::Array => todo!(),
 			};
 			TypedAST::List(l.clone(), v, t)
 		}
@@ -196,8 +201,6 @@ fn typer_test() {
 	let test = |a, t| assert_eq!(annotate(&a).get_type(), &t);
 	test(AST::Token("Str".to_string()), Type::Type);
 	test(AST::Token("-123".to_string()), Type::Int);
-	test(AST::Token("\"asf fdsa\"".to_string()), Type::Str);
-	test(AST::Token("true".to_string()), Type::Bool);
 	test(
 		AST::List(List::Group, vec![AST::Token("1".to_string()), AST::Token("2".to_string())]),
 		Type::Group(vec![Type::Int, Type::Int]),
@@ -235,7 +238,6 @@ fn interpret(ast: &TypedAST) -> Vec<i64> {
 			},
 			TypedAST::List(List::Group, v, _) => v.iter().for_each(|x| interpret(x, stack)),
 			TypedAST::List(List::Block, _, _) => todo!(),
-			TypedAST::List(List::Array, _, _) => todo!(),
 		}
 	}
 	let mut stack = vec![];
@@ -245,7 +247,7 @@ fn interpret(ast: &TypedAST) -> Vec<i64> {
 
 #[test]
 fn interpreter_test() {
-	let test = |a, b| assert_eq!(interpret(&annotate(&parse(&tokenize(a)))), b);
+	let test = |a, b| assert_eq!(interpret(&annotate(&parse(&tokenize(a).unwrap()))), b);
 	test("1 2 add", vec![3]);
 	test("1 2 sub", vec![1]);
 	test("1 2 mul", vec![2]);
