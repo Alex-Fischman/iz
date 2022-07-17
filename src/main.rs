@@ -20,6 +20,7 @@ fn main() -> Result<(), Error> {
 
 	let tokens = tokenize(&text);
 	let ast = parse(&tokens);
+
 	let typed = annotate(&ast);
 	let stack = interpret(&typed);
 	println!("{:#?}", stack);
@@ -123,18 +124,30 @@ fn parser_test() {
 	assert_eq!(parse(&tokenize("1 (2 5 sub) add 6 mul")), target);
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Type {
+	Type,
 	Int,
 	Str,
 	Bool,
+	Group(Vec<Type>),
 	Block(Vec<Type>, Vec<Type>),
+	// Array(Box<Type>),
 }
 
 #[derive(Debug, PartialEq)]
 enum TypedAST {
 	Token(String, Type),
-	List(List, Vec<TypedAST>),
+	List(List, Vec<TypedAST>, Type),
+}
+
+impl TypedAST {
+	fn get_type(&self) -> &Type {
+		match self {
+			TypedAST::Token(_, t) => t,
+			TypedAST::List(_, _, t) => t,
+		}
+	}
 }
 
 fn annotate(ast: &AST) -> TypedAST {
@@ -144,14 +157,42 @@ fn annotate(ast: &AST) -> TypedAST {
 			match s.as_str() {
 				s if s.chars().all(|c| c.is_numeric() || c == '-' || c == '_') => Type::Int,
 				s if s.chars().next().unwrap() == '"' => Type::Str,
-				"true" => Type::Bool,
-				"false" => Type::Bool,
-				"add" | "sub" => Type::Block(vec![Type::Int, Type::Int], vec![Type::Int]),
+				"true" | "false" => Type::Bool,
+				"add" | "sub" | "mul" => {
+					Type::Block(vec![Type::Int, Type::Int], vec![Type::Int])
+				}
+				"Type" | "Int" | "Str" | "Bool" => Type::Type,
+				"Group" | "Block" | "Array" => todo!(),
 				_ => panic!("unknown token: {:?}", s),
 			},
 		),
-		AST::List(l, v) => TypedAST::List(l.clone(), v.iter().map(annotate).collect()),
+		AST::List(l, v) => {
+			let v: Vec<TypedAST> = v.iter().map(annotate).collect();
+			let t = match l {
+				List::Group => Type::Group(v.iter().map(|x| x.get_type().clone()).collect()),
+				List::Block => todo!(),
+				List::Array => todo!(),
+			};
+			TypedAST::List(l.clone(), v, t)
+		}
 	}
+}
+
+#[test]
+fn typer_test() {
+	let test = |a, t| assert_eq!(annotate(&a).get_type(), &t);
+	test(AST::Token("Str".to_string()), Type::Type);
+	test(AST::Token("-123".to_string()), Type::Int);
+	test(AST::Token("\"asf fdsa\"".to_string()), Type::Str);
+	test(AST::Token("true".to_string()), Type::Bool);
+	test(
+		AST::List(List::Group, vec![AST::Token("1".to_string()), AST::Token("2".to_string())]),
+		Type::Group(vec![Type::Int, Type::Int]),
+	);
+	test(
+		AST::Token("add".to_string()),
+		Type::Block(vec![Type::Int, Type::Int], vec![Type::Int]),
+	);
 }
 
 fn interpret(ast: &TypedAST) -> Vec<i64> {
@@ -171,14 +212,29 @@ fn interpret(ast: &TypedAST) -> Vec<i64> {
 					let c = stack.pop().unwrap() - stack.pop().unwrap();
 					stack.push(c);
 				}
+				("mul", Type::Block(t0, t1))
+					if *t0 == vec![Type::Int, Type::Int] && *t1 == vec![Type::Int] =>
+				{
+					let c = stack.pop().unwrap() * stack.pop().unwrap();
+					stack.push(c);
+				}
 				(s, t) => panic!("unknown command: {:?}: {:?}", s, t),
 			},
-			TypedAST::List(List::Group, v) => v.iter().for_each(|t| interpret(t, stack)),
-			TypedAST::List(List::Block, _) => todo!(),
-			TypedAST::List(List::Array, _) => todo!(),
+			TypedAST::List(List::Group, v, _) => v.iter().for_each(|x| interpret(x, stack)),
+			TypedAST::List(List::Block, _, _) => todo!(),
+			TypedAST::List(List::Array, _, _) => todo!(),
 		}
 	}
 	let mut stack = vec![];
 	interpret(ast, &mut stack);
 	stack
+}
+
+#[test]
+fn interpreter_test() {
+	let test = |a, b| assert_eq!(interpret(&annotate(&parse(&tokenize(a)))), b);
+	test("1 2 add", vec![3]);
+	test("1 2 sub", vec![1]);
+	test("1 2 mul", vec![2]);
+	test("1 1 (mul 2) add 5 sub", vec![2]); // todo: is this good?
 }
