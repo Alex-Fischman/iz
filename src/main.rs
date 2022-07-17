@@ -20,7 +20,6 @@ fn main() -> Result<(), Error> {
 
 	let tokens = tokenize(&text);
 	let ast = parse(&tokens);
-
 	let typed = annotate(&ast);
 	let stack = interpret(&typed);
 	println!("{:#?}", stack);
@@ -124,15 +123,28 @@ fn parser_test() {
 	assert_eq!(parse(&tokenize("1 (2 5 sub) add 6 mul")), target);
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 enum Type {
 	Type,
 	Int,
 	Str,
 	Bool,
 	Group(Vec<Type>),
-	Block(Vec<Type>, Vec<Type>),
-	// Array(Box<Type>),
+	Block(Box<Type>, Box<Type>),
+	// Array(Box<Type>), todo
+}
+
+impl PartialEq for Type {
+	fn eq(&self, other: &Type) -> bool {
+		use crate::Type::*;
+		match (self, other) {
+			(Type, Type) | (Int, Int) | (Str, Str) | (Bool, Bool) => true,
+			(Group(a), Group(b)) => a == b,
+			(Block(a, c), Block(b, d)) => a == b && c == d,
+			(Group(v), y) | (y, Group(v)) if v.len() == 1 && v[0] == *y => true,
+			_ => false,
+		}
+	}
 }
 
 #[derive(Debug, PartialEq)]
@@ -158,9 +170,10 @@ fn annotate(ast: &AST) -> TypedAST {
 				s if s.chars().all(|c| c.is_numeric() || c == '-' || c == '_') => Type::Int,
 				s if s.chars().next().unwrap() == '"' => Type::Str,
 				"true" | "false" => Type::Bool,
-				"add" | "sub" | "mul" => {
-					Type::Block(vec![Type::Int, Type::Int], vec![Type::Int])
-				}
+				"add" | "sub" | "mul" => Type::Block(
+					Box::new(Type::Group(vec![Type::Int, Type::Int])),
+					Box::new(Type::Int),
+				),
 				"Type" | "Int" | "Str" | "Bool" => Type::Type,
 				"Group" | "Block" | "Array" => todo!(),
 				_ => panic!("unknown token: {:?}", s),
@@ -191,7 +204,7 @@ fn typer_test() {
 	);
 	test(
 		AST::Token("add".to_string()),
-		Type::Block(vec![Type::Int, Type::Int], vec![Type::Int]),
+		Type::Block(Box::new(Type::Group(vec![Type::Int, Type::Int])), Box::new(Type::Int)),
 	);
 }
 
@@ -201,19 +214,19 @@ fn interpret(ast: &TypedAST) -> Vec<i64> {
 			TypedAST::Token(s, t) => match (s.as_str(), t) {
 				(s, Type::Int) => stack.push(s.parse::<i64>().unwrap()),
 				("add", Type::Block(t0, t1))
-					if *t0 == vec![Type::Int, Type::Int] && *t1 == vec![Type::Int] =>
+					if **t0 == Type::Group(vec![Type::Int, Type::Int]) && **t1 == Type::Int =>
 				{
 					let c = stack.pop().unwrap() + stack.pop().unwrap();
 					stack.push(c)
 				}
 				("sub", Type::Block(t0, t1))
-					if *t0 == vec![Type::Int, Type::Int] && *t1 == vec![Type::Int] =>
+					if **t0 == Type::Group(vec![Type::Int, Type::Int]) && **t1 == Type::Int =>
 				{
 					let c = stack.pop().unwrap() - stack.pop().unwrap();
 					stack.push(c);
 				}
 				("mul", Type::Block(t0, t1))
-					if *t0 == vec![Type::Int, Type::Int] && *t1 == vec![Type::Int] =>
+					if **t0 == Type::Group(vec![Type::Int, Type::Int]) && **t1 == Type::Int =>
 				{
 					let c = stack.pop().unwrap() * stack.pop().unwrap();
 					stack.push(c);
@@ -236,5 +249,5 @@ fn interpreter_test() {
 	test("1 2 add", vec![3]);
 	test("1 2 sub", vec![1]);
 	test("1 2 mul", vec![2]);
-	test("1 1 (mul 2) add 5 sub", vec![2]); // todo: is this good?
+	test("1 1 (mul 2) add 5 sub", vec![2]); // is this good?
 }
