@@ -1,30 +1,56 @@
-enum Error {
-	MissingArgument,
-	CouldNotReadFile(String),
+fn main() {
+	match std::env::args().collect::<Vec<String>>().get(1) {
+		None => println!("pass a file"),
+		Some(file) => match std::fs::read_to_string(file) {
+			Err(_) => println!("could not read file"),
+			Ok(text) => {
+				let tokens = tokenize(&text);
+				let ast = parse(&tokens);
+				let typed = annotate(&ast);
+				let stack = interpret(&typed);
+				println!("{:#?}", stack);
+			}
+		},
+	};
 }
 
-impl std::fmt::Debug for Error {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			Error::MissingArgument => write!(f, "pass a file name as a command line argument"),
-			Error::CouldNotReadFile(file) => write!(f, "could not read file \"{}\"", file),
+fn tokenize(s: &str) -> Vec<String> {
+	fn is_splitter(c: char) -> bool {
+		c == '(' || c == ')' || c == '{' || c == '}' || c.is_whitespace()
+	}
+	let mut tokens: Vec<String> = vec![];
+	let mut in_escape = false;
+	let mut in_string = false;
+	let mut in_comment = false;
+	for c in s.chars() {
+		match c {
+			_ if in_escape => {
+				in_escape = false;
+				tokens.last_mut().unwrap().push(c);
+			}
+			'\\' if in_string => in_escape = true,
+			'"' if in_string => {
+				in_string = false;
+				tokens.last_mut().unwrap().push(c);
+			}
+			_ if in_string => tokens.last_mut().unwrap().push(c),
+			'"' => {
+				in_string = true;
+				tokens.push(c.to_string());
+			}
+			'\n' if in_comment => in_comment = false,
+			_ if in_comment => {}
+			'#' => in_comment = true,
+			_ if tokens.is_empty()
+				|| is_splitter(c)
+				|| is_splitter(tokens.last().unwrap().chars().next().unwrap()) =>
+			{
+				tokens.push(c.to_string())
+			}
+			_ => tokens.last_mut().unwrap().push(c),
 		}
 	}
-}
-
-fn main() -> Result<(), Error> {
-	let args = std::env::args().collect::<Vec<String>>();
-	let file = args.get(1).ok_or(Error::MissingArgument)?;
-	let text =
-		std::fs::read_to_string(file).or(Err(Error::CouldNotReadFile(file.to_string())))?;
-
-	let tokens = tokenize(&text);
-	let ast = parse(&tokens);
-	let typed = annotate(&ast);
-	let stack = interpret(&typed);
-	println!("{:#?}", stack);
-
-	Ok(())
+	tokens.into_iter().filter(|t| !t.chars().next().unwrap().is_whitespace()).collect()
 }
 
 fn tokenize(s: &str) -> Vec<String> {
@@ -79,13 +105,11 @@ fn tokenizer_test() {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum List {
 	Group,
-	Block,
-	Array,
 }
 
 #[derive(Debug, PartialEq)]
 enum AST {
-	Token(String),
+	Leaf(String),
 	List(List, Vec<AST>),
 }
 
@@ -96,9 +120,7 @@ fn parse(tokens: &[String]) -> AST {
 			*index += 1;
 			v.push(match &*tokens[*index - 1] {
 				"(" => AST::List(List::Group, consume(tokens, index, ")")),
-				"{" => AST::List(List::Block, consume(tokens, index, "}")),
-				"[" => AST::List(List::Array, consume(tokens, index, "]")),
-				_ => AST::Token(tokens[*index - 1].clone()),
+				_ => AST::Leaf(tokens[*index - 1].clone()),
 			});
 		}
 		*index += 1;
@@ -109,18 +131,18 @@ fn parse(tokens: &[String]) -> AST {
 
 #[test]
 fn parser_test() {
-	let leaf = |s: &str| AST::Token(s.to_string());
+	let leaf = |s: &str| AST::Leaf(s.to_string());
 	let target = AST::List(
 		List::Group,
 		vec![
 			leaf("1"),
-			AST::List(List::Group, vec![leaf("2"), leaf("5"), leaf("sub")]),
-			leaf("add"),
+			AST::List(List::Group, vec![leaf("2"), leaf("5"), leaf("-")]),
+			leaf("+"),
 			leaf("6"),
-			leaf("mul"),
+			leaf("*"),
 		],
 	);
-	assert_eq!(parse(&tokenize("1 (2 5 sub) add 6 mul")), target);
+	assert_eq!(parse(&tokenize("1 (2 5 -) + 6 *")), target);
 }
 
 #[derive(Debug, PartialEq)]
@@ -133,13 +155,13 @@ enum Type {
 
 #[derive(Debug, PartialEq)]
 enum TypedAST {
-	Token(String, Type),
+	Leaf(String, Type),
 	List(List, Vec<TypedAST>),
 }
 
 fn annotate(ast: &AST) -> TypedAST {
 	match ast {
-		AST::Token(s) => TypedAST::Token(
+		AST::Leaf(s) => TypedAST::Leaf(
 			s.clone(),
 			match s.as_str() {
 				s if s.chars().all(|c| c.is_numeric() || c == '-' || c == '_') => Type::Int,
@@ -157,7 +179,7 @@ fn annotate(ast: &AST) -> TypedAST {
 fn interpret(ast: &TypedAST) -> Vec<i64> {
 	fn interpret(ast: &TypedAST, stack: &mut Vec<i64>) {
 		match ast {
-			TypedAST::Token(s, t) => match (s.as_str(), t) {
+			TypedAST::Leaf(s, t) => match (s.as_str(), t) {
 				(s, Type::Int) => stack.push(s.parse::<i64>().unwrap()),
 				("add", Type::Block(t0, t1))
 					if *t0 == vec![Type::Int, Type::Int] && *t1 == vec![Type::Int] =>
@@ -174,8 +196,6 @@ fn interpret(ast: &TypedAST) -> Vec<i64> {
 				(s, t) => panic!("unknown command: {:?}: {:?}", s, t),
 			},
 			TypedAST::List(List::Group, v) => v.iter().for_each(|t| interpret(t, stack)),
-			TypedAST::List(List::Block, _) => todo!(),
-			TypedAST::List(List::Array, _) => todo!(),
 		}
 	}
 	let mut stack = vec![];
