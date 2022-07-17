@@ -1,0 +1,12 @@
+# goal: simplest usable execution model: stack-based with environment
+# goal: fully metaprogrammable types
+# goal: fewest language built-ins
+# goal: compilation with optimization
+
+# how to do types fully through metaprogramming?
+# - need to allow metaprograms to store compile-time erased data on values
+# - add should have pre- (and post-?) conditions that allow it to run
+# - need to have a type for symbols as well as values
+# also gets around the divide-by-zero design problem of adding NonZero types
+
+new_array = for old_array n -> n + 1

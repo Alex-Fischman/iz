@@ -53,6 +53,48 @@ fn tokenize(s: &str) -> Vec<String> {
 	tokens.into_iter().filter(|t| !t.chars().next().unwrap().is_whitespace()).collect()
 }
 
+fn tokenize(s: &str) -> Vec<String> {
+	fn is_splitter(c: char) -> bool {
+		c == '(' || c == ')' || c == '{' || c == '}' || c.is_whitespace()
+	}
+	let mut tokens: Vec<String> = vec![];
+	let mut in_escape = false;
+	let mut in_string = false;
+	let mut in_comment = false;
+	for c in s.chars() {
+		match c {
+			_ if in_escape => {
+				in_escape = false;
+				tokens.last_mut().unwrap().push(c);
+			}
+			'\\' if in_string => in_escape = true,
+
+			'"' if in_string => {
+				in_string = false;
+				tokens.last_mut().unwrap().push(c);
+			}
+			_ if in_string => tokens.last_mut().unwrap().push(c),
+			'"' => {
+				in_string = true;
+				tokens.push(c.to_string());
+			}
+
+			'\n' if in_comment => in_comment = false,
+			_ if in_comment => {}
+			'#' => in_comment = true,
+
+			_ if tokens.is_empty()
+				|| is_splitter(c)
+				|| is_splitter(tokens.last().unwrap().chars().next().unwrap()) =>
+			{
+				tokens.push(c.to_string())
+			}
+			_ => tokens.last_mut().unwrap().push(c),
+		}
+	}
+	tokens.into_iter().filter(|t| !t.chars().next().unwrap().is_whitespace()).collect()
+}
+
 #[test]
 fn tokenizer_test() {
 	let result = tokenize("# Comment\n\"test \\\"str#ing\"\n toke)n1 # comment\n");
