@@ -182,11 +182,11 @@ fn annotate(ast: &AST) -> TypedAST {
 		AST::Token(s) => TypedAST::Token(
 			s.clone(),
 			match s.as_str() {
-				s if s.chars().all(|c| c.is_numeric() || c == '-' || c == '_') => Type::Int,
+				"Type" | "Int" | "Group" | "Block" => Type::Type,
+				s if s.chars().next().unwrap().is_numeric() => Type::Int,
 				"add" | "sub" | "mul" => {
 					Type::Block(vec![Type::Int, Type::Int], vec![Type::Int])
 				}
-				"Type" | "Int" | "Group" | "Block" => Type::Type,
 				_ => panic!("unknown token: {:?}", s),
 			},
 		),
@@ -204,7 +204,7 @@ fn annotate(ast: &AST) -> TypedAST {
 #[test]
 fn typer_test() {
 	let test = |a, t| assert!(Type::eq(&[t], &[annotate(&a).get_type().clone()]));
-	test(AST::Token("-123".to_string()), Type::Int);
+	test(AST::Token("123".to_string()), Type::Int);
 	test(
 		AST::List(List::Group, vec![AST::Token("1".to_string()), AST::Token("2".to_string())]),
 		Type::Group(vec![Type::Int, Type::Int]),
