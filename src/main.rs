@@ -133,20 +133,7 @@ enum Type {
 	Type,
 	Int,
 	Group(Vec<Type>),
-	Block(Box<Type>, Box<Type>),
-}
-
-impl PartialEq for Type {
-	fn eq(&self, other: &Type) -> bool {
-		use crate::Type::*;
-		match (self, other) {
-			(Type, Type) | (Int, Int) => true,
-			(Group(a), Group(b)) => a == b,
-			(Block(a, c), Block(b, d)) => a == b && c == d,
-			(Group(v), y) | (y, Group(v)) if v.len() == 1 && v[0] == *y => true,
-			_ => false,
-		}
-	}
+	Block(Vec<Type>, Vec<Type>),
 }
 
 impl std::fmt::Display for Type {
@@ -155,7 +142,27 @@ impl std::fmt::Display for Type {
 	}
 }
 
-#[derive(Debug, PartialEq)]
+impl Type {
+	fn eq(a: &[Type], b: &[Type]) -> bool {
+		fn flatten(slice: &[Type]) -> Vec<Type> {
+			let mut v = vec![];
+			for t in slice {
+				match t {
+					Type::Group(s) => v.append(&mut flatten(s)),
+					t => v.push(t.clone()),
+				}
+			}
+			v
+		}
+		flatten(a).iter().zip(flatten(b)).all(|(a, b)| match (a, b) {
+			(Type::Type, Type::Type) | (Type::Int, Type::Int) => true,
+			(Type::Block(a, c), Type::Block(b, d)) => Type::eq(&a, &b) && Type::eq(&c, &d),
+			_ => false,
+		})
+	}
+}
+
+#[derive(Debug)]
 enum TypedAST {
 	Token(String, Type),
 	List(List, Vec<TypedAST>, Type),
@@ -176,10 +183,9 @@ fn annotate(ast: &AST) -> TypedAST {
 			s.clone(),
 			match s.as_str() {
 				s if s.chars().all(|c| c.is_numeric() || c == '-' || c == '_') => Type::Int,
-				"add" | "sub" | "mul" => Type::Block(
-					Box::new(Type::Group(vec![Type::Int, Type::Int])),
-					Box::new(Type::Int),
-				),
+				"add" | "sub" | "mul" => {
+					Type::Block(vec![Type::Int, Type::Int], vec![Type::Int])
+				}
 				"Type" | "Int" | "Str" | "Bool" => Type::Type,
 				"Group" | "Block" | "Array" => todo!(),
 				_ => panic!("unknown token: {:?}", s),
@@ -198,7 +204,7 @@ fn annotate(ast: &AST) -> TypedAST {
 
 #[test]
 fn typer_test() {
-	let test = |a, t| assert_eq!(annotate(&a).get_type(), &t);
+	let test = |a, t| assert!(Type::eq(&[t], &[annotate(&a).get_type().clone()]));
 	test(AST::Token("Str".to_string()), Type::Type);
 	test(AST::Token("-123".to_string()), Type::Int);
 	test(
@@ -207,7 +213,7 @@ fn typer_test() {
 	);
 	test(
 		AST::Token("add".to_string()),
-		Type::Block(Box::new(Type::Group(vec![Type::Int, Type::Int])), Box::new(Type::Int)),
+		Type::Block(vec![Type::Int, Type::Int], vec![Type::Int]),
 	);
 }
 
@@ -217,19 +223,19 @@ fn interpret(ast: &TypedAST) -> Vec<i64> {
 			TypedAST::Token(s, t) => match (s.as_str(), t) {
 				(s, Type::Int) => stack.push(s.parse::<i64>().unwrap()),
 				("add", Type::Block(t0, t1))
-					if **t0 == Type::Group(vec![Type::Int, Type::Int]) && **t1 == Type::Int =>
+					if Type::eq(t0, &[Type::Int, Type::Int]) && Type::eq(t1, &[Type::Int]) =>
 				{
 					let c = stack.pop().unwrap() + stack.pop().unwrap();
 					stack.push(c)
 				}
 				("sub", Type::Block(t0, t1))
-					if **t0 == Type::Group(vec![Type::Int, Type::Int]) && **t1 == Type::Int =>
+					if Type::eq(t0, &[Type::Int, Type::Int]) && Type::eq(t1, &[Type::Int]) =>
 				{
 					let c = stack.pop().unwrap() - stack.pop().unwrap();
 					stack.push(c);
 				}
 				("mul", Type::Block(t0, t1))
-					if **t0 == Type::Group(vec![Type::Int, Type::Int]) && **t1 == Type::Int =>
+					if Type::eq(t0, &[Type::Int, Type::Int]) && Type::eq(t1, &[Type::Int]) =>
 				{
 					let c = stack.pop().unwrap() * stack.pop().unwrap();
 					stack.push(c);
