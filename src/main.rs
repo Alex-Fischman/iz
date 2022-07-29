@@ -78,67 +78,53 @@ fn test() {
 }
 
 #[derive(Debug, PartialEq)]
-enum IR {
+enum AST {
 	Token(String),
-	Group(usize),
-	Block(usize),
+	Group(Vec<AST>),
+	Block(Vec<AST>),
 }
 
-fn parse(tokens: &[String]) -> Result<Vec<IR>, Error> {
+fn parse(tokens: &[String]) -> Result<AST, Error> {
 	fn consume(
 		tokens: &[String],
 		index: &mut usize,
 		end: Option<&str>,
-	) -> Result<Vec<IR>, Error> {
+	) -> Result<Vec<AST>, Error> {
 		let mut v = vec![];
 		while match end {
-			None => *index < tokens.len(),
 			Some(end) if *index >= tokens.len() => {
-				return Err(Error::MissingCloseBracket(end.to_string()))
+				Err(Error::MissingCloseBracket(end.to_string()))?
 			}
 			Some(end) => end != tokens[*index],
+			None => *index < tokens.len(),
 		} {
 			*index += 1;
-			match &*tokens[*index - 1] {
-				"(" => {
-					let mut inner = consume(tokens, index, Some(")"))?;
-					let l = inner.len();
-					v.append(&mut inner);
-					v.push(IR::Group(l));
-				}
-				"{" => {
-					let mut inner = consume(tokens, index, Some("}"))?;
-					let l = inner.len();
-					v.append(&mut inner);
-					v.push(IR::Block(l));
-				}
-				_ => v.push(IR::Token(tokens[*index - 1].clone())),
-			}
+			v.push(match &*tokens[*index - 1] {
+				"(" => AST::Group(consume(tokens, index, Some(")"))?),
+				"{" => AST::Block(consume(tokens, index, Some("}"))?),
+				_ => AST::Token(tokens[*index - 1].clone()),
+			});
 		}
 		*index += 1;
 		Ok(v)
 	}
-	consume(&tokens, &mut 0, None)
+	Ok(AST::Group(consume(&tokens, &mut 0, None)?))
 }
 
 #[test]
 fn parser_test() {
 	assert_eq!(
-		parse(&tokenize("1 {3 4} () 5 (6 (7 {8}))").unwrap()).unwrap(),
-		vec![
-			IR::Token("1".to_string()),
-			IR::Token("3".to_string()),
-			IR::Token("4".to_string()),
-			IR::Block(2),
-			IR::Group(0),
-			IR::Token("5".to_string()),
-			IR::Token("6".to_string()),
-			IR::Token("7".to_string()),
-			IR::Token("8".to_string()),
-			IR::Block(1),
-			IR::Group(3),
-			IR::Group(5),
-		]
+		parse(&tokenize("1 {3 4} () 5 (6 {8})").unwrap()).unwrap(),
+		AST::Group(vec![
+			AST::Token("1".to_string()),
+			AST::Block(vec![AST::Token("3".to_string()), AST::Token("4".to_string()),]),
+			AST::Group(vec![]),
+			AST::Token("5".to_string()),
+			AST::Group(vec![
+				AST::Token("6".to_string()),
+				AST::Block(vec![AST::Token("8".to_string())])
+			])
+		])
 	);
 	assert_eq!(
 		parse(&tokenize("1 {3 4} ( 5 (6 (7 {8}))").unwrap()),
