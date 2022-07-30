@@ -80,11 +80,10 @@ fn test() {
 #[derive(Debug, PartialEq)]
 enum AST {
 	Token(String),
-	Group(Vec<AST>),
 	Block(Vec<AST>),
 }
 
-fn parse(tokens: &[String]) -> Result<AST, Error> {
+fn parse(tokens: &[String]) -> Result<Vec<AST>, Error> {
 	fn consume(
 		tokens: &[String],
 		index: &mut usize,
@@ -100,7 +99,6 @@ fn parse(tokens: &[String]) -> Result<AST, Error> {
 		} {
 			*index += 1;
 			v.push(match &*tokens[*index - 1] {
-				"(" => AST::Group(consume(tokens, index, Some(")"))?),
 				"{" => AST::Block(consume(tokens, index, Some("}"))?),
 				_ => AST::Token(tokens[*index - 1].clone()),
 			});
@@ -108,26 +106,26 @@ fn parse(tokens: &[String]) -> Result<AST, Error> {
 		*index += 1;
 		Ok(v)
 	}
-	Ok(AST::Group(consume(&tokens, &mut 0, None)?))
+	Ok(consume(&tokens, &mut 0, None)?)
 }
 
 #[test]
 fn parser_test() {
 	assert_eq!(
-		parse(&tokenize("1 {3 4} () 5 (6 {8})").unwrap()).unwrap(),
-		AST::Group(vec![
+		parse(&tokenize("1 {3 4} {} 5 {6 {8}}").unwrap()).unwrap(),
+		vec![
 			AST::Token("1".to_string()),
 			AST::Block(vec![AST::Token("3".to_string()), AST::Token("4".to_string()),]),
-			AST::Group(vec![]),
+			AST::Block(vec![]),
 			AST::Token("5".to_string()),
-			AST::Group(vec![
+			AST::Block(vec![
 				AST::Token("6".to_string()),
 				AST::Block(vec![AST::Token("8".to_string())])
 			])
-		])
+		]
 	);
 	assert_eq!(
-		parse(&tokenize("1 {3 4} ( 5 (6 (7 {8}))").unwrap()),
-		Err(Error::MissingCloseBracket(")".to_string()))
+		parse(&tokenize("1 {3 4} { 5 {6 {7 {8}}}").unwrap()),
+		Err(Error::MissingCloseBracket("}".to_string()))
 	);
 }
