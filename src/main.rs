@@ -9,19 +9,22 @@ enum Error {
 	CouldNotFindType(Token),
 	TypeMismatch(Type, Type),
 	CouldNotFindOp(IO, Token),
+	WrongValueType(Value),
+	NoValueToPop,
 }
 
 fn main() -> Result<(), Error> {
 	let args = std::env::args().collect::<Vec<String>>();
 	let file = args.get(1).ok_or(Error::MissingArgument)?;
 	let text =
-		std::fs::read_to_string(file).or(Err(Error::CouldNotReadFile(file.to_string())))?;
+		std::fs::read_to_string(file).map_err(|_| Error::CouldNotReadFile(file.to_string()))?;
 
 	let tokens = tokenize(&text)?;
 	let ast = parse(&tokens)?;
 	let typed_ast = annotate(&ast)?;
-	let ir = compile(&typed_ast)?;
-	println!("{:#?}", ir);
+	let program = compile(&typed_ast)?;
+	let stack = interpret(&program)?;
+	println!("\n{:?}\n", stack);
 
 	Ok(())
 }
@@ -75,8 +78,13 @@ fn tokenize(s: &str) -> Result<Vec<Token>, Error> {
 #[test]
 fn tokenizer_test() {
 	assert_eq!(
-		tokenize("# Comment\n\"test \\\"str#ing\"\n toke)n1 # comment\n").unwrap(),
-		["\"test \"str#ing\"", "toke", ")", "n1"]
+		tokenize("# Comment\n\"test \\\"str#ing\"\n toke)n1 # comment\n"),
+		Ok(vec![
+			"\"test \"str#ing\"".to_string(),
+			"toke".to_string(),
+			")".to_string(),
+			"n1".to_string()
+		])
 	);
 	assert_eq!(
 		tokenize("# Comment\n\"test \\\"str#ing\n toke)n1 # comment\n"),
@@ -111,14 +119,14 @@ fn parse(tokens: &[Token]) -> Result<AST, Error> {
 		*index += 1;
 		Ok(v)
 	}
-	Ok(AST::Block(consume(&tokens, &mut 0, None)?))
+	Ok(AST::Block(consume(tokens, &mut 0, None)?))
 }
 
 #[test]
 fn parser_test() {
 	assert_eq!(
-		parse(&tokenize("1 {3 4} {} 5 {6 {8}}").unwrap()).unwrap(),
-		AST::Block(vec![
+		parse(&tokenize("1 {3 4} {} 5 {6 {8}}").unwrap()),
+		Ok(AST::Block(vec![
 			AST::Token("1".to_string()),
 			AST::Block(vec![AST::Token("3".to_string()), AST::Token("4".to_string()),]),
 			AST::Block(vec![]),
@@ -127,7 +135,7 @@ fn parser_test() {
 				AST::Token("6".to_string()),
 				AST::Block(vec![AST::Token("8".to_string())])
 			])
-		])
+		]))
 	);
 	assert_eq!(
 		parse(&tokenize("1 {3 4} { 5 {6 {7 {8}}}").unwrap()),
@@ -189,8 +197,8 @@ fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 #[test]
 fn typer_test() {
 	assert_eq!(
-		annotate(&parse(&tokenize("1 2 add 3 mul 4").unwrap()).unwrap()).unwrap(),
-		TypedAST::Block(
+		annotate(&parse(&tokenize("1 2 add 3 mul 4").unwrap()).unwrap()),
+		Ok(TypedAST::Block(
 			IO(vec![], vec![Type::Int, Type::Int]),
 			vec![
 				TypedAST::Token(IO(vec![], vec![Type::Int]), "1".to_string()),
@@ -206,7 +214,7 @@ fn typer_test() {
 				),
 				TypedAST::Token(IO(vec![], vec![Type::Int]), "4".to_string()),
 			]
-		),
+		)),
 	);
 	assert_eq!(
 		annotate(&parse(&tokenize("asdf").unwrap()).unwrap()),
@@ -280,5 +288,82 @@ fn compiler_test() {
 	assert_eq!(
 		compile(&TypedAST::Token(IO(vec![], vec![]), "asdf".to_string())),
 		Err(Error::CouldNotFindOp(IO(vec![], vec![]), "asdf".to_string()))
+	);
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Value {
+	Int(i64),
+	Bool(bool),
+}
+
+impl Value {
+	fn as_int(&self) -> Result<i64, Error> {
+		match self {
+			Value::Int(i) => Ok(*i),
+			v => Err(Error::WrongValueType(v.clone())),
+		}
+	}
+}
+
+#[derive(Debug, PartialEq)]
+struct Stack(Vec<Value>);
+
+impl Stack {
+	fn pop(&mut self) -> Result<Value, Error> {
+		self.0.pop().ok_or(Error::NoValueToPop)
+	}
+}
+
+fn interpret(program: &[Op]) -> Result<Stack, Error> {
+	fn interpret(program: &[Op], stack: &mut Stack) -> Result<(), Error> {
+		let mut i = 0;
+		while i < program.len() {
+			match program[i] {
+				Op::Bool(b) => stack.0.push(Value::Bool(b)),
+				Op::Int(i) => stack.0.push(Value::Int(i)),
+				Op::IntAdd => {
+					let a = stack.pop()?.as_int()? + stack.pop()?.as_int()?;
+					stack.0.push(Value::Int(a))
+				}
+				Op::IntSub => {
+					let a = stack.pop()?.as_int()? - stack.pop()?.as_int()?;
+					stack.0.push(Value::Int(a))
+				}
+				Op::IntMul => {
+					let a = stack.pop()?.as_int()? * stack.pop()?.as_int()?;
+					stack.0.push(Value::Int(a))
+				}
+				Op::BlockStart(0) | Op::BlockEnd(0) => {}
+				Op::BlockStart(_) | Op::BlockEnd(_) => todo!(),
+			}
+			i += 1;
+		}
+		Ok(())
+	}
+	let mut stack = Stack(vec![]);
+	interpret(program, &mut stack)?;
+	Ok(stack)
+}
+
+#[test]
+fn interpreter_test() {
+	assert_eq!(
+		interpret(&[
+			Op::BlockStart(0),
+			Op::Int(1),
+			Op::Int(2),
+			Op::IntAdd,
+			Op::Int(3),
+			Op::IntMul,
+			Op::Int(4),
+			Op::BlockEnd(0),
+		]),
+		Ok(Stack(vec![Value::Int(9), Value::Int(4)])),
+	);
+	assert_eq!(interpret(&[Op::Int(3), Op::IntAdd]), Err(Error::NoValueToPop));
+	assert_eq!(
+		interpret(&[Op::Bool(true), Op::IntAdd]),
+		Err(Error::WrongValueType(Value::Bool(true)))
 	);
 }
