@@ -128,7 +128,7 @@ fn parser_test() {
 		parse(&tokenize("1 {3 4} {} 5 {6 {8}}").unwrap()),
 		Ok(AST::Block(vec![
 			AST::Token("1".to_string()),
-			AST::Block(vec![AST::Token("3".to_string()), AST::Token("4".to_string()),]),
+			AST::Block(vec![AST::Token("3".to_string()), AST::Token("4".to_string())]),
 			AST::Block(vec![]),
 			AST::Token("5".to_string()),
 			AST::Block(vec![
@@ -145,8 +145,8 @@ fn parser_test() {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Type {
-	Int,
 	Bool,
+	Int,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -196,23 +196,18 @@ fn annotate(ast: &AST) -> Result<TypedAST, Error> {
 
 #[test]
 fn typer_test() {
+	let token = |i, o, s: &str| TypedAST::Token(IO(i, o), s.to_string());
 	assert_eq!(
 		annotate(&parse(&tokenize("1 2 add 3 mul 4").unwrap()).unwrap()),
 		Ok(TypedAST::Block(
 			IO(vec![], vec![Type::Int, Type::Int]),
 			vec![
-				TypedAST::Token(IO(vec![], vec![Type::Int]), "1".to_string()),
-				TypedAST::Token(IO(vec![], vec![Type::Int]), "2".to_string()),
-				TypedAST::Token(
-					IO(vec![Type::Int, Type::Int], vec![Type::Int]),
-					"add".to_string()
-				),
-				TypedAST::Token(IO(vec![], vec![Type::Int]), "3".to_string()),
-				TypedAST::Token(
-					IO(vec![Type::Int, Type::Int], vec![Type::Int]),
-					"mul".to_string()
-				),
-				TypedAST::Token(IO(vec![], vec![Type::Int]), "4".to_string()),
+				token(vec![], vec![Type::Int], "1"),
+				token(vec![], vec![Type::Int], "2"),
+				token(vec![Type::Int, Type::Int], vec![Type::Int], "add"),
+				token(vec![], vec![Type::Int], "3"),
+				token(vec![Type::Int, Type::Int], vec![Type::Int], "mul"),
+				token(vec![], vec![Type::Int], "4"),
 			]
 		)),
 	);
@@ -293,8 +288,8 @@ fn compiler_test() {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
-	Int(i64),
 	Bool(bool),
+	Int(i64),
 }
 
 impl Value {
