@@ -11,6 +11,9 @@ enum Error {
 	CouldNotFindOp(IO, Token),
 	WrongValueType(Value),
 	NoValueToPop,
+	CouldNotFindBlockStart(usize),
+	CouldNotFindBlockEnd(usize),
+	NoReturnAddress,
 }
 
 fn main() -> Result<(), Error> {
@@ -22,7 +25,8 @@ fn main() -> Result<(), Error> {
 	let tokens = tokenize(&text)?;
 	let ast = parse(&tokens)?;
 	let typed_ast = annotate(&ast)?;
-	let program = compile(&typed_ast)?;
+	let mut program = compile(&typed_ast)?;
+	program.push(Op::BlockCall(0));
 	let stack = interpret(&program)?;
 	println!("\n{:?}\n", stack);
 
@@ -92,7 +96,7 @@ fn tokenizer_test() {
 	);
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum AST {
 	Token(Token),
 	Block(Vec<AST>),
@@ -230,6 +234,7 @@ enum Op {
 	IntMul,
 	BlockStart(usize),
 	BlockEnd(usize),
+	BlockCall(usize),
 }
 
 fn compile(typed_ast: &TypedAST) -> Result<Vec<Op>, Error> {
@@ -311,34 +316,43 @@ impl Stack {
 }
 
 fn interpret(program: &[Op]) -> Result<Stack, Error> {
-	fn interpret(program: &[Op], stack: &mut Stack) -> Result<(), Error> {
-		let mut i = 0;
-		while i < program.len() {
-			match program[i] {
-				Op::Bool(b) => stack.0.push(Value::Bool(b)),
-				Op::Int(i) => stack.0.push(Value::Int(i)),
-				Op::IntAdd => {
-					let a = stack.pop()?.as_int()? + stack.pop()?.as_int()?;
-					stack.0.push(Value::Int(a))
-				}
-				Op::IntSub => {
-					let a = stack.pop()?.as_int()? - stack.pop()?.as_int()?;
-					stack.0.push(Value::Int(a))
-				}
-				Op::IntMul => {
-					let a = stack.pop()?.as_int()? * stack.pop()?.as_int()?;
-					stack.0.push(Value::Int(a))
-				}
-				Op::BlockStart(0) | Op::BlockEnd(0) => {}
-				Op::BlockStart(_) | Op::BlockEnd(_) => todo!(),
+	let mut data_stack = Stack(vec![]);
+	let mut call_stack = vec![];
+	let mut i = 0;
+	while i < program.len() {
+		match program[i] {
+			Op::Bool(b) => data_stack.0.push(Value::Bool(b)),
+			Op::Int(i) => data_stack.0.push(Value::Int(i)),
+			Op::IntAdd => {
+				let a = data_stack.pop()?.as_int()? + data_stack.pop()?.as_int()?;
+				data_stack.0.push(Value::Int(a))
 			}
-			i += 1;
+			Op::IntSub => {
+				let a = data_stack.pop()?.as_int()? - data_stack.pop()?.as_int()?;
+				data_stack.0.push(Value::Int(a))
+			}
+			Op::IntMul => {
+				let a = data_stack.pop()?.as_int()? * data_stack.pop()?.as_int()?;
+				data_stack.0.push(Value::Int(a))
+			}
+			Op::BlockStart(label) => {
+				i = program
+					.iter()
+					.position(|op| matches!(op, Op::BlockEnd(l) if *l == label))
+					.ok_or(Error::CouldNotFindBlockEnd(label))?
+			}
+			Op::BlockEnd(_) => i = call_stack.pop().ok_or(Error::NoReturnAddress)?,
+			Op::BlockCall(label) => {
+				call_stack.push(i);
+				i = program
+					.iter()
+					.position(|op| matches!(op, Op::BlockStart(l) if *l == label))
+					.ok_or(Error::CouldNotFindBlockStart(label))?;
+			}
 		}
-		Ok(())
+		i += 1;
 	}
-	let mut stack = Stack(vec![]);
-	interpret(program, &mut stack)?;
-	Ok(stack)
+	Ok(data_stack)
 }
 
 #[test]
@@ -350,9 +364,13 @@ fn interpreter_test() {
 			Op::Int(2),
 			Op::IntAdd,
 			Op::Int(3),
+			Op::BlockStart(1),
 			Op::IntMul,
 			Op::Int(4),
+			Op::BlockEnd(1),
+			Op::BlockCall(1),
 			Op::BlockEnd(0),
+			Op::BlockCall(0),
 		]),
 		Ok(Stack(vec![Value::Int(9), Value::Int(4)])),
 	);
