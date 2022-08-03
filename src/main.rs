@@ -8,6 +8,7 @@ enum Error {
 	MissingCloseBracket(Token),
 	CouldNotFindType(Token),
 	TypeMismatch(Type, Type),
+	NoBlockToCall,
 	CouldNotFindOp(IO, Token),
 	WrongValueType(Value),
 	NoValueToPop,
@@ -151,10 +152,25 @@ fn parser_test() {
 enum Type {
 	Bool,
 	Int,
+	Block(IO),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct IO(Vec<Type>, Vec<Type>);
+
+impl IO {
+	fn combine(&mut self, other: &IO) -> Result<(), Error> {
+		for t in other.0.clone() {
+			match self.1.pop() {
+				Some(t_) if t == t_ => {}
+				Some(t_) => Err(Error::TypeMismatch(t_, t))?,
+				None => self.0.insert(0, t),
+			}
+		}
+		self.1.append(&mut other.1.clone());
+		Ok(())
+	}
+}
 
 #[derive(Debug, PartialEq)]
 enum TypedAST {
@@ -163,55 +179,64 @@ enum TypedAST {
 }
 
 fn annotate(ast: &AST) -> Result<TypedAST, Error> {
-	Ok(match ast {
-		AST::Token(t) => TypedAST::Token(
-			match t.as_str() {
-				_ if t.parse::<i64>().is_ok() => IO(vec![], vec![Type::Int]),
-				"true" => IO(vec![], vec![Type::Bool]),
-				"false" => IO(vec![], vec![Type::Bool]),
-				"add" => IO(vec![Type::Int, Type::Int], vec![Type::Int]),
-				"sub" => IO(vec![Type::Int, Type::Int], vec![Type::Int]),
-				"mul" => IO(vec![Type::Int, Type::Int], vec![Type::Int]),
-				_ => Err(Error::CouldNotFindType(t.clone()))?,
-			},
-			t.clone(),
-		),
-		AST::Block(v) => {
-			let mut io = IO(vec![], vec![]);
-			let v = v.iter().map(annotate).collect::<Result<Vec<TypedAST>, Error>>()?;
-			for ast in &v {
-				let IO(i, o) = match ast {
-					TypedAST::Token(io, _) => io,
-					TypedAST::Block(io, _) => io,
-				};
-				for t in i.clone() {
-					match io.1.pop() {
-						Some(t_) if t == t_ => {}
-						Some(t_) => Err(Error::TypeMismatch(t_, t))?,
-						None => io.0.insert(0, t),
+	fn annotate(ast: &AST, stack: &IO) -> Result<TypedAST, Error> {
+		Ok(match ast {
+			AST::Token(t) => TypedAST::Token(
+				match t.as_str() {
+					_ if t.parse::<i64>().is_ok() => IO(vec![], vec![Type::Int]),
+					"true" => IO(vec![], vec![Type::Bool]),
+					"false" => IO(vec![], vec![Type::Bool]),
+					"add" => IO(vec![Type::Int, Type::Int], vec![Type::Int]),
+					"sub" => IO(vec![Type::Int, Type::Int], vec![Type::Int]),
+					"mul" => IO(vec![Type::Int, Type::Int], vec![Type::Int]),
+					"call" => {
+						let IO(i, o) = match stack.1.last() {
+							Some(Type::Block(io)) => io,
+							_ => Err(Error::NoBlockToCall)?,
+						};
+						let mut i = i.clone();
+						i.insert(0, Type::Block(IO(i.clone(), o.clone())));
+						IO(i, o.clone())
 					}
+					_ => Err(Error::CouldNotFindType(t.clone()))?,
+				},
+				t.clone(),
+			),
+			AST::Block(v) => {
+				let mut typed_v = vec![];
+				let mut io = IO(vec![], vec![]);
+				for ast in v {
+					typed_v.push(annotate(ast, &io)?);
+					io.combine(match typed_v.last().unwrap() {
+						TypedAST::Token(io, _) => io,
+						TypedAST::Block(io, _) => io,
+					})?;
 				}
-				io.1.append(&mut o.clone());
+				TypedAST::Block(IO(vec![], vec![Type::Block(io)]), typed_v)
 			}
-			TypedAST::Block(io, v)
-		}
-	})
+		})
+	}
+	annotate(ast, &IO(vec![], vec![]))
 }
 
 #[test]
 fn typer_test() {
+	use Type::*;
 	let token = |i, o, s: &str| TypedAST::Token(IO(i, o), s.to_string());
 	assert_eq!(
-		annotate(&parse(&tokenize("1 2 add 3 mul 4").unwrap()).unwrap()),
+		annotate(&parse(&tokenize("1 {2 add} call 3 mul 4").unwrap()).unwrap()),
 		Ok(TypedAST::Block(
-			IO(vec![], vec![Type::Int, Type::Int]),
+			IO(vec![], vec![Block(IO(vec![], vec![Int, Int]))]),
 			vec![
-				token(vec![], vec![Type::Int], "1"),
-				token(vec![], vec![Type::Int], "2"),
-				token(vec![Type::Int, Type::Int], vec![Type::Int], "add"),
-				token(vec![], vec![Type::Int], "3"),
-				token(vec![Type::Int, Type::Int], vec![Type::Int], "mul"),
-				token(vec![], vec![Type::Int], "4"),
+				token(vec![], vec![Int], "1"),
+				TypedAST::Block(
+					IO(vec![], vec![Block(IO(vec![Int], vec![Int]))]),
+					vec![token(vec![], vec![Int], "2"), token(vec![Int, Int], vec![Int], "add")],
+				),
+				token(vec![Block(IO(vec![Int], vec![Int])), Int], vec![Int], "call"),
+				token(vec![], vec![Int], "3"),
+				token(vec![Int, Int], vec![Int], "mul"),
+				token(vec![], vec![Int], "4"),
 			]
 		)),
 	);
@@ -221,7 +246,7 @@ fn typer_test() {
 	);
 	assert_eq!(
 		annotate(&parse(&tokenize("true 1 add").unwrap()).unwrap()),
-		Err(Error::TypeMismatch(Type::Bool, Type::Int)),
+		Err(Error::TypeMismatch(Bool, Int)),
 	);
 }
 
@@ -250,6 +275,7 @@ fn compile(typed_ast: &TypedAST) -> Result<Vec<Op>, Error> {
 					("add", [Type::Int, Type::Int], [Type::Int]) => Op::IntAdd,
 					("sub", [Type::Int, Type::Int], [Type::Int]) => Op::IntSub,
 					("mul", [Type::Int, Type::Int], [Type::Int]) => Op::IntMul,
+					("call", _, _) => todo!(),
 					_ => Err(Error::CouldNotFindOp(io.clone(), t.clone()))?,
 				}]
 			}
