@@ -10,7 +10,7 @@ enum Error {
 	TypeMismatch(Type, Type),
 	NoBlockToCall,
 	CouldNotFindOp(IO, Token),
-	WrongValueType(Value),
+	WrongRuntimeTime(Value),
 	NoValueToPop,
 	CouldNotFindBlockStart(usize),
 	CouldNotFindBlockEnd(usize),
@@ -27,7 +27,7 @@ fn main() -> Result<(), Error> {
 	let ast = parse(&tokens)?;
 	let typed_ast = annotate(&ast)?;
 	let mut program = compile(&typed_ast)?;
-	program.push(Op::BlockCall(0));
+	program.push(Op::BlockCall);
 	let stack = interpret(&program)?;
 	println!("\n{:?}\n", stack);
 
@@ -259,7 +259,7 @@ enum Op {
 	IntMul,
 	BlockStart(usize),
 	BlockEnd(usize),
-	BlockCall(usize),
+	BlockCall,
 }
 
 fn compile(typed_ast: &TypedAST) -> Result<Vec<Op>, Error> {
@@ -275,7 +275,9 @@ fn compile(typed_ast: &TypedAST) -> Result<Vec<Op>, Error> {
 					("add", [Type::Int, Type::Int], [Type::Int]) => Op::IntAdd,
 					("sub", [Type::Int, Type::Int], [Type::Int]) => Op::IntSub,
 					("mul", [Type::Int, Type::Int], [Type::Int]) => Op::IntMul,
-					("call", _, _) => todo!(),
+					("call", [Type::Block(IO(a, b)), c @ ..], d) if a == c && b == d => {
+						Op::BlockCall
+					}
 					_ => Err(Error::CouldNotFindOp(io.clone(), t.clone()))?,
 				}]
 			}
@@ -321,13 +323,21 @@ fn compiler_test() {
 enum Value {
 	Bool(bool),
 	Int(i64),
+	Block(usize),
 }
 
 impl Value {
 	fn as_int(&self) -> Result<i64, Error> {
 		match self {
 			Value::Int(i) => Ok(*i),
-			v => Err(Error::WrongValueType(v.clone())),
+			v => Err(Error::WrongRuntimeTime(v.clone())),
+		}
+	}
+
+	fn as_block(&self) -> Result<usize, Error> {
+		match self {
+			Value::Block(label) => Ok(*label),
+			v => Err(Error::WrongRuntimeTime(v.clone())),
 		}
 	}
 }
@@ -362,13 +372,15 @@ fn interpret(program: &[Op]) -> Result<Stack, Error> {
 				data_stack.0.push(Value::Int(a))
 			}
 			Op::BlockStart(label) => {
+				data_stack.0.push(Value::Block(label));
 				i = program
 					.iter()
 					.position(|op| matches!(op, Op::BlockEnd(l) if *l == label))
 					.ok_or(Error::CouldNotFindBlockEnd(label))?
 			}
 			Op::BlockEnd(_) => i = call_stack.pop().ok_or(Error::NoReturnAddress)?,
-			Op::BlockCall(label) => {
+			Op::BlockCall => {
+				let label = data_stack.pop()?.as_block()?;
 				call_stack.push(i);
 				i = program
 					.iter()
@@ -394,15 +406,21 @@ fn interpreter_test() {
 			Op::IntMul,
 			Op::Int(4),
 			Op::BlockEnd(1),
-			Op::BlockCall(1),
+			Op::BlockCall,
 			Op::BlockEnd(0),
-			Op::BlockCall(0),
+			Op::BlockCall,
 		]),
 		Ok(Stack(vec![Value::Int(9), Value::Int(4)])),
 	);
 	assert_eq!(interpret(&[Op::Int(3), Op::IntAdd]), Err(Error::NoValueToPop));
 	assert_eq!(
 		interpret(&[Op::Bool(true), Op::IntAdd]),
-		Err(Error::WrongValueType(Value::Bool(true)))
+		Err(Error::WrongRuntimeTime(Value::Bool(true)))
 	);
+	let mut program = compile(
+		&annotate(&parse(&tokenize("1 2 {add} call {3 mul} call").unwrap()).unwrap()).unwrap(),
+	)
+	.unwrap();
+	program.push(Op::BlockCall);
+	assert_eq!(interpret(&program), Ok(Stack(vec![Value::Int(9)])),);
 }
