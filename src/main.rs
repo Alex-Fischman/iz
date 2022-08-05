@@ -109,42 +109,82 @@ fn parse(tokens: &[Token]) -> Result<AST, Error> {
 		index: &mut usize,
 		end: Option<&str>,
 	) -> Result<Vec<AST>, Error> {
-		let mut v = vec![];
+		let mut infixes = vec![];
 		while match end {
 			Some(end) if *index < tokens.len() => end != tokens[*index],
 			Some(end) => Err(Error::MissingCloseBracket(end.to_string()))?,
 			None => *index < tokens.len(),
 		} {
 			*index += 1;
-			v.push(match &*tokens[*index - 1] {
+			infixes.push(match &*tokens[*index - 1] {
 				"{" => AST::Block(consume(tokens, index, Some("}"))?),
 				_ => AST::Token(tokens[*index - 1].clone()),
 			});
 		}
 		*index += 1;
-		Ok(v)
+
+		let mut postfixes = vec![];
+		let mut stack = vec![];
+		let operators = std::collections::HashMap::from([
+			("+".to_string(), ("add".to_string(), 1)),
+			("-".to_string(), ("sub".to_string(), 1)),
+			("*".to_string(), ("mul".to_string(), 2)),
+		]);
+		for ast in infixes {
+			match ast {
+				AST::Token(t) => match operators.get(&t) {
+					Some((name, prec)) => {
+						while stack
+							.last()
+							.map_or(false, |last: &(String, usize)| prec <= &last.1)
+						{
+							postfixes.push(AST::Token(stack.pop().unwrap().0));
+						}
+						stack.push((name.clone(), *prec));
+					}
+					None => postfixes.push(AST::Token(t)),
+				},
+				_ => postfixes.push(ast),
+			}
+		}
+		while let Some(t) = stack.pop() {
+			postfixes.push(AST::Token(t.0));
+		}
+		Ok(postfixes)
 	}
 	Ok(AST::Block(consume(tokens, &mut 0, None)?))
 }
 
 #[test]
 fn parser_test() {
+	let token = |s: &str| AST::Token(s.to_string());
 	assert_eq!(
 		parse(&tokenize("1 {3 4} {} 5 {6 {8}}").unwrap()),
 		Ok(AST::Block(vec![
-			AST::Token("1".to_string()),
-			AST::Block(vec![AST::Token("3".to_string()), AST::Token("4".to_string())]),
+			token("1"),
+			AST::Block(vec![token("3"), token("4")]),
 			AST::Block(vec![]),
-			AST::Token("5".to_string()),
-			AST::Block(vec![
-				AST::Token("6".to_string()),
-				AST::Block(vec![AST::Token("8".to_string())])
-			])
+			token("5"),
+			AST::Block(vec![token("6"), AST::Block(vec![token("8")])])
 		]))
 	);
 	assert_eq!(
 		parse(&tokenize("1 {3 4} { 5 {6 {7 {8}}}").unwrap()),
 		Err(Error::MissingCloseBracket("}".to_string()))
+	);
+	assert_eq!(
+		parse(&tokenize("1 + 2 * 3 - 4 + 5").unwrap()),
+		Ok(AST::Block(vec![
+			token("1"),
+			token("2"),
+			token("3"),
+			token("mul"),
+			token("add"),
+			token("4"),
+			token("sub"),
+			token("5"),
+			token("add")
+		]))
 	);
 }
 
@@ -365,7 +405,7 @@ fn interpret(program: &[Op]) -> Result<Stack, Error> {
 			}
 			Op::IntSub => {
 				let a = data_stack.pop()?.as_int()? - data_stack.pop()?.as_int()?;
-				data_stack.0.push(Value::Int(a))
+				data_stack.0.push(Value::Int(-a))
 			}
 			Op::IntMul => {
 				let a = data_stack.pop()?.as_int()? * data_stack.pop()?.as_int()?;
