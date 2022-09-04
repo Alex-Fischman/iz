@@ -1,8 +1,0 @@
-# goal: simplest usable execution model: stack-based with environment
-# goal: fewest language built-ins
-# goal: fully metaprogrammable types
-# goal: compilation with optimization
-
-add3 = {add add}
-square = {dup mul}
-cube = {dup dup mul mul}
