@@ -122,6 +122,7 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 					) {
 					i += 1;
 				}
+				
 				let mut a = 0i64;
 				let mut b = 1;
 				let mut fail = false;
