@@ -34,17 +34,11 @@ impl Location {
 	}
 
 	fn to_string(self, file: &str, chars: &[char]) -> String {
-		let mut row = 1;
-		let mut col = 1;
-		for c in chars {
-			if *c == '\n' {
-				row += 1;
-				col = 1;
-			} else {
-				col += 1;
-			}
-		}
-		format!(" @ {}:{} in {}", row, col, file)
+		let (row, col) = chars.iter().take(self.idx).fold((1, 1), |(row, col), c| match c {
+			'\n' => (row + 1, 1),
+			_ => (row, col + 1),
+		});
+		format!("{}:{}:{}", file, row, col)
 	}
 }
 
@@ -55,6 +49,7 @@ enum Bracket {
 	Square,
 }
 
+use TokenData::{OpenBracket, CloseBracket};
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TokenData {
 	Identifier,
@@ -70,7 +65,7 @@ struct Token(Location, TokenData);
 impl Token {
 	fn to_string(&self, file: &str, chars: &[char]) -> String {
 		chars[self.0.idx..self.0.idx + self.0.len].iter().collect::<String>()
-			+ &self.0.to_string(file, chars)
+			+ " at " + &self.0.to_string(file, chars)
 	}
 }
 
@@ -111,14 +106,12 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 					i += 1;
 				}
 			}
-			'(' => out.push(Token(Location::new(i, 1), TokenData::OpenBracket(Bracket::Round))),
-			'{' => out.push(Token(Location::new(i, 1), TokenData::OpenBracket(Bracket::Curly))),
-			'[' => out.push(Token(Location::new(i, 1), TokenData::OpenBracket(Bracket::Square))),
-			')' => out.push(Token(Location::new(i, 1), TokenData::CloseBracket(Bracket::Round))),
-			'}' => out.push(Token(Location::new(i, 1), TokenData::CloseBracket(Bracket::Curly))),
-			']' => {
-				out.push(Token(Location::new(i, 1), TokenData::CloseBracket(Bracket::Square)))
-			}
+			'(' => out.push(Token(Location::new(i, 1), OpenBracket(Bracket::Round))),
+			'{' => out.push(Token(Location::new(i, 1), OpenBracket(Bracket::Curly))),
+			'[' => out.push(Token(Location::new(i, 1), OpenBracket(Bracket::Square))),
+			')' => out.push(Token(Location::new(i, 1), CloseBracket(Bracket::Round))),
+			'}' => out.push(Token(Location::new(i, 1), CloseBracket(Bracket::Curly))),
+			']' => out.push(Token(Location::new(i, 1), CloseBracket(Bracket::Square))),
 			' ' | '\t' | '\n' => {}
 			_ => {
 				let idx = i;
@@ -129,7 +122,6 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 					) {
 					i += 1;
 				}
-
 				let mut a = 0i64;
 				let mut b = 1;
 				let mut fail = false;
@@ -164,7 +156,7 @@ fn tokenizer_test() {
 	test("214s2135**adfe442341", Ok(vec![Token(Location::new(0, 20), TokenData::Identifier)]));
 	test("\"\"", Ok(vec![Token(Location::new(1, 0), TokenData::String)]));
 	test("-5_84_39", Ok(vec![Token(Location::new(0, 8), TokenData::Number(-58439))]));
-	test(")", Ok(vec![Token(Location::new(0, 1), TokenData::CloseBracket(Bracket::Round))]));
+	test(")", Ok(vec![Token(Location::new(0, 1), CloseBracket(Bracket::Round))]));
 	test(
 		"a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = -1_000_000 (c = {a})",
 		Ok(vec![
@@ -174,13 +166,13 @@ fn tokenizer_test() {
 			Token(Location::new(42, 1), TokenData::Identifier),
 			Token(Location::new(44, 1), TokenData::Identifier),
 			Token(Location::new(46, 10), TokenData::Number(-1000000)),
-			Token(Location::new(57, 1), TokenData::OpenBracket(Bracket::Round)),
+			Token(Location::new(57, 1), OpenBracket(Bracket::Round)),
 			Token(Location::new(58, 1), TokenData::Identifier),
 			Token(Location::new(60, 1), TokenData::Identifier),
-			Token(Location::new(62, 1), TokenData::OpenBracket(Bracket::Curly)),
+			Token(Location::new(62, 1), OpenBracket(Bracket::Curly)),
 			Token(Location::new(63, 1), TokenData::Identifier),
-			Token(Location::new(64, 1), TokenData::CloseBracket(Bracket::Curly)),
-			Token(Location::new(65, 1), TokenData::CloseBracket(Bracket::Round)),
+			Token(Location::new(64, 1), CloseBracket(Bracket::Curly)),
+			Token(Location::new(65, 1), CloseBracket(Bracket::Round)),
 		]),
 	);
 }
