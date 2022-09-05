@@ -49,7 +49,7 @@ enum Bracket {
 	Square,
 }
 
-use TokenData::{OpenBracket, CloseBracket};
+use TokenData::{CloseBracket, OpenBracket};
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TokenData {
 	Identifier,
@@ -76,29 +76,26 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 		match chars[i] {
 			'"' => {
 				i += 1;
-				let mut j = 0;
+				let idx = i;
 				loop {
-					match chars.get(i + j) {
+					match chars.get(i) {
 						Some('"') => break,
 						Some('\\') => {
-							j += 1;
-							match chars.get(i + j) {
+							i += 1;
+							match chars.get(i) {
 								Some('\\') | Some('"') | Some('n') | Some('t') => {}
 								Some(_) => {
-									Err(Error::InvalidEscapeCharacter(Location::new(i + j, 1)))?
+									Err(Error::InvalidEscapeCharacter(Location::new(i, 1)))?
 								}
-								None => {
-									Err(Error::MissingEscapeCharacter(Location::new(i + j, 0)))?
-								}
+								None => Err(Error::MissingEscapeCharacter(Location::new(i, 0)))?,
 							}
 						}
 						Some(_) => {}
-						None => Err(Error::MissingEndQuote(Location::new(i + j, 0)))?,
+						None => Err(Error::MissingEndQuote(Location::new(i, 0)))?,
 					}
-					j += 1;
+					i += 1;
 				}
-				out.push(Token(Location::new(i, j), TokenData::String));
-				i += j;
+				out.push(Token(Location::new(idx, i - idx), TokenData::String));
 			}
 			'#' => {
 				i += 1;
@@ -122,7 +119,6 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 					) {
 					i += 1;
 				}
-				
 				let mut a = 0i64;
 				let mut b = 1;
 				let mut fail = false;
@@ -137,9 +133,10 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 						break;
 					}
 				}
-				let data = if fail { TokenData::Identifier } else { TokenData::Number(a) };
-				out.push(Token(Location::new(idx, i - idx), data));
-
+				out.push(Token(
+					Location::new(idx, i - idx),
+					if fail { TokenData::Identifier } else { TokenData::Number(a) },
+				));
 				i -= 1;
 			}
 		}
