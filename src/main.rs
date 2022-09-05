@@ -128,7 +128,17 @@ fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 			'}' => out.push(Token(Location::new(i, 1), TokenData::CloseBracket(Bracket::Curly))),
 			']' => out.push(Token(Location::new(i, 1), TokenData::CloseBracket(Bracket::Square))),
 			' ' | '\t' | '\n' => {},
-            _ => todo!(),
+            _ => {
+				let mut loc = Location::new(i, 1);
+				while i + loc.len < chars.len() && match chars[i + loc.len] {
+					'"' | '#' | '(' | '{' | '[' | ')' | '}' | ']' | ' ' | '\t' | '\n' => false,
+					_ => true,
+				} {
+					loc.len += 1;
+				}
+				i += loc.len - 1;
+				todo!("try to convert chars at loc to a number")
+			},
         }
         i += 1;
     }
