@@ -115,7 +115,6 @@ fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a
 								Some('"') => s.push('\"'),
 								Some('n') => s.push('\n'),
 								Some('t') => s.push('\t'),
-								Some('u') => todo!(),
 								_ => Err(Error::InvalidEscapeCharacter(t.index_to_string(i)))?,
 							}
 						}
