@@ -51,7 +51,7 @@ enum Token {
 
 #[derive(Debug, PartialEq)]
 struct Tokenizer<'a> {
-	tokens: Vec<(Location, Token)>,
+	tokens: Vec<(Token, Location)>,
 	idents: Vec<Location>,
 	strings: Vec<String>,
 	chars: &'a [char],
@@ -70,8 +70,8 @@ impl<'a> Tokenizer<'a> {
 		self.chars[start..].iter().position(f).unwrap_or(self.chars.len() - start) + start
 	}
 
-	fn index_to_string(&self, i: usize) -> String {
-		let (row, col) = self.chars[..i].iter().fold((1, 1), |(row, col), c| match c {
+	fn index_to_string(&self, index: usize) -> String {
+		let (row, col) = self.chars[..index].iter().fold((1, 1), |(row, col), c| match c {
 			'\n' => (row + 1, 1),
 			_ => (row, col + 1),
 		});
@@ -82,8 +82,7 @@ impl<'a> Tokenizer<'a> {
 	}
 
 	fn token_to_string(&self, token: usize) -> String {
-		let (l, t) = self.tokens[token];
-		let token = match t {
+		(match self.tokens[token].0 {
 			Token::Ident(i) => self[self.idents[i]].iter().collect(),
 			Token::String(i) => self.strings[i].clone(),
 			Token::Number(n) => format!("{}", n),
@@ -93,8 +92,7 @@ impl<'a> Tokenizer<'a> {
 			Token::Closer(Bracket::Round) => ")".to_owned(),
 			Token::Closer(Bracket::Curly) => "}".to_owned(),
 			Token::Closer(Bracket::Square) => "]".to_owned(),
-		};
-		token + " at " + &self.index_to_string(l.idx)
+		}) + " at " + &self.index_to_string(self.tokens[token].1.idx)
 	}
 }
 
@@ -107,8 +105,9 @@ fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a
 				i += 1;
 				let idx = i;
 				let mut s = "".to_owned();
-				while !matches!(chars.get(i), Some('"')) {
+				loop {
 					match chars.get(i) {
+						Some('"') => break,
 						Some('\\') => {
 							i += 1;
 							match chars.get(i) {
@@ -126,20 +125,19 @@ fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a
 					i += 1;
 				}
 				t.strings.push(s);
-				t.tokens.push((loc(idx, i - idx), Token::String(t.strings.len() - 1)));
+				t.tokens.push((Token::String(t.strings.len() - 1), loc(idx, i - idx)));
 			}
 			'#' => i = t.search(i, |c| *c == '\n'),
-			'(' => t.tokens.push((loc(i, 1), Token::Opener(Bracket::Round))),
-			')' => t.tokens.push((loc(i, 1), Token::Closer(Bracket::Round))),
-			'{' => t.tokens.push((loc(i, 1), Token::Opener(Bracket::Curly))),
-			'}' => t.tokens.push((loc(i, 1), Token::Closer(Bracket::Curly))),
-			'[' => t.tokens.push((loc(i, 1), Token::Opener(Bracket::Square))),
-			']' => t.tokens.push((loc(i, 1), Token::Closer(Bracket::Square))),
+			'(' => t.tokens.push((Token::Opener(Bracket::Round), loc(i, 1))),
+			')' => t.tokens.push((Token::Closer(Bracket::Round), loc(i, 1))),
+			'{' => t.tokens.push((Token::Opener(Bracket::Curly), loc(i, 1))),
+			'}' => t.tokens.push((Token::Closer(Bracket::Curly), loc(i, 1))),
+			'[' => t.tokens.push((Token::Opener(Bracket::Square), loc(i, 1))),
+			']' => t.tokens.push((Token::Closer(Bracket::Square), loc(i, 1))),
 			' ' | '\t' | '\n' => {}
 			_ => {
 				let l = loc(i, t.search(i, |a| "\"#(){}{} \t\n".chars().any(|b| *a == b)) - i);
 				t.tokens.push((
-					l,
 					match t[l].iter().enumerate().rev().try_fold((0, 1), |(a, b), t| match t {
 						(0, '-') => Some((-a, b)),
 						(_, '0') => Some((a, b * 10)),
@@ -157,18 +155,15 @@ fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a
 					}) {
 						Some((n, _)) => Token::Number(n),
 						None => Token::Ident(
-							t.idents
-								.iter()
-								.position(|i| t[*i] == t[l])
-								.unwrap_or_else(|| {
-									t.idents.push(l);
-									t.idents.len() - 1
-								}),
+							t.idents.iter().position(|i| t[*i] == t[l]).unwrap_or_else(|| {
+								t.idents.push(l);
+								t.idents.len() - 1
+							}),
 						),
 					},
+					l,
 				));
-				i += l.len;
-				i -= 1;
+				i += l.len - 1;
 			}
 		}
 		i += 1;
@@ -190,26 +185,26 @@ fn tokenizer_test() {
 	test_err("\"\"\"", Error::MissingEndQuote("1:4".to_owned()));
 	test_err("\"\\", Error::InvalidEscapeCharacter("1:3".to_owned()));
 	test_err("\"\\a", Error::InvalidEscapeCharacter("1:3".to_owned()));
-	test_ok("214s2135**adfe2", vec![(loc(0, 15), Token::Ident(0))], vec![loc(0, 15)], vec![]);
-	test_ok("\"\"", vec![(loc(1, 0), Token::String(0))], vec![], vec!["".to_owned()]);
-	test_ok("-5_84_39", vec![(loc(0, 8), Token::Number(-58439))], vec![], vec![]);
-	test_ok(")", vec![(loc(0, 1), Token::Closer(Bracket::Round))], vec![], vec![]);
+	test_ok("214s2135**adfe2", vec![(Token::Ident(0), loc(0, 15))], vec![loc(0, 15)], vec![]);
+	test_ok("\"\"", vec![(Token::String(0), loc(1, 0))], vec![], vec!["".to_owned()]);
+	test_ok("-5_84_39", vec![(Token::Number(-58439), loc(0, 8))], vec![], vec![]);
+	test_ok(")", vec![(Token::Closer(Bracket::Round), loc(0, 1))], vec![], vec![]);
 	test_ok(
 		"a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = -1_000_000 (c = {a})",
 		vec![
-			(loc(0, 1), Token::Ident(0)),
-			(loc(2, 1), Token::Ident(1)),
-			(loc(5, 35), Token::String(0)),
-			(loc(42, 1), Token::Ident(2)),
-			(loc(44, 1), Token::Ident(1)),
-			(loc(46, 10), Token::Number(-1000000)),
-			(loc(57, 1), Token::Opener(Bracket::Round)),
-			(loc(58, 1), Token::Ident(3)),
-			(loc(60, 1), Token::Ident(1)),
-			(loc(62, 1), Token::Opener(Bracket::Curly)),
-			(loc(63, 1), Token::Ident(0)),
-			(loc(64, 1), Token::Closer(Bracket::Curly)),
-			(loc(65, 1), Token::Closer(Bracket::Round)),
+			(Token::Ident(0), loc(0, 1)),
+			(Token::Ident(1), loc(2, 1)),
+			(Token::String(0), loc(5, 35)),
+			(Token::Ident(2), loc(42, 1)),
+			(Token::Ident(1), loc(44, 1)),
+			(Token::Number(-1000000), loc(46, 10)),
+			(Token::Opener(Bracket::Round), loc(57, 1)),
+			(Token::Ident(3), loc(58, 1)),
+			(Token::Ident(1), loc(60, 1)),
+			(Token::Opener(Bracket::Curly), loc(62, 1)),
+			(Token::Ident(0), loc(63, 1)),
+			(Token::Closer(Bracket::Curly), loc(64, 1)),
+			(Token::Closer(Bracket::Round), loc(65, 1)),
 		],
 		vec![loc(0, 1), loc(2, 1), loc(42, 1), loc(58, 1)],
 		vec!["text with  s, \ts, \ns, \"s, and \\s".to_owned()],
