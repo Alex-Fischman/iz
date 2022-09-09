@@ -9,11 +9,13 @@ enum Error {
 fn main() -> Result<(), Error> {
 	let args: Vec<String> = std::env::args().collect();
 	let file = args.get(1).ok_or(Error::MissingCommandLineArgument)?;
-	let text =
-		std::fs::read_to_string(file).map_err(|_| Error::CouldNotReadFile(file.to_owned()))?;
-	let chars: Vec<char> = text.chars().collect();
+	let chars: Vec<char> = std::fs::read_to_string(file)
+		.map_err(|_| Error::CouldNotReadFile(file.to_owned()))?
+		.chars()
+		.collect();
+	let input = Input { chars: &chars, file: Some(file) };
 
-	let t = tokenize(&chars, Some(file))?;
+	let t = tokenize(&input)?;
 
 	println!();
 	for i in 0..t.tokens.len() {
@@ -21,6 +23,29 @@ fn main() -> Result<(), Error> {
 	}
 	println!();
 	Ok(())
+}
+
+#[derive(Debug, PartialEq)]
+struct Input<'a> {
+	chars: &'a [char],
+	file: Option<&'a str>,
+}
+
+impl<'a> Input<'a> {
+	fn search<F: Fn(&char) -> bool>(&self, start: usize, f: F) -> usize {
+		self.chars[start..].iter().position(f).unwrap_or(self.chars.len() - start) + start
+	}
+
+	fn index_to_string(&self, index: usize) -> String {
+		let (row, col) = self.chars[..index].iter().fold((1, 1), |(row, col), c| match c {
+			'\n' => (row + 1, 1),
+			_ => (row, col + 1),
+		});
+		match self.file {
+			Some(file) => format!("{}:{}:{}", file, row, col),
+			None => format!("{}:{}", row, col),
+		}
+	}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,36 +76,20 @@ enum Token {
 
 #[derive(Debug, PartialEq)]
 struct Tokenizer<'a> {
+	input: &'a Input<'a>,
 	tokens: Vec<(Token, Location)>,
 	idents: Vec<Location>,
 	strings: Vec<String>,
-	chars: &'a [char],
-	file: Option<&'a str>,
 }
 
 impl<'a> std::ops::Index<Location> for Tokenizer<'a> {
 	type Output = [char];
 	fn index(&self, l: Location) -> &[char] {
-		&self.chars[l.idx..l.idx + l.len]
+		&self.input.chars[l.idx..l.idx + l.len]
 	}
 }
 
 impl<'a> Tokenizer<'a> {
-	fn search<F: Fn(&char) -> bool>(&self, start: usize, f: F) -> usize {
-		self.chars[start..].iter().position(f).unwrap_or(self.chars.len() - start) + start
-	}
-
-	fn index_to_string(&self, index: usize) -> String {
-		let (row, col) = self.chars[..index].iter().fold((1, 1), |(row, col), c| match c {
-			'\n' => (row + 1, 1),
-			_ => (row, col + 1),
-		});
-		match self.file {
-			Some(file) => format!("{}:{}:{}", file, row, col),
-			None => format!("{}:{}", row, col),
-		}
-	}
-
 	fn token_to_string(&self, token: usize) -> String {
 		(match self.tokens[token].0 {
 			Token::Ident(i) => self[self.idents[i]].iter().collect(),
@@ -92,41 +101,43 @@ impl<'a> Tokenizer<'a> {
 			Token::Closer(Bracket::Round) => ")".to_owned(),
 			Token::Closer(Bracket::Curly) => "}".to_owned(),
 			Token::Closer(Bracket::Square) => "]".to_owned(),
-		}) + " at " + &self.index_to_string(self.tokens[token].1.idx)
+		}) + " at " + &self.input.index_to_string(self.tokens[token].1.idx)
 	}
 }
 
-fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a>, Error> {
-	let mut t = Tokenizer { tokens: vec![], idents: vec![], strings: vec![], chars, file };
+fn tokenize<'a>(input: &'a Input<'a>) -> Result<Tokenizer<'a>, Error> {
+	let mut t = Tokenizer { tokens: vec![], idents: vec![], strings: vec![], input };
 	let mut i = 0;
-	while let Some(c) = chars.get(i) {
+	while let Some(c) = input.chars.get(i) {
 		match c {
 			'"' => {
 				i += 1;
 				let idx = i;
 				let mut s = "".to_owned();
 				loop {
-					match chars.get(i) {
+					match input.chars.get(i) {
 						Some('"') => break,
 						Some('\\') => {
 							i += 1;
-							match chars.get(i) {
+							match input.chars.get(i) {
 								Some('\\') => s.push('\\'),
 								Some('"') => s.push('\"'),
 								Some('n') => s.push('\n'),
 								Some('t') => s.push('\t'),
-								_ => Err(Error::InvalidEscapeCharacter(t.index_to_string(i)))?,
+								_ => {
+									Err(Error::InvalidEscapeCharacter(input.index_to_string(i)))?
+								}
 							}
 						}
 						Some(c) => s.push(*c),
-						None => Err(Error::MissingEndQuote(t.index_to_string(i)))?,
+						None => Err(Error::MissingEndQuote(input.index_to_string(i)))?,
 					}
 					i += 1;
 				}
 				t.strings.push(s);
 				t.tokens.push((Token::String(t.strings.len() - 1), loc(idx, i - idx)));
 			}
-			'#' => i = t.search(i, |c| *c == '\n'),
+			'#' => i = input.search(i, |c| *c == '\n'),
 			'(' => t.tokens.push((Token::Opener(Bracket::Round), loc(i, 1))),
 			')' => t.tokens.push((Token::Closer(Bracket::Round), loc(i, 1))),
 			'{' => t.tokens.push((Token::Opener(Bracket::Curly), loc(i, 1))),
@@ -135,7 +146,8 @@ fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a
 			']' => t.tokens.push((Token::Closer(Bracket::Square), loc(i, 1))),
 			' ' | '\t' | '\n' => {}
 			_ => {
-				let l = loc(i, t.search(i, |a| "\"#(){}{} \t\n".chars().any(|b| *a == b)) - i);
+				let l =
+					loc(i, input.search(i, |a| "\"#(){}{} \t\n".chars().any(|b| *a == b)) - i);
 				t.tokens.push((
 					match t[l].iter().enumerate().rev().try_fold((0, 1), |(a, b), t| match t {
 						(0, '-') => Some((-a, b)),
@@ -172,14 +184,16 @@ fn tokenize<'a>(chars: &'a [char], file: Option<&'a str>) -> Result<Tokenizer<'a
 
 #[test]
 fn tokenizer_test() {
-	let test_err =
-		|a: &str, b| assert_eq!(tokenize(&a.chars().collect::<Vec<char>>(), None), Err(b));
+	let test_err = |a: &str, b| {
+		assert_eq!(
+			tokenize(&Input { chars: &a.chars().collect::<Vec<char>>(), file: None }),
+			Err(b)
+		)
+	};
 	let test_ok = |s: &str, tokens, idents, strings| {
 		let chars = &s.chars().collect::<Vec<char>>();
-		assert_eq!(
-			tokenize(chars, None),
-			Ok(Tokenizer { tokens, idents, strings, file: None, chars })
-		)
+		let input = Input { chars, file: None };
+		assert_eq!(tokenize(&input), Ok(Tokenizer { tokens, idents, strings, input: &input }))
 	};
 	test_err("\"\"\"", Error::MissingEndQuote("1:4".to_owned()));
 	test_err("\"\\", Error::InvalidEscapeCharacter("1:3".to_owned()));
