@@ -4,6 +4,8 @@ enum Error {
 	CouldNotReadFile(String),
 	MissingEndQuote(String),
 	InvalidEscapeCharacter(String),
+	MissingCloseBracket(String),
+	ExtraCloseBracket(String),
 }
 
 fn main() -> Result<(), Error> {
@@ -16,12 +18,8 @@ fn main() -> Result<(), Error> {
 	let input = Input { chars: &chars, file: Some(file) };
 
 	let t = tokenize(&input)?;
-
-	println!();
-	for i in 0..t.tokens.len() {
-		println!("{}", t.token_to_string(i));
-	}
-	println!();
+	let p = parse(&t)?;
+	println!("\n{:?}\n", p);
 	Ok(())
 }
 
@@ -74,7 +72,7 @@ enum Token {
 	Closer(Bracket, Location),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 struct Tokenizer<'a> {
 	input: &'a Input<'a>,
 	tokens: Vec<Token>,
@@ -82,27 +80,30 @@ struct Tokenizer<'a> {
 	strings: Vec<String>,
 }
 
+impl<'a> std::fmt::Debug for Tokenizer<'a> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		for token in &self.tokens {
+			let (s, l) = match token {
+				Token::Ident(i, l) => (self[self.idents[*i]].iter().collect::<String>(), l),
+				Token::String(i, l) => (self.strings[*i].to_owned(), l),
+				Token::Number(n, l) => (format!("{}", n), l),
+				Token::Opener(Bracket::Round, l) => ("(".to_owned(), l),
+				Token::Opener(Bracket::Curly, l) => ("{".to_owned(), l),
+				Token::Opener(Bracket::Square, l) => ("[".to_owned(), l),
+				Token::Closer(Bracket::Round, l) => (")".to_owned(), l),
+				Token::Closer(Bracket::Curly, l) => ("}".to_owned(), l),
+				Token::Closer(Bracket::Square, l) => ("]".to_owned(), l),
+			};
+			writeln!(f, "{} at {}", s, self.input.index_to_string(l.idx))?
+		}
+		Ok(())
+	}
+}
+
 impl<'a> std::ops::Index<Location> for Tokenizer<'a> {
 	type Output = [char];
 	fn index(&self, l: Location) -> &[char] {
 		&self.input.chars[l.idx..l.idx + l.len]
-	}
-}
-
-impl<'a> Tokenizer<'a> {
-	fn token_to_string(&self, token: usize) -> String {
-		let (s, l) = match self.tokens[token] {
-			Token::Ident(i, l) => (self[self.idents[i]].iter().collect::<String>(), l),
-			Token::String(i, l) => (self.strings[i].to_string(), l),
-			Token::Number(n, l) => (format!("{}", n), l),
-			Token::Opener(Bracket::Round, l) => ("(".to_string(), l),
-			Token::Opener(Bracket::Curly, l) => ("{".to_string(), l),
-			Token::Opener(Bracket::Square, l) => ("[".to_string(), l),
-			Token::Closer(Bracket::Round, l) => (")".to_string(), l),
-			Token::Closer(Bracket::Curly, l) => ("}".to_string(), l),
-			Token::Closer(Bracket::Square, l) => ("]".to_string(), l),
-		};
-		s + " at " + &self.input.index_to_string(l.idx)
 	}
 }
 
@@ -223,4 +224,108 @@ fn tokenizer_test() {
 		vec![loc(0, 1), loc(2, 1), loc(42, 1), loc(58, 1)],
 		vec!["text with  s, \ts, \ns, \"s, and \\s".to_owned()],
 	);
+}
+
+#[derive(Debug, PartialEq)]
+enum AST {
+	Ident(usize, Location),
+	String(usize, Location),
+	Number(i64, Location),
+	Brackets(Bracket, Location, Location, Vec<AST>),
+}
+
+#[derive(PartialEq)]
+struct Parser<'a> {
+	tokenizer: &'a Tokenizer<'a>,
+	ast: AST,
+}
+
+impl<'a> std::fmt::Debug for Parser<'a> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		fn write_ast(
+			ast: &AST,
+			f: &mut std::fmt::Formatter,
+			depth: usize,
+			tokenizer: &Tokenizer,
+		) -> std::fmt::Result {
+			let (s, l) = match &ast {
+				AST::Ident(i, l) => {
+					(tokenizer[tokenizer.idents[*i]].iter().collect::<String>(), l)
+				}
+				AST::String(i, l) => (tokenizer.strings[*i].to_owned(), l),
+				AST::Number(n, l) => (format!("{}", n), l),
+				AST::Brackets(b, l, k, asts) => {
+					writeln!(
+						f,
+						"{}{} from {} to {}",
+						"\t".repeat(depth),
+						match b {
+							Bracket::Round => "()",
+							Bracket::Curly => "{}",
+							Bracket::Square => "[]",
+						},
+						tokenizer.input.index_to_string(l.idx),
+						tokenizer.input.index_to_string(k.idx)
+					)?;
+					return asts
+						.iter()
+						.try_fold((), |_, ast| write_ast(ast, f, depth + 1, tokenizer));
+				}
+			};
+			writeln!(
+				f,
+				"{}{} at {}",
+				"\t".repeat(depth),
+				s,
+				tokenizer.input.index_to_string(l.idx)
+			)
+		}
+		write_ast(&self.ast, f, 0, self.tokenizer)
+	}
+}
+
+fn parse<'a>(tokenizer: &'a Tokenizer<'a>) -> Result<Parser<'a>, Error> {
+	fn consume_up_to(
+		tokens: &[Token],
+		i: &mut usize,
+		end: Option<Bracket>,
+		input: &Input,
+	) -> Result<(Vec<AST>, Location), Error> {
+		let mut asts = vec![];
+		let k;
+		loop {
+			asts.push(match (end, tokens.get(*i)) {
+				(Some(_), None) => {
+					Err(Error::MissingCloseBracket(input.index_to_string(input.chars.len())))?
+				}
+				(Some(end), Some(Token::Closer(b, l))) if end != *b => {
+					Err(Error::ExtraCloseBracket(input.index_to_string(l.idx)))?
+				}
+				(None, Some(Token::Closer(_, l))) => {
+					Err(Error::ExtraCloseBracket(input.index_to_string(l.idx)))?
+				}
+				(Some(_), Some(Token::Closer(_, l))) => {
+					k = *l;
+					break;
+				}
+				(None, None) => {
+					k = loc(input.chars.len(), 0);
+					break;
+				}
+				(_, Some(Token::Ident(i, l))) => AST::Ident(*i, *l),
+				(_, Some(Token::String(s, l))) => AST::String(*s, *l),
+				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l),
+				(_, Some(Token::Opener(b, l))) => {
+					*i += 1;
+					let (asts, k) = consume_up_to(tokens, i, Some(*b), input)?;
+					AST::Brackets(*b, *l, k, asts)
+				}
+			});
+			*i += 1;
+		}
+		Ok((asts, k))
+	}
+
+	let (asts, k) = consume_up_to(&tokenizer.tokens, &mut 0, None, tokenizer.input)?;
+	Ok(Parser { tokenizer, ast: AST::Brackets(Bracket::Curly, loc(0, 0), k, asts) })
 }
