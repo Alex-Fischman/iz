@@ -237,7 +237,7 @@ enum AST {
 #[derive(PartialEq)]
 struct Parser<'a> {
 	tokenizer: &'a Tokenizer<'a>,
-	ast: AST,
+	asts: Vec<AST>,
 }
 
 impl<'a> std::fmt::Debug for Parser<'a> {
@@ -280,7 +280,7 @@ impl<'a> std::fmt::Debug for Parser<'a> {
 				tokenizer.input.index_to_string(l.idx)
 			)
 		}
-		write_ast(&self.ast, f, 0, self.tokenizer)
+		self.asts.iter().try_fold((), |_, ast| write_ast(ast, f, 0, self.tokenizer))
 	}
 }
 
@@ -325,7 +325,62 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'a>) -> Result<Parser<'a>, Error> {
 		}
 		Ok((asts, k))
 	}
+	Ok(Parser {
+		tokenizer,
+		asts: consume_up_to(&tokenizer.tokens, &mut 0, None, tokenizer.input)?.0,
+	})
+}
 
-	let (asts, k) = consume_up_to(&tokenizer.tokens, &mut 0, None, tokenizer.input)?;
-	Ok(Parser { tokenizer, ast: AST::Brackets(Bracket::Curly, loc(0, 0), k, asts) })
+#[test]
+fn parser_test() {
+	let test_err = |a: &str, b| {
+		assert_eq!(
+			parse(
+				&tokenize(&Input { chars: &a.chars().collect::<Vec<char>>(), file: None })
+					.unwrap()
+			),
+			Err(b)
+		)
+	};
+	let test_ok = |s: &str, asts| {
+		assert_eq!(
+			parse(
+				&tokenize(&Input { chars: &s.chars().collect::<Vec<char>>(), file: None })
+					.unwrap()
+			)
+			.unwrap()
+			.asts,
+			asts
+		)
+	};
+	test_err("{", Error::MissingCloseBracket("1:2".to_owned()));
+	test_err(")", Error::ExtraCloseBracket("1:1".to_owned()));
+	test_err("({)}", Error::ExtraCloseBracket("1:3".to_owned()));
+	test_ok(
+		"[(a) ({3})]",
+		vec![AST::Brackets(
+			Bracket::Square,
+			Location { idx: 0, len: 1 },
+			Location { idx: 10, len: 1 },
+			vec![
+				AST::Brackets(
+					Bracket::Round,
+					Location { idx: 1, len: 1 },
+					Location { idx: 3, len: 1 },
+					vec![AST::Ident(0, Location { idx: 2, len: 1 })],
+				),
+				AST::Brackets(
+					Bracket::Round,
+					Location { idx: 5, len: 1 },
+					Location { idx: 9, len: 1 },
+					vec![AST::Brackets(
+						Bracket::Curly,
+						Location { idx: 6, len: 1 },
+						Location { idx: 8, len: 1 },
+						vec![AST::Number(3, Location { idx: 7, len: 1 })],
+					)],
+				),
+			],
+		)],
+	);
 }
