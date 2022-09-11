@@ -12,6 +12,7 @@ fn main() -> Result<(), String> {
 }
 
 // is there some way to get rid of this char reference?
+// not in Rust, but in a non-borrow-checked language it should be a char pointer and a length
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Location<'a>(usize, usize, &'a [char]);
 
@@ -243,6 +244,8 @@ impl std::fmt::Display for Parser<'_> {
 			depth: usize,
 			t: &Tokenizer,
 		) -> std::fmt::Result {
+			// should be an unnamed enum with one value for each path
+			// like Result<(String, Location), &[AST]> (but that has a borrow error)
 			let (s, l) = match &ast {
 				AST::Ident(l) => (l.to_chars().iter().collect::<String>(), l),
 				AST::String(i, l) => (t.strings[*i].to_owned(), l),
@@ -287,8 +290,8 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 					Err(format!("no close bracket at {}", Location(t.chars.len(), 0, t.chars)))?
 				}
 				(Some(end), Some(Token::Closer(b, _))) if *b == end => break,
-				(_, Some(Token::Closer(_, l))) => Err(format!("extra close bracket at {}", l))?,
 				(None, None) => break,
+				(_, Some(Token::Closer(_, l))) => Err(format!("extra close bracket at {}", l))?,
 				(_, Some(Token::Ident(l))) => AST::Ident(*l),
 				(_, Some(Token::String(s, l))) => AST::String(*s, *l),
 				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l),
@@ -342,13 +345,11 @@ fn parse_test() {
 		parse(&tokenize(&chars).unwrap()),
 		Err("extra close bracket at 1:1-1:2".to_owned())
 	);
-
 	let chars: Vec<char> = "({)}".chars().collect::<Vec<char>>();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()),
 		Err("extra close bracket at 1:3-1:4".to_owned())
 	);
-
 	let chars: Vec<char> = "{}".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
@@ -363,7 +364,6 @@ fn parse_test() {
 			)]
 		})
 	);
-
 	let chars: Vec<char> = "[{   }]".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
@@ -383,19 +383,16 @@ fn parse_test() {
 			)]
 		})
 	);
-
 	let chars: Vec<char> = "+ 1".chars().collect::<Vec<char>>();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()),
 		Err("not enough operator arguments for 1:1-1:2".to_owned())
 	);
-
 	let chars: Vec<char> = "1 ->".chars().collect::<Vec<char>>();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()),
 		Err("not enough operator arguments for 1:3-1:5".to_owned())
 	);
-
 	let chars: Vec<char> = "a + b".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
@@ -409,7 +406,6 @@ fn parse_test() {
 			)]
 		})
 	);
-
 	let chars: Vec<char> = "a - b * c".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
@@ -433,7 +429,6 @@ fn parse_test() {
 			)]
 		})
 	);
-
 	let chars: Vec<char> = "a *  b *  c".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
@@ -457,7 +452,6 @@ fn parse_test() {
 			)]
 		})
 	);
-
 	let chars: Vec<char> = "a -> b -> c".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
@@ -481,7 +475,6 @@ fn parse_test() {
 			)]
 		})
 	);
-
 	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect::<Vec<char>>();
 	let t = tokenize(&chars).unwrap();
 	assert_eq!(
