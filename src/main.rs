@@ -5,9 +5,9 @@ fn main() -> Result<(), String> {
 		.map_err(|_| format!("could not read {}", file))?
 		.chars()
 		.collect();
-	let tokenizer = tokenize(&chars)?;
-	let parser = parse(&tokenizer, &chars)?;
-	println!("\n{:#?}", parser);
+	let tokens = tokenize(&chars)?;
+	let asts = parse(&tokens, &chars)?;
+	println!("\n{:#?}", asts);
 	Ok(())
 }
 
