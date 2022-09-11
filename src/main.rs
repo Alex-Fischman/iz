@@ -6,7 +6,7 @@ fn main() -> Result<(), String> {
 		.chars()
 		.collect();
 	let tokenizer = tokenize(&chars)?;
-	let parser = parse(&tokenizer)?;
+	let parser = parse(&tokenizer, &chars)?;
 	println!("\n{}", parser);
 	Ok(())
 }
@@ -50,17 +50,11 @@ enum Token<'a> {
 	Closer(Bracket, Location<'a>),
 }
 
-#[derive(Debug, PartialEq)]
-struct Tokenizer<'a> {
-	chars: &'a [char],
-	tokens: Vec<Token<'a>>,
-}
-
-fn tokenize(chars: &[char]) -> Result<Tokenizer, String> {
+fn tokenize(chars: &[char]) -> Result<Vec<Token>, String> {
 	fn search<F: Fn(&char) -> bool>(chars: &[char], start: usize, f: F) -> usize {
 		chars[start..].iter().position(f).unwrap_or(chars.len() - start) + start
 	}
-	let mut t = Tokenizer { chars, tokens: vec![] };
+	let mut t = vec![];
 	let mut i = 0;
 	while let Some(c) = chars.get(i) {
 		match c {
@@ -89,15 +83,15 @@ fn tokenize(chars: &[char]) -> Result<Tokenizer, String> {
 					}
 					i += 1;
 				}
-				t.tokens.push(Token::String(s, Location(idx, i - idx, chars)));
+				t.push(Token::String(s, Location(idx, i - idx, chars)));
 			}
 			'#' => i = search(chars, i, |c| *c == '\n'),
-			'(' => t.tokens.push(Token::Opener(Bracket::Round, Location(i, 1, chars))),
-			')' => t.tokens.push(Token::Closer(Bracket::Round, Location(i, 1, chars))),
-			'{' => t.tokens.push(Token::Opener(Bracket::Curly, Location(i, 1, chars))),
-			'}' => t.tokens.push(Token::Closer(Bracket::Curly, Location(i, 1, chars))),
-			'[' => t.tokens.push(Token::Opener(Bracket::Square, Location(i, 1, chars))),
-			']' => t.tokens.push(Token::Closer(Bracket::Square, Location(i, 1, chars))),
+			'(' => t.push(Token::Opener(Bracket::Round, Location(i, 1, chars))),
+			')' => t.push(Token::Closer(Bracket::Round, Location(i, 1, chars))),
+			'{' => t.push(Token::Opener(Bracket::Curly, Location(i, 1, chars))),
+			'}' => t.push(Token::Closer(Bracket::Curly, Location(i, 1, chars))),
+			'[' => t.push(Token::Opener(Bracket::Square, Location(i, 1, chars))),
+			']' => t.push(Token::Closer(Bracket::Square, Location(i, 1, chars))),
 			' ' | '\t' | '\n' => {}
 			_ => {
 				let l = Location(
@@ -105,7 +99,7 @@ fn tokenize(chars: &[char]) -> Result<Tokenizer, String> {
 					search(chars, i, |a| "\"#(){}{} \t\n".chars().any(|b| *a == b)) - i,
 					chars,
 				);
-				t.tokens.push(
+				t.push(
 					match l.to_chars().iter().enumerate().rev().try_fold((0, 1), |(a, b), t| {
 						match t {
 							(0, '-') => Some((-a, b)),
@@ -152,51 +146,42 @@ fn tokenize_test() {
 		Err("no valid escape character at 1:3-1:3".to_owned())
 	);
 	let chars = "214s2135**adfe2".chars().collect::<Vec<char>>();
-	assert_eq!(tokenize(&chars).unwrap().tokens, vec![Token::Ident(Location(0, 15, &chars))]);
+	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Ident(Location(0, 15, &chars))]);
 	let chars = "\"\"".chars().collect::<Vec<char>>();
 	assert_eq!(
-		tokenize(&chars),
-		Ok(Tokenizer {
-			tokens: vec![Token::String("".to_owned(), Location(1, 0, &chars))],
-			chars: &chars
-		})
+		tokenize(&chars).unwrap(),
+		vec![Token::String("".to_owned(), Location(1, 0, &chars))]
 	);
 	let chars = "-5_84_39".chars().collect::<Vec<char>>();
-	assert_eq!(
-		tokenize(&chars).unwrap().tokens,
-		vec![Token::Number(-58439, Location(0, 8, &chars))]
-	);
+	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Number(-58439, Location(0, 8, &chars))]);
 	let chars = ")".chars().collect::<Vec<char>>();
 	assert_eq!(
-		tokenize(&chars).unwrap().tokens,
+		tokenize(&chars).unwrap(),
 		vec![Token::Closer(Bracket::Round, Location(0, 1, &chars))]
 	);
 	let chars = "a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = -1_000_000 (c = {a})"
 		.chars()
 		.collect::<Vec<char>>();
 	assert_eq!(
-		tokenize(&chars),
-		Ok(Tokenizer {
-			tokens: vec![
-				Token::Ident(Location(0, 1, &chars)),
-				Token::Ident(Location(2, 1, &chars)),
-				Token::String(
-					"text with  s, \ts, \ns, \"s, and \\s".to_owned(),
-					Location(5, 35, &chars)
-				),
-				Token::Ident(Location(42, 1, &chars)),
-				Token::Ident(Location(44, 1, &chars)),
-				Token::Number(-1000000, Location(46, 10, &chars)),
-				Token::Opener(Bracket::Round, Location(57, 1, &chars)),
-				Token::Ident(Location(58, 1, &chars)),
-				Token::Ident(Location(60, 1, &chars)),
-				Token::Opener(Bracket::Curly, Location(62, 1, &chars)),
-				Token::Ident(Location(63, 1, &chars)),
-				Token::Closer(Bracket::Curly, Location(64, 1, &chars)),
-				Token::Closer(Bracket::Round, Location(65, 1, &chars)),
-			],
-			chars: &chars
-		})
+		tokenize(&chars).unwrap(),
+		vec![
+			Token::Ident(Location(0, 1, &chars)),
+			Token::Ident(Location(2, 1, &chars)),
+			Token::String(
+				"text with  s, \ts, \ns, \"s, and \\s".to_owned(),
+				Location(5, 35, &chars)
+			),
+			Token::Ident(Location(42, 1, &chars)),
+			Token::Ident(Location(44, 1, &chars)),
+			Token::Number(-1000000, Location(46, 10, &chars)),
+			Token::Opener(Bracket::Round, Location(57, 1, &chars)),
+			Token::Ident(Location(58, 1, &chars)),
+			Token::Ident(Location(60, 1, &chars)),
+			Token::Opener(Bracket::Curly, Location(62, 1, &chars)),
+			Token::Ident(Location(63, 1, &chars)),
+			Token::Closer(Bracket::Curly, Location(64, 1, &chars)),
+			Token::Closer(Bracket::Round, Location(65, 1, &chars)),
+		]
 	);
 }
 
@@ -230,10 +215,7 @@ enum AST<'a, T> {
 }
 
 #[derive(Debug, PartialEq)]
-struct Parser<'a> {
-	tokenizer: &'a Tokenizer<'a>,
-	asts: Vec<AST<'a, ()>>,
-}
+struct Parser<'a>(Vec<AST<'a, ()>>);
 
 impl std::fmt::Display for Parser<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -241,7 +223,6 @@ impl std::fmt::Display for Parser<'_> {
 			ast: &AST<()>,
 			f: &mut std::fmt::Formatter,
 			depth: usize,
-			t: &Tokenizer,
 		) -> std::fmt::Result {
 			// should be an unnamed enum with one value for each path
 			// like Result<(String, Location), &[AST]> (but that has a borrow error)
@@ -262,31 +243,31 @@ impl std::fmt::Display for Parser<'_> {
 						l,
 						k
 					)?;
-					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1, t));
+					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1));
 				}
 				AST::Operator((i, j), l, asts, ()) => {
 					writeln!(f, "{}{} at {}", "\t".repeat(depth), OPERATORS[*i].0[*j].func, l,)?;
-					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1, t));
+					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1));
 				}
 			};
 			writeln!(f, "{}{} at {}", "\t".repeat(depth), s, l)
 		}
-		self.asts.iter().try_fold((), |_, ast| write_ast(ast, f, 0, self.tokenizer))
+		self.0.iter().try_fold((), |_, ast| write_ast(ast, f, 0))
 	}
 }
 
-fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
+fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Parser<'a>, String> {
 	fn consume_up_to<'a>(
 		tokens: &[Token<'a>],
 		i: &mut usize,
 		end: Option<Bracket>,
-		t: &Tokenizer<'a>,
+		chars: &[char],
 	) -> Result<Vec<AST<'a, ()>>, String> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
 				(Some(_), None) => {
-					Err(format!("no close bracket at {}", Location(t.chars.len(), 0, t.chars)))?
+					Err(format!("no close bracket at {}", Location(chars.len(), 0, chars)))?
 				}
 				(Some(end), Some(Token::Closer(b, _))) if *b == end => break,
 				(None, None) => break,
@@ -296,7 +277,7 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l, ()),
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
-					let asts = consume_up_to(tokens, i, Some(*b), t)?;
+					let asts = consume_up_to(tokens, i, Some(*b), chars)?;
 					let k = match tokens[*i] {
 						Token::Ident(l) => l,
 						Token::String(_, l) => l,
@@ -332,208 +313,180 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 		}
 		Ok(asts)
 	}
-	Ok(Parser { tokenizer, asts: consume_up_to(&tokenizer.tokens, &mut 0, None, tokenizer)? })
+	Ok(Parser(consume_up_to(tokens, &mut 0, None, chars)?))
 }
 
 #[test]
 fn parse_test() {
 	let chars: Vec<char> = "{".chars().collect::<Vec<char>>();
-	assert_eq!(parse(&tokenize(&chars).unwrap()), Err("no close bracket at 1:2-1:2".to_owned()));
+	assert_eq!(
+		parse(&tokenize(&chars).unwrap(), &chars),
+		Err("no close bracket at 1:2-1:2".to_owned())
+	);
 	let chars: Vec<char> = ")".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()),
+		parse(&tokenize(&chars).unwrap(), &chars),
 		Err("extra close bracket at 1:1-1:2".to_owned())
 	);
 	let chars: Vec<char> = "({)}".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()),
+		parse(&tokenize(&chars).unwrap(), &chars),
 		Err("extra close bracket at 1:3-1:4".to_owned())
 	);
 	let chars: Vec<char> = "{}".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
 	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Brackets(
-				Bracket::Curly,
-				Location(0, 1, &chars),
-				Location(1, 1, &chars),
-				vec![],
-				()
-			)]
-		})
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Brackets(
+			Bracket::Curly,
+			Location(0, 1, &chars),
+			Location(1, 1, &chars),
+			vec![],
+			()
+		)],
 	);
 	let chars: Vec<char> = "[{   }]".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
 	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Brackets(
-				Bracket::Square,
-				Location(0, 1, &chars),
-				Location(6, 1, &chars),
-				vec![AST::Brackets(
-					Bracket::Curly,
-					Location(1, 1, &chars),
-					Location(5, 1, &chars),
-					vec![],
-					()
-				)],
-				(),
-			)]
-		})
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Brackets(
+			Bracket::Square,
+			Location(0, 1, &chars),
+			Location(6, 1, &chars),
+			vec![AST::Brackets(
+				Bracket::Curly,
+				Location(1, 1, &chars),
+				Location(5, 1, &chars),
+				vec![],
+				()
+			)],
+			(),
+		)]
 	);
 	let chars: Vec<char> = "+ 1".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()),
+		parse(&tokenize(&chars).unwrap(), &chars),
 		Err("not enough operator arguments for 1:1-1:2".to_owned())
 	);
 	let chars: Vec<char> = "1 ->".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()),
+		parse(&tokenize(&chars).unwrap(), &chars),
 		Err("not enough operator arguments for 1:3-1:5".to_owned())
 	);
 	let chars: Vec<char> = "a + b".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
 	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Operator(
-				(1, 0),
-				Location(2, 1, &chars),
-				vec![
-					AST::Ident(Location(0, 1, &chars), ()),
-					AST::Ident(Location(4, 1, &chars), ())
-				],
-				()
-			)]
-		})
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Operator(
+			(1, 0),
+			Location(2, 1, &chars),
+			vec![AST::Ident(Location(0, 1, &chars), ()), AST::Ident(Location(4, 1, &chars), ())],
+			()
+		)],
 	);
 	let chars: Vec<char> = "a - b * c".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
 	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Operator(
-				(1, 1),
-				Location(2, 1, &chars),
-				vec![
-					AST::Ident(Location(0, 1, &chars), ()),
-					AST::Operator(
-						(0, 0),
-						Location(6, 1, &chars),
-						vec![
-							AST::Ident(Location(4, 1, &chars), ()),
-							AST::Ident(Location(8, 1, &chars), ())
-						],
-						()
-					),
-				],
-				(),
-			)]
-		})
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Operator(
+			(1, 1),
+			Location(2, 1, &chars),
+			vec![
+				AST::Ident(Location(0, 1, &chars), ()),
+				AST::Operator(
+					(0, 0),
+					Location(6, 1, &chars),
+					vec![
+						AST::Ident(Location(4, 1, &chars), ()),
+						AST::Ident(Location(8, 1, &chars), ())
+					],
+					()
+				),
+			],
+			(),
+		)]
 	);
 	let chars: Vec<char> = "a *  b *  c".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
 	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Operator(
-				(0, 0),
-				Location(7, 1, &chars),
-				vec![
-					AST::Operator(
-						(0, 0),
-						Location(2, 1, &chars),
-						vec![
-							AST::Ident(Location(0, 1, &chars), ()),
-							AST::Ident(Location(5, 1, &chars), ())
-						],
-						()
-					),
-					AST::Ident(Location(10, 1, &chars), ()),
-				],
-				(),
-			)]
-		})
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Operator(
+			(0, 0),
+			Location(7, 1, &chars),
+			vec![
+				AST::Operator(
+					(0, 0),
+					Location(2, 1, &chars),
+					vec![
+						AST::Ident(Location(0, 1, &chars), ()),
+						AST::Ident(Location(5, 1, &chars), ())
+					],
+					()
+				),
+				AST::Ident(Location(10, 1, &chars), ()),
+			],
+			(),
+		)]
 	);
 	let chars: Vec<char> = "a -> b -> c".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
 	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Operator(
-				(2, 0),
-				Location(2, 2, &chars),
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Operator(
+			(2, 0),
+			Location(2, 2, &chars),
+			vec![
+				AST::Ident(Location(0, 1, &chars), ()),
+				AST::Operator(
+					(2, 0),
+					Location(7, 2, &chars),
+					vec![
+						AST::Ident(Location(5, 1, &chars), ()),
+						AST::Ident(Location(10, 1, &chars), ())
+					],
+					(),
+				),
+			],
+			(),
+		)]
+	);
+	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect::<Vec<char>>();
+	assert_eq!(
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		vec![AST::Brackets(
+			Bracket::Square,
+			Location(0, 1, &chars),
+			Location(17, 1, &chars),
+			vec![AST::Operator(
+				(1, 0),
+				Location(5, 1, &chars),
 				vec![
-					AST::Ident(Location(0, 1, &chars), ()),
-					AST::Operator(
-						(2, 0),
-						Location(7, 2, &chars),
-						vec![
-							AST::Ident(Location(5, 1, &chars), ()),
-							AST::Ident(Location(10, 1, &chars), ())
-						],
+					AST::Brackets(
+						Bracket::Round,
+						Location(1, 1, &chars),
+						Location(3, 1, &chars),
+						vec![AST::Ident(Location(2, 1, &chars), ())],
+						(),
+					),
+					AST::Brackets(
+						Bracket::Round,
+						Location(7, 1, &chars),
+						Location(16, 1, &chars),
+						vec![AST::Brackets(
+							Bracket::Curly,
+							Location(8, 1, &chars),
+							Location(15, 1, &chars),
+							vec![AST::Operator(
+								(0, 0),
+								Location(11, 1, &chars),
+								vec![
+									AST::Number(3, Location(9, 1, &chars), ()),
+									AST::Number(97, Location(13, 2, &chars), ()),
+								],
+								(),
+							)],
+							(),
+						)],
 						(),
 					),
 				],
 				(),
-			)]
-		})
-	);
-	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect::<Vec<char>>();
-	let t = tokenize(&chars).unwrap();
-	assert_eq!(
-		parse(&t),
-		Ok(Parser {
-			tokenizer: &t,
-			asts: vec![AST::Brackets(
-				Bracket::Square,
-				Location(0, 1, &chars),
-				Location(17, 1, &chars),
-				vec![AST::Operator(
-					(1, 0),
-					Location(5, 1, &chars),
-					vec![
-						AST::Brackets(
-							Bracket::Round,
-							Location(1, 1, &chars),
-							Location(3, 1, &chars),
-							vec![AST::Ident(Location(2, 1, &chars), ())],
-							(),
-						),
-						AST::Brackets(
-							Bracket::Round,
-							Location(7, 1, &chars),
-							Location(16, 1, &chars),
-							vec![AST::Brackets(
-								Bracket::Curly,
-								Location(8, 1, &chars),
-								Location(15, 1, &chars),
-								vec![AST::Operator(
-									(0, 0),
-									Location(11, 1, &chars),
-									vec![
-										AST::Number(3, Location(9, 1, &chars), ()),
-										AST::Number(97, Location(13, 2, &chars), ()),
-									],
-									(),
-								)],
-								(),
-							)],
-							(),
-						),
-					],
-					(),
-				)],
-				(),
 			)],
-		})
+			(),
+		)]
 	);
 }
