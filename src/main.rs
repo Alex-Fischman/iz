@@ -221,27 +221,22 @@ fn tokenize_test() {
 
 #[derive(PartialEq)]
 struct Operator {
-	name: &'static [char],
-	func: &'static [char],
+	name: &'static str,
+	func: &'static str,
 	left: usize,
 	right: usize,
 }
 
-const fn op(
-	name: &'static [char],
-	func: &'static [char],
-	left: usize,
-	right: usize,
-) -> Operator {
+const fn op(name: &'static str, func: &'static str, left: usize, right: usize) -> Operator {
 	Operator { name, func, left, right }
 }
 
 // Grouped by precedence; highest first
 // bool is right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[op(&['*'], &['m', 'u', 'l'], 1, 1)], false),
-	(&[op(&['+'], &['a', 'd', 'd'], 1, 1), op(&['-'], &['s', 'u', 'b'], 1, 1)], false),
-	(&[op(&['-', '>'], &['a', 'r', 'r', 'o', 'w'], 1, 1)], true),
+	(&[op("*", "mul", 1, 1)], false),
+	(&[op("+", "add", 1, 1), op("-", "sub", 1, 1)], false),
+	(&[op("->", "arrow", 1, 1)], true),
 ];
 
 #[derive(Clone, PartialEq)]
@@ -291,7 +286,7 @@ impl<'a> std::fmt::Debug for Parser<'a> {
 						f,
 						"{}{} at {}",
 						"\t".repeat(depth),
-						OPERATORS[*i].0[*j].func.iter().collect::<String>(),
+						OPERATORS[*i].0[*j].func,
 						t.input.index_to_string(l.idx),
 					)?;
 					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1, t));
@@ -330,66 +325,37 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'a>) -> Result<Parser<'a>, Error> {
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
 					let asts = consume_up_to(tokens, i, Some(*b), t)?;
-					AST::Brackets(
-						*b,
-						*l,
-						match tokens[*i] {
-							Token::Ident(l) => l,
-							Token::String(_, l) => l,
-							Token::Number(_, l) => l,
-							Token::Opener(_, l) => l,
-							Token::Closer(_, l) => l,
-						},
-						asts,
-					)
+					let k = match tokens[*i] {
+						Token::Ident(l) => l,
+						Token::String(_, l) => l,
+						Token::Number(_, l) => l,
+						Token::Opener(_, l) => l,
+						Token::Closer(_, l) => l,
+					};
+					AST::Brackets(*b, *l, k, asts)
 				}
 			});
 			*i += 1;
 		}
 		for (a, (ops, right)) in OPERATORS.iter().enumerate() {
-			if *right {
-				if asts.is_empty() {
-					continue;
-				}
-				let mut j = asts.len() - 1;
-				while let Some(ast) = asts.get(j) {
-					if let AST::Ident(l) = ast.clone() {
-						if let Some((b, op)) =
-							ops.iter().enumerate().find(|(_, op)| op.name == &t.input[l])
-						{
-							if j < op.left || j + op.right >= asts.len() {
-								Err(Error::NotEnoughArgs(t.input.index_to_string(l.idx)))?
-							}
-							asts.remove(j);
-							let c: Vec<AST> = asts.drain(j - op.left..j + op.right).collect();
-							j -= op.left;
-							asts.insert(j, AST::Operator((a, b), l, c));
+			let mut j = if *right { asts.len().wrapping_sub(1) } else { 0 };
+			while let Some(ast) = asts.get(j) {
+				if let AST::Ident(l) = ast.clone() {
+					if let Some((b, op)) = ops
+						.iter()
+						.enumerate()
+						.find(|(_, op)| op.name == t.input[l].iter().collect::<String>())
+					{
+						if j < op.left || j + op.right >= asts.len() {
+							Err(Error::NotEnoughArgs(t.input.index_to_string(l.idx)))?
 						}
-					}
-					if j == 0 {
-						break;
-					} else {
-						j -= 1
+						asts.remove(j);
+						let c: Vec<AST> = asts.drain(j - op.left..j + op.right).collect();
+						j -= op.left;
+						asts.insert(j, AST::Operator((a, b), l, c));
 					}
 				}
-			} else {
-				let mut j = 0;
-				while let Some(ast) = asts.get(j) {
-					if let AST::Ident(l) = ast.clone() {
-						if let Some((b, op)) =
-							ops.iter().enumerate().find(|(_, op)| op.name == &t.input[l])
-						{
-							if j < op.left || j + op.right >= asts.len() {
-								Err(Error::NotEnoughArgs(t.input.index_to_string(l.idx)))?
-							}
-							asts.remove(j);
-							let c: Vec<AST> = asts.drain(j - op.left..j + op.right).collect();
-							j -= op.left;
-							asts.insert(j, AST::Operator((a, b), l, c));
-						}
-					}
-					j += 1
-				}
+				j = if *right { j.wrapping_sub(1) } else { j + 1 }
 			}
 		}
 		Ok(asts)
@@ -399,6 +365,7 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'a>) -> Result<Parser<'a>, Error> {
 
 #[test]
 fn parse_test() {
+	use AST::*;
 	let test_err = |a: &str, b| {
 		let input = Input { chars: &a.chars().collect::<Vec<char>>(), file: None };
 		let t = tokenize(&input).unwrap();
@@ -412,101 +379,85 @@ fn parse_test() {
 	test_err("{", Error::MissingCloseBracket("1:2".to_owned()));
 	test_err(")", Error::ExtraCloseBracket("1:1".to_owned()));
 	test_err("({)}", Error::ExtraCloseBracket("1:3".to_owned()));
-	test_ok("{}", vec![AST::Brackets(Bracket::Curly, loc(0, 1), loc(1, 1), vec![])]);
+	test_ok("{}", vec![Brackets(Bracket::Curly, loc(0, 1), loc(1, 1), vec![])]);
 	test_ok(
 		"[{   }]",
-		vec![AST::Brackets(
+		vec![Brackets(
 			Bracket::Square,
 			loc(0, 1),
 			loc(6, 1),
-			vec![AST::Brackets(Bracket::Curly, loc(1, 1), loc(5, 1), vec![])],
+			vec![Brackets(Bracket::Curly, loc(1, 1), loc(5, 1), vec![])],
 		)],
 	);
 	test_err("+ 1", Error::NotEnoughArgs("1:1".to_owned()));
 	test_err("1 ->", Error::NotEnoughArgs("1:3".to_owned()));
 	test_ok(
 		"a + b",
-		vec![AST::Operator(
-			(1, 0),
-			loc(2, 1),
-			vec![AST::Ident(loc(0, 1)), AST::Ident(loc(4, 1))],
-		)],
+		vec![Operator((1, 0), loc(2, 1), vec![Ident(loc(0, 1)), Ident(loc(4, 1))])],
 	);
 	test_ok(
 		"a - b * c",
-		vec![AST::Operator(
+		vec![Operator(
 			(1, 1),
 			loc(2, 1),
 			vec![
-				AST::Ident(loc(0, 1)),
-				AST::Operator(
-					(0, 0),
-					loc(6, 1),
-					vec![AST::Ident(loc(4, 1)), AST::Ident(loc(8, 1))],
-				),
+				Ident(loc(0, 1)),
+				Operator((0, 0), loc(6, 1), vec![Ident(loc(4, 1)), Ident(loc(8, 1))]),
 			],
 		)],
 	);
 	test_ok(
 		"a *  b *  c",
-		vec![AST::Operator(
+		vec![Operator(
 			(0, 0),
 			loc(7, 1),
 			vec![
-				AST::Operator(
-					(0, 0),
-					loc(2, 1),
-					vec![AST::Ident(loc(0, 1)), AST::Ident(loc(5, 1))],
-				),
-				AST::Ident(loc(10, 1)),
+				Operator((0, 0), loc(2, 1), vec![Ident(loc(0, 1)), Ident(loc(5, 1))]),
+				Ident(loc(10, 1)),
 			],
 		)],
 	);
 	test_ok(
 		"a -> b -> c",
-		vec![AST::Operator(
+		vec![Operator(
 			(2, 0),
 			loc(2, 2),
 			vec![
-				AST::Ident(loc(0, 1)),
-				AST::Operator(
-					(2, 0),
-					loc(7, 2),
-					vec![AST::Ident(loc(5, 1)), AST::Ident(loc(10, 1))],
-				),
+				Ident(loc(0, 1)),
+				Operator((2, 0), loc(7, 2), vec![Ident(loc(5, 1)), Ident(loc(10, 1))]),
 			],
 		)],
 	);
 	test_ok(
 		"[(a) + ({3 * 97})]",
-		vec![AST::Brackets(
+		vec![Brackets(
 			Bracket::Square,
 			Location { idx: 0, len: 1 },
 			Location { idx: 17, len: 1 },
-			vec![AST::Operator(
+			vec![Operator(
 				(1, 0),
 				loc(5, 1),
 				vec![
-					AST::Brackets(
+					Brackets(
 						Bracket::Round,
 						Location { idx: 1, len: 1 },
 						Location { idx: 3, len: 1 },
-						vec![AST::Ident(Location { idx: 2, len: 1 })],
+						vec![Ident(Location { idx: 2, len: 1 })],
 					),
-					AST::Brackets(
+					Brackets(
 						Bracket::Round,
 						Location { idx: 7, len: 1 },
 						Location { idx: 16, len: 1 },
-						vec![AST::Brackets(
+						vec![Brackets(
 							Bracket::Curly,
 							Location { idx: 8, len: 1 },
 							Location { idx: 15, len: 1 },
-							vec![AST::Operator(
+							vec![Operator(
 								(0, 0),
 								loc(11, 1),
 								vec![
-									AST::Number(3, Location { idx: 9, len: 1 }),
-									AST::Number(97, Location { idx: 13, len: 2 }),
+									Number(3, Location { idx: 9, len: 1 }),
+									Number(97, Location { idx: 13, len: 2 }),
 								],
 							)],
 						)],
