@@ -7,7 +7,7 @@ fn main() -> Result<(), String> {
 		.collect();
 	let tokenizer = tokenize(&chars)?;
 	let parser = parse(&tokenizer, &chars)?;
-	println!("\n{}", parser);
+	println!("\n{:#?}", parser);
 	Ok(())
 }
 
@@ -214,54 +214,12 @@ enum AST<'a, T> {
 	Operator((usize, usize), Location<'a>, Vec<AST<'a, T>>, T),
 }
 
-#[derive(Debug, PartialEq)]
-struct Parser<'a>(Vec<AST<'a, ()>>);
-
-impl std::fmt::Display for Parser<'_> {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		fn write_ast(
-			ast: &AST<()>,
-			f: &mut std::fmt::Formatter,
-			depth: usize,
-		) -> std::fmt::Result {
-			// should be an unnamed enum with one value for each path
-			// like Result<(String, Location), &[AST]> (but that has a borrow error)
-			let (s, l) = match &ast {
-				AST::Ident(l, ()) => (l.to_chars().iter().collect::<String>(), l),
-				AST::String(s, l, ()) => (s.clone(), l),
-				AST::Number(n, l, ()) => (format!("{}", n), l),
-				AST::Brackets(b, l, k, asts, ()) => {
-					writeln!(
-						f,
-						"{}{} from {} to {}",
-						"\t".repeat(depth),
-						match b {
-							Bracket::Round => "()",
-							Bracket::Curly => "{}",
-							Bracket::Square => "[]",
-						},
-						l,
-						k
-					)?;
-					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1));
-				}
-				AST::Operator((i, j), l, asts, ()) => {
-					writeln!(f, "{}{} at {}", "\t".repeat(depth), OPERATORS[*i].0[*j].func, l,)?;
-					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1));
-				}
-			};
-			writeln!(f, "{}{} at {}", "\t".repeat(depth), s, l)
-		}
-		self.0.iter().try_fold((), |_, ast| write_ast(ast, f, 0))
-	}
-}
-
-fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Parser<'a>, String> {
-	fn consume_up_to<'a>(
+fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Vec<AST<'a, ()>>, String> {
+	fn parse<'a>(
 		tokens: &[Token<'a>],
+		chars: &[char],
 		i: &mut usize,
 		end: Option<Bracket>,
-		chars: &[char],
 	) -> Result<Vec<AST<'a, ()>>, String> {
 		let mut asts = vec![];
 		loop {
@@ -277,7 +235,7 @@ fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Parser<'a>, S
 				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l, ()),
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
-					let asts = consume_up_to(tokens, i, Some(*b), chars)?;
+					let asts = parse(tokens, chars, i, Some(*b))?;
 					let k = match tokens[*i] {
 						Token::Ident(l) => l,
 						Token::String(_, l) => l,
@@ -313,7 +271,7 @@ fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Parser<'a>, S
 		}
 		Ok(asts)
 	}
-	Ok(Parser(consume_up_to(tokens, &mut 0, None, chars)?))
+	parse(tokens, chars, &mut 0, None)
 }
 
 #[test]
@@ -335,7 +293,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "{}".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Curly,
 			Location(0, 1, &chars),
@@ -346,7 +304,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "[{   }]".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Square,
 			Location(0, 1, &chars),
@@ -373,7 +331,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "a + b".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Operator(
 			(1, 0),
 			Location(2, 1, &chars),
@@ -383,7 +341,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "a - b * c".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Operator(
 			(1, 1),
 			Location(2, 1, &chars),
@@ -404,7 +362,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "a *  b *  c".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Operator(
 			(0, 0),
 			Location(7, 1, &chars),
@@ -425,7 +383,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "a -> b -> c".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Operator(
 			(2, 0),
 			Location(2, 2, &chars),
@@ -446,7 +404,7 @@ fn parse_test() {
 	);
 	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap().0,
+		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Square,
 			Location(0, 1, &chars),
