@@ -41,10 +41,10 @@ enum Bracket {
 	Square,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Token<'a> {
 	Ident(Location<'a>),
-	String(usize, Location<'a>),
+	String(String, Location<'a>),
 	Number(i64, Location<'a>),
 	Opener(Bracket, Location<'a>),
 	Closer(Bracket, Location<'a>),
@@ -54,14 +54,13 @@ enum Token<'a> {
 struct Tokenizer<'a> {
 	chars: &'a [char],
 	tokens: Vec<Token<'a>>,
-	strings: Vec<String>,
 }
 
 fn tokenize(chars: &[char]) -> Result<Tokenizer, String> {
 	fn search<F: Fn(&char) -> bool>(chars: &[char], start: usize, f: F) -> usize {
 		chars[start..].iter().position(f).unwrap_or(chars.len() - start) + start
 	}
-	let mut t = Tokenizer { chars, tokens: vec![], strings: vec![] };
+	let mut t = Tokenizer { chars, tokens: vec![] };
 	let mut i = 0;
 	while let Some(c) = chars.get(i) {
 		match c {
@@ -90,8 +89,7 @@ fn tokenize(chars: &[char]) -> Result<Tokenizer, String> {
 					}
 					i += 1;
 				}
-				t.strings.push(s);
-				t.tokens.push(Token::String(t.strings.len() - 1, Location(idx, i - idx, chars)));
+				t.tokens.push(Token::String(s, Location(idx, i - idx, chars)));
 			}
 			'#' => i = search(chars, i, |c| *c == '\n'),
 			'(' => t.tokens.push(Token::Opener(Bracket::Round, Location(i, 1, chars))),
@@ -159,8 +157,7 @@ fn tokenize_test() {
 	assert_eq!(
 		tokenize(&chars),
 		Ok(Tokenizer {
-			tokens: vec![Token::String(0, Location(1, 0, &chars))],
-			strings: vec!["".to_owned()],
+			tokens: vec![Token::String("".to_owned(), Location(1, 0, &chars))],
 			chars: &chars
 		})
 	);
@@ -183,7 +180,10 @@ fn tokenize_test() {
 			tokens: vec![
 				Token::Ident(Location(0, 1, &chars)),
 				Token::Ident(Location(2, 1, &chars)),
-				Token::String(0, Location(5, 35, &chars)),
+				Token::String(
+					"text with  s, \ts, \ns, \"s, and \\s".to_owned(),
+					Location(5, 35, &chars)
+				),
 				Token::Ident(Location(42, 1, &chars)),
 				Token::Ident(Location(44, 1, &chars)),
 				Token::Number(-1000000, Location(46, 10, &chars)),
@@ -195,7 +195,6 @@ fn tokenize_test() {
 				Token::Closer(Bracket::Curly, Location(64, 1, &chars)),
 				Token::Closer(Bracket::Round, Location(65, 1, &chars)),
 			],
-			strings: vec!["text with  s, \ts, \ns, \"s, and \\s".to_owned()],
 			chars: &chars
 		})
 	);
@@ -224,7 +223,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 #[derive(Clone, Debug, PartialEq)]
 enum AST<'a, T> {
 	Ident(Location<'a>, T),
-	String(usize, Location<'a>, T),
+	String(String, Location<'a>, T),
 	Number(i64, Location<'a>, T),
 	Brackets(Bracket, Location<'a>, Location<'a>, Vec<AST<'a, T>>, T),
 	Operator((usize, usize), Location<'a>, Vec<AST<'a, T>>, T),
@@ -248,7 +247,7 @@ impl std::fmt::Display for Parser<'_> {
 			// like Result<(String, Location), &[AST]> (but that has a borrow error)
 			let (s, l) = match &ast {
 				AST::Ident(l, ()) => (l.to_chars().iter().collect::<String>(), l),
-				AST::String(i, l, ()) => (t.strings[*i].to_owned(), l),
+				AST::String(s, l, ()) => (s.clone(), l),
 				AST::Number(n, l, ()) => (format!("{}", n), l),
 				AST::Brackets(b, l, k, asts, ()) => {
 					writeln!(
@@ -293,7 +292,7 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 				(None, None) => break,
 				(_, Some(Token::Closer(_, l))) => Err(format!("extra close bracket at {}", l))?,
 				(_, Some(Token::Ident(l))) => AST::Ident(*l, ()),
-				(_, Some(Token::String(s, l))) => AST::String(*s, *l, ()),
+				(_, Some(Token::String(s, l))) => AST::String(s.clone(), *l, ()),
 				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l, ()),
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
