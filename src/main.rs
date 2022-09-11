@@ -222,24 +222,24 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq)]
-enum AST<'a> {
-	Ident(Location<'a>),
-	String(usize, Location<'a>),
-	Number(i64, Location<'a>),
-	Brackets(Bracket, Location<'a>, Location<'a>, Vec<AST<'a>>),
-	Operator((usize, usize), Location<'a>, Vec<AST<'a>>),
+enum AST<'a, T> {
+	Ident(Location<'a>, T),
+	String(usize, Location<'a>, T),
+	Number(i64, Location<'a>, T),
+	Brackets(Bracket, Location<'a>, Location<'a>, Vec<AST<'a, T>>, T),
+	Operator((usize, usize), Location<'a>, Vec<AST<'a, T>>, T),
 }
 
 #[derive(Debug, PartialEq)]
 struct Parser<'a> {
 	tokenizer: &'a Tokenizer<'a>,
-	asts: Vec<AST<'a>>,
+	asts: Vec<AST<'a, ()>>,
 }
 
 impl std::fmt::Display for Parser<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		fn write_ast(
-			ast: &AST,
+			ast: &AST<()>,
 			f: &mut std::fmt::Formatter,
 			depth: usize,
 			t: &Tokenizer,
@@ -247,10 +247,10 @@ impl std::fmt::Display for Parser<'_> {
 			// should be an unnamed enum with one value for each path
 			// like Result<(String, Location), &[AST]> (but that has a borrow error)
 			let (s, l) = match &ast {
-				AST::Ident(l) => (l.to_chars().iter().collect::<String>(), l),
-				AST::String(i, l) => (t.strings[*i].to_owned(), l),
-				AST::Number(n, l) => (format!("{}", n), l),
-				AST::Brackets(b, l, k, asts) => {
+				AST::Ident(l, ()) => (l.to_chars().iter().collect::<String>(), l),
+				AST::String(i, l, ()) => (t.strings[*i].to_owned(), l),
+				AST::Number(n, l, ()) => (format!("{}", n), l),
+				AST::Brackets(b, l, k, asts, ()) => {
 					writeln!(
 						f,
 						"{}{} from {} to {}",
@@ -265,7 +265,7 @@ impl std::fmt::Display for Parser<'_> {
 					)?;
 					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1, t));
 				}
-				AST::Operator((i, j), l, asts) => {
+				AST::Operator((i, j), l, asts, ()) => {
 					writeln!(f, "{}{} at {}", "\t".repeat(depth), OPERATORS[*i].0[*j].func, l,)?;
 					return asts.iter().try_fold((), |_, ast| write_ast(ast, f, depth + 1, t));
 				}
@@ -282,7 +282,7 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 		i: &mut usize,
 		end: Option<Bracket>,
 		t: &Tokenizer<'a>,
-	) -> Result<Vec<AST<'a>>, String> {
+	) -> Result<Vec<AST<'a, ()>>, String> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
@@ -292,9 +292,9 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 				(Some(end), Some(Token::Closer(b, _))) if *b == end => break,
 				(None, None) => break,
 				(_, Some(Token::Closer(_, l))) => Err(format!("extra close bracket at {}", l))?,
-				(_, Some(Token::Ident(l))) => AST::Ident(*l),
-				(_, Some(Token::String(s, l))) => AST::String(*s, *l),
-				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l),
+				(_, Some(Token::Ident(l))) => AST::Ident(*l, ()),
+				(_, Some(Token::String(s, l))) => AST::String(*s, *l, ()),
+				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l, ()),
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
 					let asts = consume_up_to(tokens, i, Some(*b), t)?;
@@ -305,7 +305,7 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 						Token::Opener(_, l) => l,
 						Token::Closer(_, l) => l,
 					};
-					AST::Brackets(*b, *l, k, asts)
+					AST::Brackets(*b, *l, k, asts, ())
 				}
 			});
 			*i += 1;
@@ -313,7 +313,7 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 		for (a, (ops, right)) in OPERATORS.iter().enumerate() {
 			let mut j = if *right { asts.len().wrapping_sub(1) } else { 0 };
 			while let Some(ast) = asts.get(j) {
-				if let AST::Ident(l) = ast.clone() {
+				if let AST::Ident(l, ()) = ast.clone() {
 					if let Some((b, op)) = ops
 						.iter()
 						.enumerate()
@@ -323,9 +323,9 @@ fn parse<'a>(tokenizer: &'a Tokenizer<'_>) -> Result<Parser<'a>, String> {
 							Err(format!("not enough operator arguments for {}", l))?
 						}
 						asts.remove(j);
-						let c: Vec<AST> = asts.drain(j - op.left..j + op.right).collect();
+						let c: Vec<AST<()>> = asts.drain(j - op.left..j + op.right).collect();
 						j -= op.left;
-						asts.insert(j, AST::Operator((a, b), l, c));
+						asts.insert(j, AST::Operator((a, b), l, c, ()));
 					}
 				}
 				j = if *right { j.wrapping_sub(1) } else { j + 1 }
@@ -360,7 +360,8 @@ fn parse_test() {
 				Bracket::Curly,
 				Location(0, 1, &chars),
 				Location(1, 1, &chars),
-				vec![]
+				vec![],
+				()
 			)]
 		})
 	);
@@ -378,8 +379,10 @@ fn parse_test() {
 					Bracket::Curly,
 					Location(1, 1, &chars),
 					Location(5, 1, &chars),
-					vec![]
+					vec![],
+					()
 				)],
+				(),
 			)]
 		})
 	);
@@ -402,7 +405,11 @@ fn parse_test() {
 			asts: vec![AST::Operator(
 				(1, 0),
 				Location(2, 1, &chars),
-				vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(4, 1, &chars))]
+				vec![
+					AST::Ident(Location(0, 1, &chars), ()),
+					AST::Ident(Location(4, 1, &chars), ())
+				],
+				()
 			)]
 		})
 	);
@@ -416,16 +423,18 @@ fn parse_test() {
 				(1, 1),
 				Location(2, 1, &chars),
 				vec![
-					AST::Ident(Location(0, 1, &chars)),
+					AST::Ident(Location(0, 1, &chars), ()),
 					AST::Operator(
 						(0, 0),
 						Location(6, 1, &chars),
 						vec![
-							AST::Ident(Location(4, 1, &chars)),
-							AST::Ident(Location(8, 1, &chars))
-						]
+							AST::Ident(Location(4, 1, &chars), ()),
+							AST::Ident(Location(8, 1, &chars), ())
+						],
+						()
 					),
 				],
+				(),
 			)]
 		})
 	);
@@ -443,12 +452,14 @@ fn parse_test() {
 						(0, 0),
 						Location(2, 1, &chars),
 						vec![
-							AST::Ident(Location(0, 1, &chars)),
-							AST::Ident(Location(5, 1, &chars))
+							AST::Ident(Location(0, 1, &chars), ()),
+							AST::Ident(Location(5, 1, &chars), ())
 						],
+						()
 					),
-					AST::Ident(Location(10, 1, &chars)),
+					AST::Ident(Location(10, 1, &chars), ()),
 				],
+				(),
 			)]
 		})
 	);
@@ -462,16 +473,18 @@ fn parse_test() {
 				(2, 0),
 				Location(2, 2, &chars),
 				vec![
-					AST::Ident(Location(0, 1, &chars)),
+					AST::Ident(Location(0, 1, &chars), ()),
 					AST::Operator(
 						(2, 0),
 						Location(7, 2, &chars),
 						vec![
-							AST::Ident(Location(5, 1, &chars)),
-							AST::Ident(Location(10, 1, &chars))
+							AST::Ident(Location(5, 1, &chars), ()),
+							AST::Ident(Location(10, 1, &chars), ())
 						],
+						(),
 					),
 				],
+				(),
 			)]
 		})
 	);
@@ -493,7 +506,8 @@ fn parse_test() {
 							Bracket::Round,
 							Location(1, 1, &chars),
 							Location(3, 1, &chars),
-							vec![AST::Ident(Location(2, 1, &chars))],
+							vec![AST::Ident(Location(2, 1, &chars), ())],
+							(),
 						),
 						AST::Brackets(
 							Bracket::Round,
@@ -507,14 +521,19 @@ fn parse_test() {
 									(0, 0),
 									Location(11, 1, &chars),
 									vec![
-										AST::Number(3, Location(9, 1, &chars)),
-										AST::Number(97, Location(13, 2, &chars)),
+										AST::Number(3, Location(9, 1, &chars), ()),
+										AST::Number(97, Location(13, 2, &chars), ()),
 									],
+									(),
 								)],
+								(),
 							)],
+							(),
 						),
 					],
+					(),
 				)],
+				(),
 			)],
 		})
 	);
