@@ -6,13 +6,12 @@ fn main() -> Result<(), String> {
 		.chars()
 		.collect();
 	let tokens = tokenize(&chars)?;
-	let asts = parse(&tokens, &chars)?;
+	let asts = parse(&tokens)?;
+	// let asts = analyze(&asts)?;
 	println!("\n{:#?}", asts);
 	Ok(())
 }
 
-// is there some way to get rid of this char reference?
-// not in Rust, but in a non-borrow-checked language it should be a char pointer and a length
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Location<'a>(usize, usize, &'a [char]);
 
@@ -214,19 +213,16 @@ enum AST<'a, T> {
 	Operator((usize, usize), Location<'a>, Vec<AST<'a, T>>, T),
 }
 
-fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Vec<AST<'a, ()>>, String> {
+fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a, ()>>, String> {
 	fn parse<'a>(
 		tokens: &[Token<'a>],
-		chars: &[char],
 		i: &mut usize,
 		end: Option<Bracket>,
 	) -> Result<Vec<AST<'a, ()>>, String> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
-				(Some(_), None) => {
-					Err(format!("no close bracket at {}", Location(chars.len(), 0, chars)))?
-				}
+				(Some(_), None) => Err(format!("missing close bracket"))?,
 				(Some(end), Some(Token::Closer(b, _))) if *b == end => break,
 				(None, None) => break,
 				(_, Some(Token::Closer(_, l))) => Err(format!("extra close bracket at {}", l))?,
@@ -235,7 +231,7 @@ fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Vec<AST<'a, (
 				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l, ()),
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
-					let asts = parse(tokens, chars, i, Some(*b))?;
+					let asts = parse(tokens, i, Some(*b))?;
 					let k = match tokens[*i] {
 						Token::Ident(l) => l,
 						Token::String(_, l) => l,
@@ -271,29 +267,26 @@ fn parse<'a>(tokens: &'a [Token<'a>], chars: &'a [char]) -> Result<Vec<AST<'a, (
 		}
 		Ok(asts)
 	}
-	parse(tokens, chars, &mut 0, None)
+	parse(tokens, &mut 0, None)
 }
 
 #[test]
 fn parse_test() {
-	let chars: Vec<char> = "{".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars),
-		Err("no close bracket at 1:2-1:2".to_owned())
+		parse(&tokenize(&"{".chars().collect::<Vec<char>>()).unwrap()),
+		Err("missing close bracket".to_owned())
 	);
-	let chars: Vec<char> = ")".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars),
+		parse(&tokenize(&")".chars().collect::<Vec<char>>()).unwrap()),
 		Err("extra close bracket at 1:1-1:2".to_owned())
 	);
-	let chars: Vec<char> = "({)}".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars),
+		parse(&tokenize(&"({)}".chars().collect::<Vec<char>>()).unwrap()),
 		Err("extra close bracket at 1:3-1:4".to_owned())
 	);
-	let chars: Vec<char> = "{}".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "{}".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Curly,
 			Location(0, 1, &chars),
@@ -302,9 +295,9 @@ fn parse_test() {
 			()
 		)],
 	);
-	let chars: Vec<char> = "[{   }]".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "[{   }]".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Square,
 			Location(0, 1, &chars),
@@ -319,19 +312,17 @@ fn parse_test() {
 			(),
 		)]
 	);
-	let chars: Vec<char> = "+ 1".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars),
+		parse(&tokenize(&"+ 1".chars().collect::<Vec<char>>()).unwrap()),
 		Err("not enough operator arguments for 1:1-1:2".to_owned())
 	);
-	let chars: Vec<char> = "1 ->".chars().collect::<Vec<char>>();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars),
+		parse(&tokenize(&"1 ->".chars().collect::<Vec<char>>()).unwrap()),
 		Err("not enough operator arguments for 1:3-1:5".to_owned())
 	);
-	let chars: Vec<char> = "a + b".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "a + b".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
 			(1, 0),
 			Location(2, 1, &chars),
@@ -339,9 +330,9 @@ fn parse_test() {
 			()
 		)],
 	);
-	let chars: Vec<char> = "a - b * c".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "a - b * c".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
 			(1, 1),
 			Location(2, 1, &chars),
@@ -360,9 +351,9 @@ fn parse_test() {
 			(),
 		)]
 	);
-	let chars: Vec<char> = "a *  b *  c".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "a *  b *  c".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
 			(0, 0),
 			Location(7, 1, &chars),
@@ -381,9 +372,9 @@ fn parse_test() {
 			(),
 		)]
 	);
-	let chars: Vec<char> = "a -> b -> c".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "a -> b -> c".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
 			(2, 0),
 			Location(2, 2, &chars),
@@ -402,9 +393,9 @@ fn parse_test() {
 			(),
 		)]
 	);
-	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect::<Vec<char>>();
+	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap(), &chars).unwrap(),
+		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Square,
 			Location(0, 1, &chars),
@@ -447,4 +438,57 @@ fn parse_test() {
 			(),
 		)]
 	);
+}
+
+impl<'a, T> AST<'a, T> {
+	fn map_tag<S, F: Copy + Fn(&AST<'a, T>) -> S>(&self, f: F) -> AST<'a, S> {
+		match self {
+			AST::Ident(l, _) => AST::Ident(*l, f(self)),
+			AST::String(s, l, _) => AST::String(s.clone(), *l, f(self)),
+			AST::Number(n, l, _) => AST::Number(*n, *l, f(self)),
+			AST::Brackets(b, l, k, v, _) => {
+				AST::Brackets(*b, *l, *k, v.iter().map(|ast| ast.map_tag(f)).collect(), f(self))
+			}
+			AST::Operator(o, l, v, _) => {
+				AST::Operator(*o, *l, v.iter().map(|ast| ast.map_tag(f)).collect(), f(self))
+			}
+		}
+	}
+}
+
+#[derive(Debug)]
+enum Type {
+	Int,
+	String,
+	Bool,
+}
+
+fn analyze<'a>(asts: &'a [AST<'a, ()>]) -> Result<AST<'a, Type>, String> {
+	let mut typed: Vec<AST<Option<Type>>> = asts
+		.iter()
+		.map(|ast| {
+			ast.map_tag(|ast| match ast {
+				AST::Ident(l, _)
+					if l.to_chars().iter().collect::<String>() == "true"
+						|| l.to_chars().iter().collect::<String>() == "false" =>
+				{
+					Some(Type::Bool)
+				}
+				AST::String(..) => Some(Type::String),
+				AST::Number(..) => Some(Type::Int),
+				_ => None,
+			})
+		})
+		.collect();
+	fn annotate(
+		_typed: &mut [AST<Option<Type>>],
+		_inputs: &mut Vec<Type>,
+		_outputs: &mut Vec<Type>,
+		_vars: &mut Vec<&AST<Option<Type>>>,
+	) -> Result<(), String> {
+		todo!()
+	}
+	let mut vars = vec![];
+	annotate(&mut typed, &mut vec![], &mut vec![], &mut vars)?;
+	todo!("solve unused vars")
 }
