@@ -450,10 +450,57 @@ enum Type {
 #[derive(Debug)]
 struct IO(Vec<Type>, Vec<Type>);
 
-fn analyze<'a>(asts: &'a [AST<'a, ()>]) -> Result<AST<'a, IO>, String> {
-	fn analyze<'a>(asts: &'a [AST<()>], io: &mut IO) -> Vec<AST<'a, Option<IO>>> {
-		todo!()
+impl IO {
+	fn from_str(s: &str) -> Option<IO> {
+		match s {
+			"true" | "false" => Some(IO(vec![], vec![Type::Bool])),
+			_ => None,
+		}
 	}
-	analyze(asts, &mut IO(vec![], vec![]));
-	todo!("solve vars")
+}
+
+impl<'a, T> AST<'a, T> {
+	fn set_tag<S, F: Copy + Fn(T) -> S>(self, f: F) -> AST<'a, S> {
+		match self {
+			AST::Ident(l, t) => AST::Ident(l, f(t)),
+			AST::String(s_, l, t) => AST::String(s_, l, f(t)),
+			AST::Number(n, l, t) => AST::Number(n, l, f(t)),
+			AST::Brackets(b, l, k, v, t) => AST::Brackets(b, l, k, v.into_iter().map(|ast| ast.set_tag(f)).collect(), f(t)),
+			AST::Operator(o, l, v, t) => AST::Operator(o, l, v.into_iter().map(|ast| ast.set_tag(f)).collect(), f(t))
+		}
+	}
+}
+
+fn analyze<'a>(asts: &[AST<'a, ()>]) -> Result<Vec<AST<'a, IO>>, String> {
+	fn analyze<'a>(asts: &[AST<'a, ()>], _io: &mut IO) -> Vec<AST<'a, Option<IO>>> {
+		let mut out = vec![];
+		for ast in asts {
+			out.push(match ast {
+				AST::Ident(l, ()) => AST::Ident(*l, IO::from_str(&l.to_chars().iter().collect::<String>())),
+				AST::String(s, l, ()) => AST::String(s.clone(), *l, Some(IO(vec![], vec![Type::String]))),
+				AST::Number(n, l, ()) => AST::Number(*n, *l, Some(IO(vec![], vec![Type::Int]))),
+				AST::Brackets(..) => todo!(),
+				AST::Operator(..) => todo!(), //Type::from_str(OPERATORS[*a].0[*b].func)),
+			});
+		}
+		out
+	}
+	let mut io = IO(vec![], vec![]);
+	let typed = analyze(asts, &mut io);
+	if !io.0.is_empty() {
+		Err(format!("program expects inputs on the stack: {:?}", io.0))
+	} else if !io.1.is_empty() {
+		Err(format!("program leaves data on the stack: {:?}", io.1))
+	} else {
+		Ok(typed.into_iter().map(|ast| ast.set_tag(|o| o.expect("all vars are solved"))).collect())
+	}
+}
+
+#[test]
+fn analyze_test() {
+	// extra inputs test
+	// extra outputs test
+	// test for each Type variant
+	// type vars test
+	// combo test
 }
