@@ -7,7 +7,7 @@ fn main() -> Result<(), String> {
 		.collect();
 	let tokens = tokenize(&chars)?;
 	let asts = parse(&tokens)?;
-	// let asts = analyze(&asts)?;
+	let asts = analyze(&asts)?;
 	println!("\n{:#?}", asts);
 	Ok(())
 }
@@ -440,6 +440,7 @@ fn parse_test() {
 	);
 }
 
+// todo: remove this whole thing, only used once
 impl<'a, T> AST<'a, T> {
 	fn map_tag<S, F: Copy + Fn(&AST<'a, T>) -> S>(&self, f: F) -> AST<'a, S> {
 		match self {
@@ -464,31 +465,19 @@ enum Type {
 }
 
 fn analyze<'a>(asts: &'a [AST<'a, ()>]) -> Result<AST<'a, Type>, String> {
-	let mut typed: Vec<AST<Option<Type>>> = asts
+	let _typed: Vec<AST<Option<Type>>> = asts
 		.iter()
 		.map(|ast| {
 			ast.map_tag(|ast| match ast {
-				AST::Ident(l, _)
-					if l.to_chars().iter().collect::<String>() == "true"
-						|| l.to_chars().iter().collect::<String>() == "false" =>
-				{
-					Some(Type::Bool)
-				}
+				AST::Ident(l, _) => match l.to_chars().iter().collect::<String>().as_str() {
+					"true" | "false" => Some(Type::Bool),
+					_ => None,
+				},
 				AST::String(..) => Some(Type::String),
 				AST::Number(..) => Some(Type::Int),
-				_ => None,
+				_ => todo!(),
 			})
 		})
 		.collect();
-	fn annotate(
-		_typed: &mut [AST<Option<Type>>],
-		_inputs: &mut Vec<Type>,
-		_outputs: &mut Vec<Type>,
-		_vars: &mut Vec<&AST<Option<Type>>>,
-	) -> Result<(), String> {
-		todo!()
-	}
-	let mut vars = vec![];
-	annotate(&mut typed, &mut vec![], &mut vec![], &mut vars)?;
-	todo!("solve unused vars")
+	todo!("solve vars")
 }
