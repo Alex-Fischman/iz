@@ -440,23 +440,6 @@ fn parse_test() {
 	);
 }
 
-// todo: remove this whole thing, only used once
-impl<'a, T> AST<'a, T> {
-	fn map_tag<S, F: Copy + Fn(&AST<'a, T>) -> S>(&self, f: F) -> AST<'a, S> {
-		match self {
-			AST::Ident(l, _) => AST::Ident(*l, f(self)),
-			AST::String(s, l, _) => AST::String(s.clone(), *l, f(self)),
-			AST::Number(n, l, _) => AST::Number(*n, *l, f(self)),
-			AST::Brackets(b, l, k, v, _) => {
-				AST::Brackets(*b, *l, *k, v.iter().map(|ast| ast.map_tag(f)).collect(), f(self))
-			}
-			AST::Operator(o, l, v, _) => {
-				AST::Operator(*o, *l, v.iter().map(|ast| ast.map_tag(f)).collect(), f(self))
-			}
-		}
-	}
-}
-
 #[derive(Debug)]
 enum Type {
 	Int,
@@ -464,20 +447,13 @@ enum Type {
 	Bool,
 }
 
-fn analyze<'a>(asts: &'a [AST<'a, ()>]) -> Result<AST<'a, Type>, String> {
-	let _typed: Vec<AST<Option<Type>>> = asts
-		.iter()
-		.map(|ast| {
-			ast.map_tag(|ast| match ast {
-				AST::Ident(l, _) => match l.to_chars().iter().collect::<String>().as_str() {
-					"true" | "false" => Some(Type::Bool),
-					_ => None,
-				},
-				AST::String(..) => Some(Type::String),
-				AST::Number(..) => Some(Type::Int),
-				_ => todo!(),
-			})
-		})
-		.collect();
+#[derive(Debug)]
+struct IO(Vec<Type>, Vec<Type>);
+
+fn analyze<'a>(asts: &'a [AST<'a, ()>]) -> Result<AST<'a, IO>, String> {
+	fn analyze<'a>(asts: &'a [AST<()>], io: &mut IO) -> Vec<AST<'a, Option<IO>>> {
+		todo!()
+	}
+	analyze(asts, &mut IO(vec![], vec![]));
 	todo!("solve vars")
 }
