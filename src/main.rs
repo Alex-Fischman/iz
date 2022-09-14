@@ -451,49 +451,51 @@ enum Type {
 struct IO(Vec<Type>, Vec<Type>);
 
 impl IO {
-	fn from_str(s: &str) -> Option<IO> {
+	fn from_str(s: &str) -> IO {
 		match s {
-			"true" | "false" => Some(IO(vec![], vec![Type::Bool])),
-			_ => None,
-		}
-	}
-}
-
-impl<'a, T> AST<'a, T> {
-	fn set_tag<S, F: Copy + Fn(T) -> S>(self, f: F) -> AST<'a, S> {
-		match self {
-			AST::Ident(l, t) => AST::Ident(l, f(t)),
-			AST::String(s_, l, t) => AST::String(s_, l, f(t)),
-			AST::Number(n, l, t) => AST::Number(n, l, f(t)),
-			AST::Brackets(b, l, k, v, t) => AST::Brackets(b, l, k, v.into_iter().map(|ast| ast.set_tag(f)).collect(), f(t)),
-			AST::Operator(o, l, v, t) => AST::Operator(o, l, v.into_iter().map(|ast| ast.set_tag(f)).collect(), f(t))
+			"true" | "false" => (IO(vec![], vec![Type::Bool])),
+			_ => panic!("can't find type for {}", s),
 		}
 	}
 }
 
 fn analyze<'a>(asts: &[AST<'a, ()>]) -> Result<Vec<AST<'a, IO>>, String> {
-	fn analyze<'a>(asts: &[AST<'a, ()>], _io: &mut IO) -> Vec<AST<'a, Option<IO>>> {
-		let mut out = vec![];
-		for ast in asts {
-			out.push(match ast {
-				AST::Ident(l, ()) => AST::Ident(*l, IO::from_str(&l.to_chars().iter().collect::<String>())),
-				AST::String(s, l, ()) => AST::String(s.clone(), *l, Some(IO(vec![], vec![Type::String]))),
-				AST::Number(n, l, ()) => AST::Number(*n, *l, Some(IO(vec![], vec![Type::Int]))),
-				AST::Brackets(..) => todo!(),
-				AST::Operator(..) => todo!(), //Type::from_str(OPERATORS[*a].0[*b].func)),
-			});
-		}
-		out
+	fn add_types<'a>(asts: &[AST<'a, ()>], _io: &mut IO) -> Vec<AST<'a, IO>> {
+		asts.iter()
+			.map(|ast| {
+				let ast = match ast {
+					AST::Ident(l, ()) => {
+						AST::Ident(*l, IO::from_str(&l.to_chars().iter().collect::<String>()))
+					}
+					AST::String(s, l, ()) => {
+						AST::String(s.clone(), *l, IO(vec![], vec![Type::String]))
+					}
+					AST::Number(n, l, ()) => AST::Number(*n, *l, IO(vec![], vec![Type::Int])),
+					AST::Brackets(b, l, k, v, ()) => {
+						let mut io = IO(vec![], vec![]);
+						let v = add_types(v, &mut io);
+						let t = match b {
+							Bracket::Round => io,
+							Bracket::Curly => io,
+							Bracket::Square => todo!("Type::List not supported"),
+						};
+						AST::Brackets(*b, *l, *k, v, t)
+					}
+					AST::Operator(..) => todo!(), //Type::from_str(OPERATORS[*a].0[*b].func)),
+				};
+				// todo: update IO
+				ast
+			})
+			.collect()
 	}
 	let mut io = IO(vec![], vec![]);
-	let typed = analyze(asts, &mut io);
+	let typed = add_types(asts, &mut io);
 	if !io.0.is_empty() {
-		Err(format!("program expects inputs on the stack: {:?}", io.0))
+		Err(format!("program expects inputs on the stack: {:?}", io.0))?
 	} else if !io.1.is_empty() {
-		Err(format!("program leaves data on the stack: {:?}", io.1))
-	} else {
-		Ok(typed.into_iter().map(|ast| ast.set_tag(|o| o.expect("all vars are solved"))).collect())
+		Err(format!("program leaves data on the stack: {:?}", io.1))?
 	}
+	Ok(typed)
 }
 
 #[test]
