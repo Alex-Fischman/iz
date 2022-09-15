@@ -1,7 +1,7 @@
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Location<'a>(pub usize, pub usize, pub &'a [char]);
 
-impl std::fmt::Display for Location<'_> {
+impl std::fmt::Debug for Location<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		let fold = |(row, col), &c| match c {
 			'\n' => (row + 1, 1),
@@ -19,14 +19,14 @@ impl<'a> Location<'a> {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bracket {
 	Round,
 	Curly,
 	Square,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token<'a> {
 	Ident(Location<'a>),
 	String(String, Location<'a>),
@@ -58,13 +58,13 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, String> {
 								Some('n') => s.push('\n'),
 								Some('t') => s.push('\t'),
 								_ => Err(format!(
-									"no valid escape character at {}",
+									"no valid escape character at {:?}",
 									Location(i, 0, chars)
 								))?,
 							}
 						}
 						Some(c) => s.push(*c),
-						None => Err(format!("no end quote at {}", Location(i, 0, chars)))?,
+						None => Err(format!("no end quote at {:?}", Location(i, 0, chars)))?,
 					}
 					i += 1;
 				}

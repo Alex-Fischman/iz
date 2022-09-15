@@ -2,7 +2,7 @@ use crate::tokenize::Bracket;
 use crate::tokenize::Location;
 use crate::tokenize::Token;
 
-#[derive(PartialEq)]
+#[allow(dead_code)]
 pub struct Operator {
 	name: &'static str,
 	func: &'static str,
@@ -40,10 +40,12 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
-				(Some(_), None) => Err(format!("missing close bracket"))?,
+				(Some(_), None) => Err("missing close bracket".to_owned())?,
 				(Some(end), Some(Token::Closer(b, _))) if *b == end => break,
 				(None, None) => break,
-				(_, Some(Token::Closer(_, l))) => Err(format!("extra close bracket at {}", l))?,
+				(_, Some(Token::Closer(_, l))) => {
+					Err(format!("extra close bracket at {:?}", l))?
+				}
 				(_, Some(Token::Ident(l))) => AST::Ident(*l),
 				(_, Some(Token::String(s, l))) => AST::String(s.clone(), *l),
 				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l),
@@ -72,7 +74,7 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 						.find(|(_, op)| op.name == l.to_chars().iter().collect::<String>())
 					{
 						if j < op.left || j + op.right >= asts.len() {
-							Err(format!("not enough operator arguments for {}", l))?
+							Err(format!("not enough operator arguments for {:?}", l))?
 						}
 						asts.remove(j);
 						let c: Vec<AST> = asts.drain(j - op.left..j + op.right).collect();

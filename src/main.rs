@@ -1,4 +1,3 @@
-mod analyze;
 mod parse;
 mod tokenize;
 
@@ -11,7 +10,6 @@ fn main() -> Result<(), String> {
 		.collect();
 	let tokens = tokenize::tokenize(&chars)?;
 	let asts = parse::parse(&tokens)?;
-	let asts = analyze::analyze(&asts)?;
 	println!("\n{:#?}", asts);
 	Ok(())
 }
