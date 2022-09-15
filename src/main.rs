@@ -1,5 +1,6 @@
 mod parse;
 mod tokenize;
+mod analyze;
 
 fn main() -> Result<(), String> {
 	let args = std::env::args().collect::<Vec<String>>();
@@ -10,6 +11,7 @@ fn main() -> Result<(), String> {
 		.collect();
 	let tokens = tokenize::tokenize(&chars)?;
 	let asts = parse::parse(&tokens)?;
-	println!("\n{:#?}", asts);
+	let tree = analyze::analyze(&asts)?;
+	println!("\n{:#?}", tree);
 	Ok(())
 }
