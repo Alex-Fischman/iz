@@ -1,6 +1,6 @@
+mod analyze;
 mod parse;
 mod tokenize;
-mod analyze;
 
 fn main() -> Result<(), String> {
 	let args = std::env::args().collect::<Vec<String>>();

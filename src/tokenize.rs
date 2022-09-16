@@ -37,7 +37,7 @@ pub enum Token<'a> {
 
 pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, String> {
 	fn search<F: Fn(&char) -> bool>(chars: &[char], start: usize, f: F) -> usize {
-		chars[start..].iter().position(f).unwrap_or(chars.len() - start) + start
+		chars[start..].iter().position(f).unwrap_or(chars.len() - start)
 	}
 	let mut t = vec![];
 	let mut i = 0;
@@ -70,7 +70,7 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, String> {
 				}
 				t.push(Token::String(s, Location(idx, i - idx, chars)));
 			}
-			'#' => i = search(chars, i, |c| *c == '\n'),
+			'#' => i += search(chars, i, |c| *c == '\n'),
 			'(' => t.push(Token::Opener(Bracket::Round, Location(i, 1, chars))),
 			')' => t.push(Token::Closer(Bracket::Round, Location(i, 1, chars))),
 			'{' => t.push(Token::Opener(Bracket::Curly, Location(i, 1, chars))),
@@ -78,33 +78,36 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, String> {
 			'[' => t.push(Token::Opener(Bracket::Square, Location(i, 1, chars))),
 			']' => t.push(Token::Closer(Bracket::Square, Location(i, 1, chars))),
 			' ' | '\t' | '\n' => {}
-			_ => {
+			c => {
+				let is_alphanumeric = |c: char| c.is_ascii_alphanumeric() || c == '_';
+				let is_splitter = |c: char| "\"#(){}{} \t\n".chars().any(|a| a == c);
 				let l = Location(
 					i,
-					search(chars, i, |a| "\"#(){}{} \t\n".chars().any(|b| *a == b)) - i,
+					if is_alphanumeric(*c) {
+						search(chars, i, |c: &char| !is_alphanumeric(*c))
+					} else {
+						search(chars, i, |c: &char| is_splitter(*c) || is_alphanumeric(*c))
+					},
 					chars,
 				);
 				t.push(
-					match l.to_chars().iter().enumerate().rev().try_fold((0, 1), |(a, b), t| {
-						match t {
-							(0, '-') => Some((-a, b)),
-							(_, '0') => Some((a, b * 10)),
-							(_, '1') => Some((a + b, b * 10)),
-							(_, '2') => Some((a + b * 2, b * 10)),
-							(_, '3') => Some((a + b * 3, b * 10)),
-							(_, '4') => Some((a + b * 4, b * 10)),
-							(_, '5') => Some((a + b * 5, b * 10)),
-							(_, '6') => Some((a + b * 6, b * 10)),
-							(_, '7') => Some((a + b * 7, b * 10)),
-							(_, '8') => Some((a + b * 8, b * 10)),
-							(_, '9') => Some((a + b * 9, b * 10)),
-							(_, '_') => Some((a, b)),
+					match l.to_chars().iter().rev().try_fold((0, 1, false), |(a, b, z), c| {
+						match c {
+							'0' => Some((a, b * 10, true)),
+							'1' => Some((a + b, b * 10, true)),
+							'2' => Some((a + b * 2, b * 10, true)),
+							'3' => Some((a + b * 3, b * 10, true)),
+							'4' => Some((a + b * 4, b * 10, true)),
+							'5' => Some((a + b * 5, b * 10, true)),
+							'6' => Some((a + b * 6, b * 10, true)),
+							'7' => Some((a + b * 7, b * 10, true)),
+							'8' => Some((a + b * 8, b * 10, true)),
+							'9' => Some((a + b * 9, b * 10, true)),
+							'_' => Some((a, b, z)),
 							_ => None,
 						}
 					}) {
-						Some((n, _)) if l.to_chars().iter().any(char::is_ascii_digit) => {
-							Token::Number(n, l)
-						}
+						Some((n, _, z)) if z => Token::Number(n, l),
 						_ => Token::Ident(l),
 					},
 				);
@@ -130,21 +133,31 @@ fn tokenize_test() {
 		tokenize(&"\"\\a".chars().collect::<Vec<char>>()),
 		Err("no valid escape character at 1:3-1:3".to_owned())
 	);
-	let chars = "214s2135**adfe2".chars().collect::<Vec<char>>();
-	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Ident(Location(0, 15, &chars))]);
+	let chars = "214s2135**ad_fe2 _-_".chars().collect::<Vec<char>>();
+	assert_eq!(
+		tokenize(&chars).unwrap(),
+		vec![
+			Token::Ident(Location(0, 8, &chars)),
+			Token::Ident(Location(8, 2, &chars)),
+			Token::Ident(Location(10, 6, &chars)),
+			Token::Ident(Location(17, 1, &chars)),
+			Token::Ident(Location(18, 1, &chars)),
+			Token::Ident(Location(19, 1, &chars)),
+		]
+	);
 	let chars = "\"\"".chars().collect::<Vec<char>>();
 	assert_eq!(
 		tokenize(&chars).unwrap(),
 		vec![Token::String("".to_owned(), Location(1, 0, &chars))]
 	);
-	let chars = "-5_84_39".chars().collect::<Vec<char>>();
-	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Number(-58439, Location(0, 8, &chars))]);
+	let chars = "5_84_39".chars().collect::<Vec<char>>();
+	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Number(58439, Location(0, 7, &chars))]);
 	let chars = ")".chars().collect::<Vec<char>>();
 	assert_eq!(
 		tokenize(&chars).unwrap(),
 		vec![Token::Closer(Bracket::Round, Location(0, 1, &chars))]
 	);
-	let chars = "a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = -1_000_000 (c = {a})"
+	let chars = "a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = 1_000_000 (c = {a})"
 		.chars()
 		.collect::<Vec<char>>();
 	assert_eq!(
@@ -158,14 +171,14 @@ fn tokenize_test() {
 			),
 			Token::Ident(Location(42, 1, &chars)),
 			Token::Ident(Location(44, 1, &chars)),
-			Token::Number(-1000000, Location(46, 10, &chars)),
-			Token::Opener(Bracket::Round, Location(57, 1, &chars)),
-			Token::Ident(Location(58, 1, &chars)),
-			Token::Ident(Location(60, 1, &chars)),
-			Token::Opener(Bracket::Curly, Location(62, 1, &chars)),
-			Token::Ident(Location(63, 1, &chars)),
-			Token::Closer(Bracket::Curly, Location(64, 1, &chars)),
-			Token::Closer(Bracket::Round, Location(65, 1, &chars)),
+			Token::Number(1000000, Location(46, 9, &chars)),
+			Token::Opener(Bracket::Round, Location(56, 1, &chars)),
+			Token::Ident(Location(57, 1, &chars)),
+			Token::Ident(Location(59, 1, &chars)),
+			Token::Opener(Bracket::Curly, Location(61, 1, &chars)),
+			Token::Ident(Location(62, 1, &chars)),
+			Token::Closer(Bracket::Curly, Location(63, 1, &chars)),
+			Token::Closer(Bracket::Round, Location(64, 1, &chars)),
 		]
 	);
 }
