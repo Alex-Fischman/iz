@@ -52,7 +52,9 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 					*i += 1;
 					let asts = parse(tokens, i, Some(*b))?;
 					match tokens[*i] {
-						Token::Closer(_, k) => AST::Brackets(*b, Location(l.0, k.0 - l.0 + 1, l.2), asts),
+						Token::Closer(_, k) => {
+							AST::Brackets(*b, Location(l.0, k.0 - l.0 + 1, l.2), asts)
+						}
 						_ => unreachable!(),
 					}
 				}
