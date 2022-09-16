@@ -2,7 +2,6 @@ use crate::tokenize::Bracket;
 use crate::tokenize::Location;
 use crate::tokenize::Token;
 
-#[allow(dead_code)]
 pub struct Operator {
 	name: &'static str,
 	func: &'static str,
