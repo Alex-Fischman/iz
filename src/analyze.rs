@@ -13,7 +13,7 @@ pub fn analyze<'a>(asts: &'a [AST]) -> Result<Vec<Tree<'a>>, String> {
 			AST::Ident(location) => Tree { location, children: vec![] },
 			AST::String(_, location) => Tree { location, children: vec![] },
 			AST::Number(_, location) => Tree { location, children: vec![] },
-			AST::Brackets(_, location, _, v) => {
+			AST::Brackets(_, location, v) => {
 				Tree { location, children: v.iter().map(convert).collect() }
 			}
 			AST::Operator(_, location, v) => {

@@ -26,7 +26,7 @@ pub enum AST<'a> {
 	Ident(Location<'a>),
 	String(String, Location<'a>),
 	Number(i64, Location<'a>),
-	Brackets(Bracket, Location<'a>, Location<'a>, Vec<AST<'a>>),
+	Brackets(Bracket, Location<'a>, Vec<AST<'a>>),
 	Operator((usize, usize), Location<'a>, Vec<AST<'a>>),
 }
 
@@ -51,14 +51,10 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
 					let asts = parse(tokens, i, Some(*b))?;
-					let k = match tokens[*i] {
-						Token::Ident(l) => l,
-						Token::String(_, l) => l,
-						Token::Number(_, l) => l,
-						Token::Opener(_, l) => l,
-						Token::Closer(_, l) => l,
-					};
-					AST::Brackets(*b, *l, k, asts)
+					match tokens[*i] {
+						Token::Closer(_, k) => AST::Brackets(*b, Location(l.0, k.0 - l.0 + 1, l.2), asts),
+						_ => unreachable!(),
+					}
 				}
 			});
 			*i += 1;
@@ -107,26 +103,15 @@ fn parse_test() {
 	let chars: Vec<char> = "{}".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Brackets(
-			Bracket::Curly,
-			Location(0, 1, &chars),
-			Location(1, 1, &chars),
-			vec![],
-		)],
+		vec![AST::Brackets(Bracket::Curly, Location(0, 2, &chars), vec![],)],
 	);
 	let chars: Vec<char> = "[{   }]".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Square,
-			Location(0, 1, &chars),
-			Location(6, 1, &chars),
-			vec![AST::Brackets(
-				Bracket::Curly,
-				Location(1, 1, &chars),
-				Location(5, 1, &chars),
-				vec![],
-			)],
+			Location(0, 7, &chars),
+			vec![AST::Brackets(Bracket::Curly, Location(1, 5, &chars), vec![],)],
 		)]
 	);
 	assert_eq!(
@@ -202,26 +187,22 @@ fn parse_test() {
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Brackets(
 			Bracket::Square,
-			Location(0, 1, &chars),
-			Location(17, 1, &chars),
+			Location(0, 18, &chars),
 			vec![AST::Operator(
 				(1, 0),
 				Location(5, 1, &chars),
 				vec![
 					AST::Brackets(
 						Bracket::Round,
-						Location(1, 1, &chars),
-						Location(3, 1, &chars),
+						Location(1, 3, &chars),
 						vec![AST::Ident(Location(2, 1, &chars))],
 					),
 					AST::Brackets(
 						Bracket::Round,
-						Location(7, 1, &chars),
-						Location(16, 1, &chars),
+						Location(7, 10, &chars),
 						vec![AST::Brackets(
 							Bracket::Curly,
-							Location(8, 1, &chars),
-							Location(15, 1, &chars),
+							Location(8, 8, &chars),
 							vec![AST::Operator(
 								(0, 0),
 								Location(11, 1, &chars),
