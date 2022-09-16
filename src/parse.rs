@@ -6,6 +6,7 @@ use crate::tokenize::Token;
 // (&[name, func, left args, right args], (right assoc))
 type Operator<'a> = (&'a str, &'a str, usize, usize);
 const OPERATORS: &[(&[Operator], bool)] = &[
+	(&[("@", "call", 1, 1)], false),
 	(&[("*", "mul", 1, 1), ("/", "div", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
 	(
@@ -20,6 +21,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 		false,
 	),
 	(&[("=", "assign", 1, 1)], true),
+	(&[("if", "_if_", 0, 2), ("else", "_else_", 1, 1), ("while", "_while_", 0, 2)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,7 +131,7 @@ fn parse_test() {
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
-			(1, 0),
+			(2, 0),
 			Location(2, 1, &chars),
 			vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(4, 1, &chars))],
 		)],
@@ -138,12 +140,12 @@ fn parse_test() {
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
-			(1, 1),
+			(2, 1),
 			Location(2, 1, &chars),
 			vec![
 				AST::Ident(Location(0, 1, &chars)),
 				AST::Operator(
-					(0, 0),
+					(1, 0),
 					Location(6, 1, &chars),
 					vec![AST::Ident(Location(4, 1, &chars)), AST::Ident(Location(8, 1, &chars))],
 				),
@@ -154,11 +156,11 @@ fn parse_test() {
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
-			(0, 0),
+			(1, 0),
 			Location(6, 1, &chars),
 			vec![
 				AST::Operator(
-					(0, 0),
+					(1, 0),
 					Location(2, 1, &chars),
 					vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(4, 1, &chars))],
 				),
@@ -170,12 +172,12 @@ fn parse_test() {
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
-			(3, 0),
+			(4, 0),
 			Location(2, 1, &chars),
 			vec![
 				AST::Ident(Location(0, 1, &chars)),
 				AST::Operator(
-					(3, 0),
+					(4, 0),
 					Location(6, 1, &chars),
 					vec![AST::Ident(Location(4, 1, &chars)), AST::Ident(Location(8, 1, &chars))],
 				),
@@ -189,7 +191,7 @@ fn parse_test() {
 			Bracket::Square,
 			Location(0, 18, &chars),
 			vec![AST::Operator(
-				(1, 0),
+				(2, 0),
 				Location(5, 1, &chars),
 				vec![
 					AST::Brackets(
@@ -204,7 +206,7 @@ fn parse_test() {
 							Bracket::Curly,
 							Location(8, 8, &chars),
 							vec![AST::Operator(
-								(0, 0),
+								(1, 0),
 								Location(11, 1, &chars),
 								vec![
 									AST::Number(3, Location(9, 1, &chars)),
