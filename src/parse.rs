@@ -2,23 +2,24 @@ use crate::tokenize::Bracket;
 use crate::tokenize::Location;
 use crate::tokenize::Token;
 
-pub struct Operator {
-	name: &'static str,
-	func: &'static str,
-	left: usize,
-	right: usize,
-}
-
-const fn op(name: &'static str, func: &'static str, left: usize, right: usize) -> Operator {
-	Operator { name, func, left, right }
-}
-
 // Grouped by precedence; highest first
-// bool is right associativity
+// (&[name, func, left args, right args], (right assoc))
+type Operator<'a> = (&'a str, &'a str, usize, usize);
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[op("*", "mul", 1, 1)], false),
-	(&[op("+", "add", 1, 1), op("-", "sub", 1, 1)], false),
-	(&[op("->", "arrow", 1, 1)], true),
+	(&[("*", "mul", 1, 1), ("/", "div", 1, 1)], false),
+	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
+	(
+		&[
+			("==", "eq", 1, 1),
+			("!=", "ne", 1, 1),
+			("<", "lt", 1, 1),
+			(">", "gt", 1, 1),
+			("<=", "le", 1, 1),
+			(">=", "ge", 1, 1),
+		],
+		false,
+	),
+	(&[("=", "assign", 1, 1)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -68,14 +69,14 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 					if let Some((b, op)) = ops
 						.iter()
 						.enumerate()
-						.find(|(_, op)| op.name == l.to_chars().iter().collect::<String>())
+						.find(|(_, op)| op.0 == l.to_chars().iter().collect::<String>())
 					{
-						if j < op.left || j + op.right >= asts.len() {
+						if j < op.2 || j + op.3 >= asts.len() {
 							Err(format!("not enough operator arguments for {:?}", l))?
 						}
 						asts.remove(j);
-						let c: Vec<AST> = asts.drain(j - op.left..j + op.right).collect();
-						j -= op.left;
+						let c: Vec<AST> = asts.drain(j - op.2..j + op.3).collect();
+						j -= op.2;
 						asts.insert(j, AST::Operator((a, b), l, c));
 					}
 				}
@@ -121,8 +122,8 @@ fn parse_test() {
 		Err("not enough operator arguments for 1:1-1:2".to_owned())
 	);
 	assert_eq!(
-		parse(&tokenize(&"1 ->".chars().collect::<Vec<char>>()).unwrap()),
-		Err("not enough operator arguments for 1:3-1:5".to_owned())
+		parse(&tokenize(&"1 =".chars().collect::<Vec<char>>()).unwrap()),
+		Err("not enough operator arguments for 1:3-1:4".to_owned())
 	);
 	let chars: Vec<char> = "a + b".chars().collect();
 	assert_eq!(
@@ -149,37 +150,34 @@ fn parse_test() {
 			],
 		)]
 	);
-	let chars: Vec<char> = "a *  b *  c".chars().collect();
+	let chars: Vec<char> = "a * b * c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
 			(0, 0),
-			Location(7, 1, &chars),
+			Location(6, 1, &chars),
 			vec![
 				AST::Operator(
 					(0, 0),
 					Location(2, 1, &chars),
-					vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(5, 1, &chars))],
+					vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(4, 1, &chars))],
 				),
-				AST::Ident(Location(10, 1, &chars)),
+				AST::Ident(Location(8, 1, &chars)),
 			],
 		)]
 	);
-	let chars: Vec<char> = "a -> b -> c".chars().collect();
+	let chars: Vec<char> = "a = b = c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
 		vec![AST::Operator(
-			(2, 0),
-			Location(2, 2, &chars),
+			(3, 0),
+			Location(2, 1, &chars),
 			vec![
 				AST::Ident(Location(0, 1, &chars)),
 				AST::Operator(
-					(2, 0),
-					Location(7, 2, &chars),
-					vec![
-						AST::Ident(Location(5, 1, &chars)),
-						AST::Ident(Location(10, 1, &chars))
-					],
+					(3, 0),
+					Location(6, 1, &chars),
+					vec![AST::Ident(Location(4, 1, &chars)), AST::Ident(Location(8, 1, &chars))],
 				),
 			],
 		)]
