@@ -2,9 +2,9 @@ use crate::tokenize::Bracket;
 use crate::tokenize::Location;
 use crate::tokenize::Token;
 
+type Operator<'a> = (&'a str, &'a str, usize, usize);
 // Grouped by precedence; highest first
 // (&[name, func, left args, right args], (right assoc))
-type Operator<'a> = (&'a str, &'a str, usize, usize);
 const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("@", "call", 1, 1)], false),
 	(&[("*", "mul", 1, 1), ("/", "div", 1, 1)], false),
@@ -24,21 +24,53 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("if", "_if_", 0, 2), ("else", "_else_", 1, 1), ("while", "_while_", 0, 2)], true),
 ];
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum AST<'a> {
-	Ident(Location<'a>),
-	String(String, Location<'a>),
-	Number(i64, Location<'a>),
-	Brackets(Bracket, Location<'a>, Vec<AST<'a>>),
-	Operator((usize, usize), Location<'a>, Vec<AST<'a>>),
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Data {
+	Ident,
+	String(String),
+	Number(i64),
+	Brackets(Bracket),
+	Operator(usize, usize),
 }
 
-pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tree<'a> {
+	data: Data,
+	location: Location<'a>,
+	children: Vec<Tree<'a>>,
+}
+
+fn ident(location: Location) -> Tree {
+	Tree { data: Data::Ident, location, children: vec![] }
+}
+
+fn string(s: String, location: Location) -> Tree {
+	Tree { data: Data::String(s), location, children: vec![] }
+}
+
+fn number(n: i64, location: Location) -> Tree {
+	Tree { data: Data::Number(n), location, children: vec![] }
+}
+
+fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
+	Tree { data: Data::Brackets(b), location, children }
+}
+
+fn operator<'a>(
+	a: usize,
+	b: usize,
+	location: Location<'a>,
+	children: Vec<Tree<'a>>,
+) -> Tree<'a> {
+	Tree { data: Data::Operator(a, b), location, children }
+}
+
+pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<Tree<'a>>, String> {
 	fn parse<'a>(
 		tokens: &[Token<'a>],
 		i: &mut usize,
 		end: Option<Bracket>,
-	) -> Result<Vec<AST<'a>>, String> {
+	) -> Result<Vec<Tree<'a>>, String> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
@@ -48,15 +80,15 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 				(_, Some(Token::Closer(_, l))) => {
 					Err(format!("extra close bracket at {:?}", l))?
 				}
-				(_, Some(Token::Ident(l))) => AST::Ident(*l),
-				(_, Some(Token::String(s, l))) => AST::String(s.clone(), *l),
-				(_, Some(Token::Number(n, l))) => AST::Number(*n, *l),
+				(_, Some(Token::Ident(l))) => ident(*l),
+				(_, Some(Token::String(s, l))) => string(s.clone(), *l),
+				(_, Some(Token::Number(n, l))) => number(*n, *l),
 				(_, Some(Token::Opener(b, l))) => {
 					*i += 1;
 					let asts = parse(tokens, i, Some(*b))?;
 					match tokens[*i] {
 						Token::Closer(_, k) => {
-							AST::Brackets(*b, Location(l.0, k.0 - l.0 + 1, l.2), asts)
+							brackets(*b, Location(l.0, k.0 - l.0 + 1, l.2), asts)
 						}
 						_ => unreachable!(),
 					}
@@ -67,7 +99,8 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 		for (a, (ops, right)) in OPERATORS.iter().enumerate() {
 			let mut j = if *right { asts.len().wrapping_sub(1) } else { 0 };
 			while let Some(ast) = asts.get(j) {
-				if let AST::Ident(l) = ast.clone() {
+				if let Data::Ident = ast.data {
+					let l = ast.location;
 					if let Some((b, op)) = ops
 						.iter()
 						.enumerate()
@@ -77,9 +110,9 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<AST<'a>>, String> {
 							Err(format!("not enough operator arguments for {:?}", l))?
 						}
 						asts.remove(j);
-						let c: Vec<AST> = asts.drain(j - op.2..j + op.3).collect();
+						let c: Vec<Tree> = asts.drain(j - op.2..j + op.3).collect();
 						j -= op.2;
-						asts.insert(j, AST::Operator((a, b), l, c));
+						asts.insert(j, operator(a, b, l, c));
 					}
 				}
 				j = if *right { j.wrapping_sub(1) } else { j + 1 }
@@ -108,15 +141,15 @@ fn parse_test() {
 	let chars: Vec<char> = "{}".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Brackets(Bracket::Curly, Location(0, 2, &chars), vec![],)],
+		vec![brackets(Bracket::Curly, Location(0, 2, &chars), vec![],)],
 	);
 	let chars: Vec<char> = "[{   }]".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Brackets(
+		vec![brackets(
 			Bracket::Square,
 			Location(0, 7, &chars),
-			vec![AST::Brackets(Bracket::Curly, Location(1, 5, &chars), vec![],)],
+			vec![brackets(Bracket::Curly, Location(1, 5, &chars), vec![],)],
 		)]
 	);
 	assert_eq!(
@@ -130,24 +163,27 @@ fn parse_test() {
 	let chars: Vec<char> = "a + b".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Operator(
-			(2, 0),
+		vec![operator(
+			2,
+			0,
 			Location(2, 1, &chars),
-			vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(4, 1, &chars))],
+			vec![ident(Location(0, 1, &chars)), ident(Location(4, 1, &chars))],
 		)],
 	);
 	let chars: Vec<char> = "a - b * c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Operator(
-			(2, 1),
+		vec![operator(
+			2,
+			1,
 			Location(2, 1, &chars),
 			vec![
-				AST::Ident(Location(0, 1, &chars)),
-				AST::Operator(
-					(1, 0),
+				ident(Location(0, 1, &chars)),
+				operator(
+					1,
+					0,
 					Location(6, 1, &chars),
-					vec![AST::Ident(Location(4, 1, &chars)), AST::Ident(Location(8, 1, &chars))],
+					vec![ident(Location(4, 1, &chars)), ident(Location(8, 1, &chars))],
 				),
 			],
 		)]
@@ -155,31 +191,35 @@ fn parse_test() {
 	let chars: Vec<char> = "a * b * c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Operator(
-			(1, 0),
+		vec![operator(
+			1,
+			0,
 			Location(6, 1, &chars),
 			vec![
-				AST::Operator(
-					(1, 0),
+				operator(
+					1,
+					0,
 					Location(2, 1, &chars),
-					vec![AST::Ident(Location(0, 1, &chars)), AST::Ident(Location(4, 1, &chars))],
+					vec![ident(Location(0, 1, &chars)), ident(Location(4, 1, &chars))],
 				),
-				AST::Ident(Location(8, 1, &chars)),
+				ident(Location(8, 1, &chars)),
 			],
 		)]
 	);
 	let chars: Vec<char> = "a = b = c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Operator(
-			(4, 0),
+		vec![operator(
+			4,
+			0,
 			Location(2, 1, &chars),
 			vec![
-				AST::Ident(Location(0, 1, &chars)),
-				AST::Operator(
-					(4, 0),
+				ident(Location(0, 1, &chars)),
+				operator(
+					4,
+					0,
 					Location(6, 1, &chars),
-					vec![AST::Ident(Location(4, 1, &chars)), AST::Ident(Location(8, 1, &chars))],
+					vec![ident(Location(4, 1, &chars)), ident(Location(8, 1, &chars))],
 				),
 			],
 		)]
@@ -187,30 +227,32 @@ fn parse_test() {
 	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![AST::Brackets(
+		vec![brackets(
 			Bracket::Square,
 			Location(0, 18, &chars),
-			vec![AST::Operator(
-				(2, 0),
+			vec![operator(
+				2,
+				0,
 				Location(5, 1, &chars),
 				vec![
-					AST::Brackets(
+					brackets(
 						Bracket::Round,
 						Location(1, 3, &chars),
-						vec![AST::Ident(Location(2, 1, &chars))],
+						vec![ident(Location(2, 1, &chars))],
 					),
-					AST::Brackets(
+					brackets(
 						Bracket::Round,
 						Location(7, 10, &chars),
-						vec![AST::Brackets(
+						vec![brackets(
 							Bracket::Curly,
 							Location(8, 8, &chars),
-							vec![AST::Operator(
-								(1, 0),
+							vec![operator(
+								1,
+								0,
 								Location(11, 1, &chars),
 								vec![
-									AST::Number(3, Location(9, 1, &chars)),
-									AST::Number(97, Location(13, 2, &chars)),
+									number(3, Location(9, 1, &chars)),
+									number(97, Location(13, 2, &chars)),
 								],
 							)],
 						)],
