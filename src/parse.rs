@@ -25,7 +25,14 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Data {
+pub struct Tree<'a, Data> {
+	data: Data,
+	location: Location<'a>,
+	children: Vec<Tree<'a, Data>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AstData {
 	Ident,
 	String(String),
 	Number(i64),
@@ -33,44 +40,29 @@ pub enum Data {
 	Operator(usize, usize),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tree<'a> {
-	data: Data,
-	location: Location<'a>,
-	children: Vec<Tree<'a>>,
+type Ast<'a> = Tree<'a, AstData>;
+fn ident(location: Location) -> Ast {
+	Tree { data: AstData::Ident, location, children: vec![] }
+}
+fn string(s: String, location: Location) -> Ast {
+	Tree { data: AstData::String(s), location, children: vec![] }
+}
+fn number(n: i64, location: Location) -> Ast {
+	Tree { data: AstData::Number(n), location, children: vec![] }
+}
+fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Ast<'a>>) -> Ast<'a> {
+	Tree { data: AstData::Brackets(b), location, children }
+}
+fn operator<'a>(a: usize, b: usize, location: Location<'a>, children: Vec<Ast<'a>>) -> Ast<'a> {
+	Tree { data: AstData::Operator(a, b), location, children }
 }
 
-fn ident(location: Location) -> Tree {
-	Tree { data: Data::Ident, location, children: vec![] }
-}
-
-fn string(s: String, location: Location) -> Tree {
-	Tree { data: Data::String(s), location, children: vec![] }
-}
-
-fn number(n: i64, location: Location) -> Tree {
-	Tree { data: Data::Number(n), location, children: vec![] }
-}
-
-fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
-	Tree { data: Data::Brackets(b), location, children }
-}
-
-fn operator<'a>(
-	a: usize,
-	b: usize,
-	location: Location<'a>,
-	children: Vec<Tree<'a>>,
-) -> Tree<'a> {
-	Tree { data: Data::Operator(a, b), location, children }
-}
-
-pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<Tree<'a>>, String> {
+pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<Ast<'a>>, String> {
 	fn parse<'a>(
 		tokens: &[Token<'a>],
 		i: &mut usize,
 		end: Option<Bracket>,
-	) -> Result<Vec<Tree<'a>>, String> {
+	) -> Result<Vec<Ast<'a>>, String> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
@@ -99,7 +91,7 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<Tree<'a>>, String> {
 		for (a, (ops, right)) in OPERATORS.iter().enumerate() {
 			let mut j = if *right { asts.len().wrapping_sub(1) } else { 0 };
 			while let Some(ast) = asts.get(j) {
-				if let Data::Ident = ast.data {
+				if let AstData::Ident = ast.data {
 					let l = ast.location;
 					if let Some((b, op)) = ops
 						.iter()
@@ -110,7 +102,7 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Vec<Tree<'a>>, String> {
 							Err(format!("not enough operator arguments for {:?}", l))?
 						}
 						asts.remove(j);
-						let c: Vec<Tree> = asts.drain(j - op.2..j + op.3).collect();
+						let c: Vec<Ast> = asts.drain(j - op.2..j + op.3).collect();
 						j -= op.2;
 						asts.insert(j, operator(a, b, l, c));
 					}
