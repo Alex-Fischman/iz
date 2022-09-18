@@ -13,9 +13,11 @@ pub enum Named {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
+	Symbol,
 	Int,
 	Bool,
 	String,
+	Block(Vec<Type>, Vec<Type>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -52,6 +54,8 @@ pub fn analyze<'a>(asts: &[Tree<'a, Parsed>]) -> Result<Vec<Tree<'a, Typed>>, St
 		stack: &mut Vec<Type>,
 		names: &[String],
 	) -> Result<Vec<Tree<'a, Typed>>, String> {
+		let get_last =
+			|v: &[Type]| v.last().cloned().ok_or_else(|| "extra type expected".to_owned());
 		let mut out = vec![];
 		for tree in named {
 			out.push(Tree {
@@ -65,12 +69,21 @@ pub fn analyze<'a>(asts: &[Tree<'a, Parsed>]) -> Result<Vec<Tree<'a, Typed>>, St
 							"mul" | "div" | "add" | "sub" => {
 								(vec![Type::Int, Type::Int], vec![Type::Int])
 							}
-							"eq" | "ne" | "lt" | "gt" | "le" | "ge" => todo!(),
+							"eq" | "ne" => {
+								(vec![get_last(stack)?, get_last(stack)?], vec![Type::Bool])
+							}
+							"lt" | "gt" | "le" | "ge" => todo!(),
 							"assign" => todo!(),
 							"_if_" => todo!(),
 							"_else_" => todo!(),
-							"_while_" => todo!(),
-							s => Err(format!("unknown symbol: {}", s))?,
+							"_while_" => (
+								vec![
+									Type::Block(vec![], vec![Type::Bool]),
+									Type::Block(vec![], vec![]),
+								],
+								vec![],
+							),
+							_ => (vec![], vec![Type::Symbol]),
 						},
 						Named::String(_) => (vec![], vec![Type::String]),
 						Named::Number(_) => (vec![], vec![Type::Int]),
@@ -86,7 +99,7 @@ pub fn analyze<'a>(asts: &[Tree<'a, Parsed>]) -> Result<Vec<Tree<'a, Typed>>, St
 						Err(format!("types not equal:\n{:?}\n{:?}", input, t))?
 					}
 				} else {
-					Err(format!("extra type expected on stack: {:?}", input))?
+					Err(format!("extra type expected: {:?}", input))?
 				}
 			}
 			for output in outputs {
@@ -103,11 +116,6 @@ fn analyze_test() {
 	use crate::parse::parse;
 	use crate::tokenize::tokenize;
 	use crate::tokenize::Location;
-	let chars: Vec<char> = "asdf".chars().collect();
-	assert_eq!(
-		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
-		Err("unknown symbol: asdf".to_owned())
-	);
 	let chars: Vec<char> = "true + 1".chars().collect();
 	assert_eq!(
 		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
@@ -116,7 +124,12 @@ fn analyze_test() {
 	let chars: Vec<char> = "1 add".chars().collect();
 	assert_eq!(
 		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
-		Err("extra type expected on stack: Int".to_owned())
+		Err("extra type expected: Int".to_owned())
+	);
+	let chars: Vec<char> = "eq".chars().collect();
+	assert_eq!(
+		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
+		Err("extra type expected".to_owned())
 	);
 	let chars: Vec<char> = "1 2 add".chars().collect();
 	assert_eq!(
