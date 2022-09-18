@@ -3,6 +3,9 @@ pub struct Location<'a>(pub usize, pub usize, pub &'a [char]);
 
 impl std::fmt::Debug for Location<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		if self.1 != 0 {
+			write!(f, "{} @ ", self.to_chars().iter().collect::<String>())?
+		}
 		let fold = |(row, col), &c| match c {
 			'\n' => (row + 1, 1),
 			_ => (row, col + 1),

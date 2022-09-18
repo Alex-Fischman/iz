@@ -132,11 +132,11 @@ fn parse_test() {
 	);
 	assert_eq!(
 		parse(&tokenize(&")".chars().collect::<Vec<char>>()).unwrap()),
-		Err("extra close bracket at 1:1-1:2".to_owned())
+		Err("extra close bracket at ) @ 1:1-1:2".to_owned())
 	);
 	assert_eq!(
 		parse(&tokenize(&"({)}".chars().collect::<Vec<char>>()).unwrap()),
-		Err("extra close bracket at 1:3-1:4".to_owned())
+		Err("extra close bracket at ) @ 1:3-1:4".to_owned())
 	);
 	let chars: Vec<char> = "{}".chars().collect();
 	assert_eq!(
@@ -154,11 +154,11 @@ fn parse_test() {
 	);
 	assert_eq!(
 		parse(&tokenize(&"+ 1".chars().collect::<Vec<char>>()).unwrap()),
-		Err("not enough operator arguments for 1:1-1:2".to_owned())
+		Err("not enough operator arguments for + @ 1:1-1:2".to_owned())
 	);
 	assert_eq!(
 		parse(&tokenize(&"1 =".chars().collect::<Vec<char>>()).unwrap()),
-		Err("not enough operator arguments for 1:3-1:4".to_owned())
+		Err("not enough operator arguments for = @ 1:3-1:4".to_owned())
 	);
 	let chars: Vec<char> = "a + b".chars().collect();
 	assert_eq!(
