@@ -1,3 +1,4 @@
+mod analyze;
 mod parse;
 mod tokenize;
 
