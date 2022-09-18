@@ -3,7 +3,7 @@ use crate::parse::Tree;
 use crate::parse::OPERATORS;
 use crate::tokenize::Bracket;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Named {
 	Name(usize),
 	String(String),
@@ -18,12 +18,10 @@ pub enum Type {
 	String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Typed(Named, (Vec<Type>, Vec<Type>));
 
-pub fn analyze<'a>(
-	asts: &[Tree<'a, Parsed>],
-) -> Result<(Vec<Tree<'a, Typed>>, Vec<String>), String> {
+pub fn analyze<'a>(asts: &[Tree<'a, Parsed>]) -> Result<Vec<Tree<'a, Typed>>, String> {
 	fn name<'a>(asts: &[Tree<'a, Parsed>], names: &mut Vec<String>) -> Vec<Tree<'a, Named>> {
 		fn new_name(name: &str, names: &mut Vec<String>) -> Named {
 			Named::Name(names.iter().position(|n| n == name).unwrap_or_else(|| {
@@ -57,12 +55,22 @@ pub fn analyze<'a>(
 		let mut out = vec![];
 		for tree in named {
 			out.push(Tree {
+				children: annotate(&tree.children, stack, names)?,
 				data: Typed(
 					tree.data.clone(),
 					match tree.data {
 						Named::Name(i) => match names[i].as_str() {
 							"true" | "false" => (vec![], vec![Type::Bool]),
-							_ => todo!(),
+							"call" => todo!(),
+							"mul" | "div" | "add" | "sub" => {
+								(vec![Type::Int, Type::Int], vec![Type::Int])
+							}
+							"eq" | "ne" | "lt" | "gt" | "le" | "ge" => todo!(),
+							"assign" => todo!(),
+							"_if_" => todo!(),
+							"_else_" => todo!(),
+							"_while_" => todo!(),
+							s => Err(format!("unknown symbol: {}", s))?,
 						},
 						Named::String(_) => (vec![], vec![Type::String]),
 						Named::Number(_) => (vec![], vec![Type::Int]),
@@ -70,7 +78,6 @@ pub fn analyze<'a>(
 					},
 				),
 				location: tree.location,
-				children: annotate(&tree.children, stack, names)?,
 			});
 			let (inputs, outputs) = &out.last().unwrap().data.1;
 			for input in inputs {
@@ -88,11 +95,68 @@ pub fn analyze<'a>(
 		}
 		Ok(out)
 	}
-	let mut stack = vec![];
-	let typed = annotate(&named, &mut stack, &names)?;
-	if stack.is_empty() {
-		Ok((typed, names))
-	} else {
-		Err(format!("extra types remained stack: {:?}", stack))
-	}
+	annotate(&named, &mut vec![], &names)
+}
+
+#[test]
+fn analyze_test() {
+	use crate::parse::parse;
+	use crate::tokenize::tokenize;
+	use crate::tokenize::Location;
+	let chars: Vec<char> = "asdf".chars().collect();
+	assert_eq!(
+		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
+		Err("unknown symbol: asdf".to_owned())
+	);
+	let chars: Vec<char> = "true + 1".chars().collect();
+	assert_eq!(
+		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
+		Err("types not equal:\nInt\nBool".to_owned())
+	);
+	let chars: Vec<char> = "1 add".chars().collect();
+	assert_eq!(
+		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
+		Err("extra type expected on stack: Int".to_owned())
+	);
+	let chars: Vec<char> = "1 2 add".chars().collect();
+	assert_eq!(
+		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
+		Ok(vec![
+			Tree {
+				data: Typed(Named::Number(1), (vec![], vec![Type::Int])),
+				location: Location(0, 1, &chars),
+				children: vec![]
+			},
+			Tree {
+				data: Typed(Named::Number(2), (vec![], vec![Type::Int])),
+				location: Location(2, 1, &chars),
+				children: vec![]
+			},
+			Tree {
+				data: Typed(Named::Name(0), (vec![Type::Int, Type::Int], vec![Type::Int])),
+				location: Location(4, 3, &chars),
+				children: vec![]
+			},
+		])
+	);
+	let chars: Vec<char> = "1 + 2".chars().collect();
+	assert_eq!(
+		analyze(&parse(&tokenize(&chars).unwrap()).unwrap()),
+		Ok(vec![Tree {
+			data: Typed(Named::Name(0), (vec![Type::Int, Type::Int], vec![Type::Int])),
+			location: Location(2, 1, &chars),
+			children: vec![
+				Tree {
+					data: Typed(Named::Number(1), (vec![], vec![Type::Int])),
+					location: Location(0, 1, &chars),
+					children: vec![]
+				},
+				Tree {
+					data: Typed(Named::Number(2), (vec![], vec![Type::Int])),
+					location: Location(4, 1, &chars),
+					children: vec![]
+				},
+			]
+		}])
+	);
 }

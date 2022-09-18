@@ -11,8 +11,7 @@ fn main() -> Result<(), String> {
 		.collect();
 	let tokens = tokenize::tokenize(&chars)?;
 	let asts = parse::parse(&tokens)?;
-	let (named, names) = analyze::analyze(&asts)?;
-	println!("\n{:#?}", named);
-	println!("\n{:#?}", names);
+	let asts = analyze::analyze(&asts)?;
+	println!("\n{:#?}", asts);
 	Ok(())
 }
