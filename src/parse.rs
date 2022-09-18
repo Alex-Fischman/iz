@@ -5,7 +5,7 @@ use crate::tokenize::Token;
 type Operator<'a> = (&'a str, &'a str, usize, usize);
 // Grouped by precedence; highest first
 // (&[name, func, left args, right args], (right assoc))
-const OPERATORS: &[(&[Operator], bool)] = &[
+pub const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("@", "call", 1, 1)], false),
 	(&[("*", "mul", 1, 1), ("/", "div", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
@@ -26,9 +26,9 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tree<'a, Data> {
-	data: Data,
-	location: Location<'a>,
-	children: Vec<Tree<'a, Data>>,
+	pub data: Data,
+	pub location: Location<'a>,
+	pub children: Vec<Tree<'a, Data>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
