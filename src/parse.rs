@@ -33,14 +33,14 @@ pub struct Tree<'a> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Parsed {
-	Ident(usize),
+	Name(usize),
 	String(String),
 	Number(i64),
 	Brackets(Bracket),
 }
 
 fn ident(i: usize, location: Location) -> Tree {
-	Tree { data: Parsed::Ident(i), location, children: vec![] }
+	Tree { data: Parsed::Name(i), location, children: vec![] }
 }
 fn string(s: String, location: Location) -> Tree {
 	Tree { data: Parsed::String(s), location, children: vec![] }
@@ -52,7 +52,7 @@ fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Tree<'a>>) -> 
 	Tree { data: Parsed::Brackets(b), location, children }
 }
 fn operator<'a>(i: usize, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
-	Tree { data: Parsed::Ident(i), location, children }
+	Tree { data: Parsed::Name(i), location, children }
 }
 
 pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Vec<Tree<'a>>, Vec<String>), String> {
@@ -104,7 +104,7 @@ pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Vec<Tree<'a>>, Vec<String>)
 		for (ops, right) in OPERATORS.iter() {
 			let mut j = if *right { asts.len().wrapping_sub(1) } else { 0 };
 			while let Some(ast) = asts.get(j) {
-				if let Parsed::Ident(i) = ast.data {
+				if let Parsed::Name(i) = ast.data {
 					let l = ast.location;
 					if let Some(op) =
 						ops.iter().find(|op| op.0 == l.to_chars().iter().collect::<String>())

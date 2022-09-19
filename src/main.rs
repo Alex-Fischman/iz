@@ -1,3 +1,4 @@
+mod interpret;
 mod parse;
 mod tokenize;
 
@@ -10,6 +11,6 @@ fn main() -> Result<(), String> {
 		.collect();
 	let tokens = tokenize::tokenize(&chars)?;
 	let (trees, names) = parse::parse(&tokens)?;
-	println!("\n{:#?}\n{:#?}", trees, names);
+	println!("\n{:#?}", interpret::interpret(&trees, &names)?);
 	Ok(())
 }
