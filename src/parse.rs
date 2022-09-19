@@ -25,10 +25,10 @@ pub const OPERATORS: &[(&[Operator], bool)] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tree<'a, Data> {
-	pub data: Data,
+pub struct Tree<'a> {
+	pub data: Parsed,
 	pub location: Location<'a>,
-	pub children: Vec<Tree<'a, Data>>,
+	pub children: Vec<Tree<'a>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,39 +39,29 @@ pub enum Parsed {
 	Brackets(Bracket),
 }
 
-fn ident(i: usize, location: Location) -> Tree<Parsed> {
+fn ident(i: usize, location: Location) -> Tree {
 	Tree { data: Parsed::Ident(i), location, children: vec![] }
 }
-fn string(s: String, location: Location) -> Tree<Parsed> {
+fn string(s: String, location: Location) -> Tree {
 	Tree { data: Parsed::String(s), location, children: vec![] }
 }
-fn number(n: i64, location: Location) -> Tree<Parsed> {
+fn number(n: i64, location: Location) -> Tree {
 	Tree { data: Parsed::Number(n), location, children: vec![] }
 }
-fn brackets<'a>(
-	b: Bracket,
-	location: Location<'a>,
-	children: Vec<Tree<'a, Parsed>>,
-) -> Tree<'a, Parsed> {
+fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
 	Tree { data: Parsed::Brackets(b), location, children }
 }
-fn operator<'a>(
-	i: usize,
-	location: Location<'a>,
-	children: Vec<Tree<'a, Parsed>>,
-) -> Tree<'a, Parsed> {
+fn operator<'a>(i: usize, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
 	Tree { data: Parsed::Ident(i), location, children }
 }
 
-pub fn parse<'a>(
-	tokens: &'a [Token<'a>],
-) -> Result<(Vec<Tree<'a, Parsed>>, Vec<String>), String> {
+pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Vec<Tree<'a>>, Vec<String>), String> {
 	fn parse<'a>(
 		tokens: &[Token<'a>],
 		i: &mut usize,
 		end: Option<Bracket>,
 		names: &mut Vec<String>,
-	) -> Result<Vec<Tree<'a, Parsed>>, String> {
+	) -> Result<Vec<Tree<'a>>, String> {
 		fn new_name(name: String, names: &mut Vec<String>) -> usize {
 			names.iter().position(|n| *n == name).unwrap_or_else(|| {
 				names.push(name);
@@ -123,7 +113,7 @@ pub fn parse<'a>(
 							Err(format!("not enough operator arguments for {:?}", l))?
 						}
 						asts.remove(j);
-						let c: Vec<Tree<Parsed>> = asts.drain(j - op.2..j + op.3).collect();
+						let c: Vec<Tree> = asts.drain(j - op.2..j + op.3).collect();
 						j -= op.2;
 						asts.insert(j, operator(i, l, c));
 					}
