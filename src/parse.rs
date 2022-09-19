@@ -88,15 +88,12 @@ pub fn parse<'a>(
 					Err(format!("extra close bracket at {:?}", l))?
 				}
 				(_, Some(Token::Ident(l))) => {
-					let mut name = l.to_chars().iter().collect::<String>();
-					'outer: for os in OPERATORS {
-						for o in os.0 {
-							if o.0 == name {
-								name = o.1.to_owned();
-								break 'outer;
-							}
-						}
-					}
+					let name = l.to_chars().iter().collect::<String>();
+					let name = OPERATORS
+						.iter()
+						.flat_map(|os| os.0)
+						.find_map(|o| if o.0 == name { Some(o.1.to_owned()) } else { None })
+						.unwrap_or(name);
 					ident(new_name(name, names), *l)
 				}
 				(_, Some(Token::String(s, l))) => string(s.clone(), *l),
