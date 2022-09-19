@@ -9,7 +9,7 @@ fn main() -> Result<(), String> {
 		.chars()
 		.collect();
 	let tokens = tokenize::tokenize(&chars)?;
-	let asts = parse::parse(&tokens)?;
-	println!("\n{:#?}", asts);
+	let (trees, names) = parse::parse(&tokens)?;
+	println!("\n{:#?}\n{:#?}", trees, names);
 	Ok(())
 }
