@@ -1,11 +1,13 @@
 use crate::parse::Parsed;
 use crate::parse::Tree;
+use crate::tokenize::Bracket;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
 	Int(i64),
 	Bool(bool),
 	String(String),
+	List(Vec<Value>),
 }
 
 impl Value {
@@ -27,6 +29,13 @@ impl Value {
 		match self {
 			Value::String(s) => Ok(s),
 			v => Err(format!("expected string, found {:?}", v)),
+		}
+	}
+
+	fn to_list(&self) -> Result<&[Value], String> {
+		match self {
+			Value::List(l) => Ok(l),
+			v => Err(format!("expected list, found {:?}", v)),
 		}
 	}
 }
@@ -64,6 +73,7 @@ pub fn interpret(trees: &[Tree], names: &[String]) -> Result<Vec<Value>, String>
 							Value::Int(a) => a == b.to_int()?,
 							Value::Bool(a) => a == b.to_bool()?,
 							Value::String(a) => a == b.to_string()?,
+							Value::List(a) => a == b.to_list()?,
 						}));
 					}
 					"ne" => {
@@ -72,6 +82,7 @@ pub fn interpret(trees: &[Tree], names: &[String]) -> Result<Vec<Value>, String>
 							Value::Int(a) => a != b.to_int()?,
 							Value::Bool(a) => a != b.to_bool()?,
 							Value::String(a) => a != b.to_string()?,
+							Value::List(a) => a != b.to_list()?,
 						}));
 					}
 					"lt" => {
@@ -95,7 +106,9 @@ pub fn interpret(trees: &[Tree], names: &[String]) -> Result<Vec<Value>, String>
 				},
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
 				Parsed::Number(n) => stack.push(Value::Int(*n)),
-				Parsed::Brackets(_b) => todo!(),
+				Parsed::Brackets(Bracket::Round) => todo!(),
+				Parsed::Brackets(Bracket::Curly) => todo!(),
+				Parsed::Brackets(Bracket::Square) => todo!(),
 			}
 		}
 		Ok(())
