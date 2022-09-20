@@ -98,15 +98,15 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
 				Parsed::Number(n) => stack.push(Value::Int(*n)),
-				Parsed::Brackets(b) => match b {
-					Bracket::Round => interpret(&tree.children, names, stack)?,
-					Bracket::Curly => stack.push(Value::Block(tree.children.clone())),
-					Bracket::Square => {
-						let mut s = vec![];
-						interpret(&tree.children, names, &mut s)?;
-						stack.push(Value::Group(s));
-					}
-				},
+				Parsed::Brackets(Bracket::Round) => interpret(&tree.children, names, stack)?,
+				Parsed::Brackets(Bracket::Curly) => {
+					stack.push(Value::Block(tree.children.clone()))
+				}
+				Parsed::Brackets(Bracket::Square) => {
+					let mut s = vec![];
+					interpret(&tree.children, names, &mut s)?;
+					stack.push(Value::Group(s));
+				}
 			}
 		}
 		Ok(())
