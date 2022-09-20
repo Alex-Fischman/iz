@@ -2,9 +2,10 @@ use crate::parse::Parsed;
 use crate::parse::Tree;
 use crate::tokenize::Bracket;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
 	Int(i64),
+	Float(f64),
 	Bool(bool),
 	String(String),
 	List(Vec<Value>),
@@ -15,6 +16,14 @@ impl Value {
 		match self {
 			Value::Int(i) => Ok(*i),
 			v => Err(format!("expected int, found {:?}", v)),
+		}
+	}
+
+	fn to_float(&self) -> Result<f64, String> {
+		match self {
+			Value::Float(f) => Ok(*f),
+			Value::Int(i) => Ok(*i as f64),
+			v => Err(format!("expected float, found {:?}", v)),
 		}
 	}
 
@@ -67,10 +76,18 @@ pub fn interpret(trees: &[Tree], names: &[String]) -> Result<Vec<Value>, String>
 						let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
 						stack.push(Value::Int(a * b));
 					}
+					"div" => {
+						let (b, a) = (pop(stack)?.to_float()?, pop(stack)?.to_float()?);
+						if b == 0.0 {
+							Err("divide by zero".to_owned())?
+						}
+						stack.push(Value::Float(a / b))
+					}
 					"eq" => {
 						let (b, a) = (pop(stack)?, pop(stack)?);
 						stack.push(Value::Bool(match a {
 							Value::Int(a) => a == b.to_int()?,
+							Value::Float(a) => a == b.to_float()?,
 							Value::Bool(a) => a == b.to_bool()?,
 							Value::String(a) => a == b.to_string()?,
 							Value::List(a) => a == b.to_list()?,
@@ -80,6 +97,7 @@ pub fn interpret(trees: &[Tree], names: &[String]) -> Result<Vec<Value>, String>
 						let (b, a) = (pop(stack)?, pop(stack)?);
 						stack.push(Value::Bool(match a {
 							Value::Int(a) => a != b.to_int()?,
+							Value::Float(a) => a != b.to_float()?,
 							Value::Bool(a) => a != b.to_bool()?,
 							Value::String(a) => a != b.to_string()?,
 							Value::List(a) => a != b.to_list()?,
@@ -132,4 +150,5 @@ fn interpret_test() {
 	assert_eq!(f("1 sub"), Err("no value on stack".to_owned()));
 	assert_eq!(f("1 - 2"), Ok(vec![Value::Int(-1)]));
 	assert_eq!(f("1 > 2"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("4 / 5"), Ok(vec![Value::Float(0.8)]));
 }
