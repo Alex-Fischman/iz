@@ -21,7 +21,8 @@ pub const OPERATORS: &[(&[Operator], bool)] = &[
 		false,
 	),
 	(&[("=", "assign", 1, 1)], true),
-	(&[("if", "_if_", 0, 2), ("else", "_else_", 1, 1), ("while", "_while_", 0, 2)], true),
+	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
+	(&[("else", "_else_", 1, 1)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
