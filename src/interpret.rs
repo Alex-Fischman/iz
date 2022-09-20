@@ -92,7 +92,18 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a >= b)),
 							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
 						},
-						"call" | "assign" | "_if_" | "_else_" | "_while_" => todo!(),
+						"call" => match pop(stack)? {
+							Value::Block(b) => interpret(&b, names, stack)?,
+							v => Err(format!("invalid call arg: {}", v))?,
+						},
+						"call_with" => match (pop(stack)?, pop(stack)?) {
+							(x, Value::Block(b)) => {
+								stack.push(x);
+								interpret(&b, names, stack)?;
+							}
+							(u, v) => Err(format!("invalid call_with args: {}, {}", u, v))?,
+						},
+						"assign" | "_if_" | "_else_" | "_while_" => todo!(),
 						s => Err(format!("unknown symbol {}", s))?,
 					}
 				}
@@ -149,4 +160,8 @@ fn interpret_test() {
 			Value::Int(6)
 		])
 	);
+	let chars: Vec<char> = "{2 mul}@3 {2 * 3} call".chars().collect();
+	let tokens = tokenize(&chars).unwrap();
+	let (trees, names) = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees, &names), Ok(vec![Value::Int(6), Value::Int(6)]));
 }
