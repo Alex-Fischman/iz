@@ -60,14 +60,14 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 			}
 		}
 		fn call<'a>(
-			b: Block<'a>,
+			b: &Block<'a>,
 			names: &[String],
 			stack: &mut Vec<Value<'a>>,
 		) -> Result<(), String> {
 			match b {
-				Block::Code(v) => interpret(&v, names, stack),
+				Block::Code(v) => interpret(v, names, stack),
 				Block::Lazy(v) => {
-					stack.push(*v);
+					stack.push(*v.clone());
 					Ok(())
 				}
 			}
@@ -122,19 +122,19 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
 						},
 						"call" => match pop(stack)? {
-							Value::Block(b) => call(b, names, stack)?,
+							Value::Block(b) => call(&b, names, stack)?,
 							v => Err(format!("invalid call arg: {}", v))?,
 						},
 						"call_with" => match (pop(stack)?, pop(stack)?) {
 							(x, Value::Block(b)) => {
 								stack.push(x);
-								call(b, names, stack)?;
+								call(&b, names, stack)?;
 							}
 							(u, v) => Err(format!("invalid call_with args: {}, {}", u, v))?,
 						},
 						"_if_" => match (pop(stack)?, pop(stack)?) {
 							(b, Value::Bool(true)) => {
-								call(to_block(b), names, stack)?;
+								call(&to_block(b), names, stack)?;
 								let c = pop(stack)?;
 								stack.push(Value::Some(Box::new(c)))
 							}
@@ -146,7 +146,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 							(b, Value::None) => stack.push(b),
 							(b, a) => Err(format!("invalid else args: {}, {}", a, b))?,
 						},
-						"assign" | "_while_" => todo!(),
+						"assign" => todo!(),
 						s => Err(format!("unknown symbol {}", s))?,
 					}
 				}
