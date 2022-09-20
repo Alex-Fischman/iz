@@ -11,11 +11,20 @@ pub enum Value<'a> {
 	Block(Vec<Tree<'a>>),
 }
 
-impl<'a> Value<'a> {
-	fn to_int(&self) -> Result<i64, String> {
+impl<'a> std::fmt::Display for Value<'a> {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			Value::Int(i) => Ok(*i),
-			v => Err(format!("expected int, found {:?}", v)),
+			Value::Int(i) => write!(f, "{}", i),
+			Value::Bool(b) => write!(f, "{}", b),
+			Value::String(s) => write!(f, "{}", s),
+			Value::Group(v) => {
+				write!(f, "[ ")?;
+				for v in v {
+					write!(f, "{} ", v)?;
+				}
+				write!(f, "]")
+			}
+			Value::Block(_) => write!(f, "Block"),
 		}
 	}
 }
@@ -29,9 +38,67 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 		fn pop<'a>(stack: &mut Vec<Value<'a>>) -> Result<Value<'a>, String> {
 			stack.pop().ok_or_else(|| "no value on stack".to_owned())
 		}
+		fn eq(a: &Value, b: &Value) -> Result<bool, String> {
+			match (a, b) {
+				(Value::Int(a), Value::Int(b)) => Ok(a == b),
+				(Value::Bool(a), Value::Bool(b)) => Ok(a == b),
+				(Value::String(a), Value::String(b)) => Ok(a == b),
+				(Value::Group(a), Value::Group(b)) => {
+					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b)?))
+				}
+				(b, a) => Err(format!("invalid eq args: {}, {}", a, b))?,
+			}
+		}
 		for tree in trees {
-			if let Parsed::Brackets(b) = &tree.data {
-				match b {
+			match &tree.data {
+				Parsed::Name(i) => {
+					interpret(&tree.children, names, stack)?;
+					match names[*i].as_str() {
+						"true" => stack.push(Value::Bool(true)),
+						"false" => stack.push(Value::Bool(false)),
+						"add" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a + b)),
+							(b, a) => Err(format!("invalid add args: {}, {}", a, b))?,
+						},
+						"sub" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a - b)),
+							(b, a) => Err(format!("invalid sub args: {}, {}", a, b))?,
+						},
+						"mul" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
+							(b, a) => Err(format!("invalid mul args: {}, {}", a, b))?,
+						},
+						"eq" => {
+							let (b, a) = (pop(stack)?, pop(stack)?);
+							stack.push(Value::Bool(eq(&a, &b)?));
+						}
+						"ne" => {
+							let (b, a) = (pop(stack)?, pop(stack)?);
+							stack.push(Value::Bool(!eq(&a, &b)?));
+						}
+						"lt" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a < b)),
+							(b, a) => Err(format!("invalid lt args: {}, {}", a, b))?,
+						},
+						"gt" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
+							(b, a) => Err(format!("invalid gt args: {}, {}", a, b))?,
+						},
+						"le" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a <= b)),
+							(b, a) => Err(format!("invalid le args: {}, {}", a, b))?,
+						},
+						"ge" => match (pop(stack)?, pop(stack)?) {
+							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a >= b)),
+							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
+						},
+						"call" | "assign" | "_if_" | "_else_" | "_while_" => todo!(),
+						s => Err(format!("unknown symbol {}", s))?,
+					}
+				}
+				Parsed::String(s) => stack.push(Value::String(s.clone())),
+				Parsed::Number(n) => stack.push(Value::Int(*n)),
+				Parsed::Brackets(b) => match b {
 					Bracket::Round => interpret(&tree.children, names, stack)?,
 					Bracket::Curly => stack.push(Value::Block(tree.children.clone())),
 					Bracket::Square => {
@@ -39,58 +106,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 						interpret(&tree.children, names, &mut s)?;
 						stack.push(Value::Group(s));
 					}
-				}
-			} else {
-				interpret(&tree.children, names, stack)?;
-				match &tree.data {
-					Parsed::Name(i) => match names[*i].as_str() {
-						"true" => stack.push(Value::Bool(true)),
-						"false" => stack.push(Value::Bool(false)),
-						"add" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Int(a + b));
-						}
-						"sub" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Int(a - b));
-						}
-						"mul" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Int(a * b));
-						}
-						"eq" => {
-							let (b, a) = (pop(stack)?, pop(stack)?);
-							stack.push(Value::Bool(a == b));
-							todo!("assert same type and not blocks");
-						}
-						"ne" => {
-							let (b, a) = (pop(stack)?, pop(stack)?);
-							stack.push(Value::Bool(a != b));
-							todo!("assert same type and not blocks");
-						}
-						"lt" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Bool(a < b));
-						}
-						"gt" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Bool(a > b));
-						}
-						"le" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Bool(a <= b));
-						}
-						"ge" => {
-							let (b, a) = (pop(stack)?.to_int()?, pop(stack)?.to_int()?);
-							stack.push(Value::Bool(a >= b));
-						}
-						"call" | "assign" | "_if_" | "_else_" | "_while_" => todo!(),
-						s => Err(format!("unknown symbol {}", s))?,
-					},
-					Parsed::String(s) => stack.push(Value::String(s.clone())),
-					Parsed::Number(n) => stack.push(Value::Int(*n)),
-					Parsed::Brackets(_) => unreachable!(),
-				}
+				},
 			}
 		}
 		Ok(())
@@ -107,7 +123,7 @@ fn interpret_test() {
 	let chars: Vec<char> = "true 1 sub".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Err("expected int, found Bool(true)".to_owned()));
+	assert_eq!(interpret(&trees, &names), Err("invalid sub args: true, 1".to_owned()));
 	let chars: Vec<char> = "1 sub".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let (trees, names) = parse(&tokens).unwrap();
