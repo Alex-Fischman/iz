@@ -39,12 +39,39 @@ impl<'a> std::fmt::Display for Value<'a> {
 	}
 }
 
-pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'a>>, String> {
-	fn interpret<'a>(
-		trees: &[Tree<'a>],
-		names: &[String],
-		stack: &mut Vec<Value<'a>>,
-	) -> Result<(), String> {
+// use std::collections::HashMap;
+// #[derive(Debug)]
+// struct Context<'a, 'b> {
+// 	last: Option<&'a mut Context<'a, 'b>>,
+// 	vars: HashMap<String, Value<'b>>,
+// }
+
+// impl<'a, 'b> Context<'a, 'b> {
+// 	fn set<'c>(&'c mut self, key: &str, value: Value<'b>) {
+// 		fn find<'a, 'b, 'c>(
+// 			context: &'c mut Context<'a, 'b>,
+// 			key: &str,
+// 		) -> Option<&'c mut Context<'a, 'b>> {
+// 			if context.vars.contains_key(key) {
+// 				Some(context)
+// 			} else {
+// 				match &mut context.last {
+// 					Some(last) => find(last, key),
+// 					None => None,
+// 				}
+// 			}
+// 		}
+// 		match find(self, key) {
+// 			Some(context) => context,
+// 			None => self,
+// 		}
+// 		.vars
+// 		.insert(key.to_owned(), value);
+// 	}
+// }
+
+pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
+	fn interpret<'a>(trees: &[Tree<'a>], stack: &mut Vec<Value<'a>>) -> Result<(), String> {
 		fn pop<'a>(stack: &mut Vec<Value<'a>>) -> Result<Value<'a>, String> {
 			stack.pop().ok_or_else(|| "no value on stack".to_owned())
 		}
@@ -59,13 +86,9 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 				(b, a) => Err(format!("invalid eq args: {}, {}", a, b))?,
 			}
 		}
-		fn call<'a>(
-			b: &Block<'a>,
-			names: &[String],
-			stack: &mut Vec<Value<'a>>,
-		) -> Result<(), String> {
+		fn call<'a>(b: &Block<'a>, stack: &mut Vec<Value<'a>>) -> Result<(), String> {
 			match b {
-				Block::Code(v) => interpret(v, names, stack),
+				Block::Code(v) => interpret(v, stack),
 				Block::Lazy(v) => {
 					stack.push(*v.clone());
 					Ok(())
@@ -81,8 +104,8 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 		for tree in trees {
 			match &tree.data {
 				Parsed::Name(i) => {
-					interpret(&tree.children, names, stack)?;
-					match names[*i].as_str() {
+					interpret(&tree.children, stack)?;
+					match i.as_str() {
 						"true" => stack.push(Value::Bool(true)),
 						"false" => stack.push(Value::Bool(false)),
 						"add" => match (pop(stack)?, pop(stack)?) {
@@ -122,19 +145,19 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
 						},
 						"call" => match pop(stack)? {
-							Value::Block(b) => call(&b, names, stack)?,
+							Value::Block(b) => call(&b, stack)?,
 							v => Err(format!("invalid call arg: {}", v))?,
 						},
 						"call_with" => match (pop(stack)?, pop(stack)?) {
 							(x, Value::Block(b)) => {
 								stack.push(x);
-								call(&b, names, stack)?;
+								call(&b, stack)?;
 							}
 							(u, v) => Err(format!("invalid call_with args: {}, {}", u, v))?,
 						},
 						"_if_" => match (pop(stack)?, pop(stack)?) {
 							(b, Value::Bool(true)) => {
-								call(&to_block(b), names, stack)?;
+								call(&to_block(b), stack)?;
 								let c = pop(stack)?;
 								stack.push(Value::Some(Box::new(c)))
 							}
@@ -152,13 +175,13 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
 				Parsed::Number(n) => stack.push(Value::Int(*n)),
-				Parsed::Brackets(Bracket::Round) => interpret(&tree.children, names, stack)?,
+				Parsed::Brackets(Bracket::Round) => interpret(&tree.children, stack)?,
 				Parsed::Brackets(Bracket::Curly) => {
 					stack.push(Value::Block(Block::Code(tree.children.clone())))
 				}
 				Parsed::Brackets(Bracket::Square) => {
 					let mut s = vec![];
-					interpret(&tree.children, names, &mut s)?;
+					interpret(&tree.children, &mut s)?;
 					stack.push(Value::Group(s));
 				}
 			}
@@ -166,7 +189,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>], names: &[String]) -> Result<Vec<Value<'
 		Ok(())
 	}
 	let mut stack = vec![];
-	interpret(trees, names, &mut stack)?;
+	interpret(trees, &mut stack)?;
 	Ok(stack)
 }
 
@@ -176,25 +199,25 @@ fn interpret_test() {
 	use crate::tokenize::tokenize;
 	let chars: Vec<char> = "true 1 sub".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Err("invalid sub args: true, 1".to_owned()));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Err("invalid sub args: true, 1".to_owned()));
 	let chars: Vec<char> = "1 sub".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Err("no value on stack".to_owned()));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Err("no value on stack".to_owned()));
 	let chars: Vec<char> = "1 - 2".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Ok(vec![Value::Int(-1)]));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Int(-1)]));
 	let chars: Vec<char> = "1 > 2".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Ok(vec![Value::Bool(false)]));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Bool(false)]));
 	let chars: Vec<char> = "1 2 [3 4] 5 6".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
+	let trees = parse(&tokens).unwrap();
 	assert_eq!(
-		interpret(&trees, &names),
+		interpret(&trees),
 		Ok(vec![
 			Value::Int(1),
 			Value::Int(2),
@@ -205,14 +228,14 @@ fn interpret_test() {
 	);
 	let chars: Vec<char> = "{2 mul}@3 {2 * 3} call".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Ok(vec![Value::Int(6), Value::Int(6)]));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Int(6), Value::Int(6)]));
 	let chars: Vec<char> = "if true 1".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
 	let chars: Vec<char> = "if true 1 else 2".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
-	let (trees, names) = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees, &names), Ok(vec![Value::Int(1)]));
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Int(1)]));
 }

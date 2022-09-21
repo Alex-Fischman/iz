@@ -10,7 +10,7 @@ fn main() -> Result<(), String> {
 		.chars()
 		.collect();
 	let tokens = tokenize::tokenize(&chars)?;
-	let (trees, names) = parse::parse(&tokens)?;
-	println!("\n{:#?}", interpret::interpret(&trees, &names)?);
+	let trees = parse::parse(&tokens)?;
+	println!("\n{:#?}", interpret::interpret(&trees)?);
 	Ok(())
 }
