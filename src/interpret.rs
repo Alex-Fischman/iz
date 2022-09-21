@@ -39,36 +39,36 @@ impl<'a> std::fmt::Display for Value<'a> {
 	}
 }
 
-// use std::collections::HashMap;
-// #[derive(Debug)]
-// struct Context<'a, 'b> {
-// 	last: Option<&'a mut Context<'a, 'b>>,
-// 	vars: HashMap<String, Value<'b>>,
-// }
+use std::collections::HashMap;
+#[derive(Debug)]
+struct Context<'a, 'b> {
+	last: Option<&'a mut Context<'a, 'b>>,
+	vars: HashMap<String, Value<'b>>,
+}
 
-// impl<'a, 'b> Context<'a, 'b> {
-// 	fn set<'c>(&'c mut self, key: &str, value: Value<'b>) {
-// 		fn find<'a, 'b, 'c>(
-// 			context: &'c mut Context<'a, 'b>,
-// 			key: &str,
-// 		) -> Option<&'c mut Context<'a, 'b>> {
-// 			if context.vars.contains_key(key) {
-// 				Some(context)
-// 			} else {
-// 				match &mut context.last {
-// 					Some(last) => find(last, key),
-// 					None => None,
-// 				}
-// 			}
-// 		}
-// 		match find(self, key) {
-// 			Some(context) => context,
-// 			None => self,
-// 		}
-// 		.vars
-// 		.insert(key.to_owned(), value);
-// 	}
-// }
+impl<'a, 'b> Context<'a, 'b> {
+	fn set<'c>(&'c mut self, key: &str, value: Value<'b>) {
+		fn find<'a, 'b, 'c>(
+			context: &'c mut Context<'a, 'b>,
+			key: &str,
+		) -> Option<&'c mut Context<'a, 'b>> {
+			if context.vars.contains_key(key) {
+				Some(context)
+			} else {
+				match &mut context.last {
+					Some(last) => find(last, key),
+					None => None,
+				}
+			}
+		}
+		match find(self, key) {
+			Some(context) => context,
+			None => self,
+		}
+		.vars
+		.insert(key.to_owned(), value);
+	}
+}
 
 pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 	fn interpret<'a>(trees: &[Tree<'a>], stack: &mut Vec<Value<'a>>) -> Result<(), String> {
