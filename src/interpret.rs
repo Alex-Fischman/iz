@@ -88,17 +88,22 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 			}
 		}
 		fn call<'a>(
-			v: Value<'a>,
 			stack: &mut Vec<Value<'a>>,
 			context: &mut Context,
 		) -> Result<(), String> {
-			match v {
+			match pop(stack)? {
 				Value::Block(v) => interpret(&v, stack, context),
 				v => {
 					stack.push(v);
 					Ok(())
 				},
 			}
+		}
+		fn swap(stack: &mut Vec<Value>) -> Result<(), String> {
+			let (b, a) = (pop(stack)?, pop(stack)?);
+			stack.push(b);
+			stack.push(a);
+			Ok(())
 		}
 		for tree in trees {
 			match &tree.data {
@@ -143,24 +148,24 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a >= b)),
 							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
 						},
-						"call" => {
-							let v = pop(stack)?;
-							call(v, stack, context)?;
-						}
+						"call" => call(stack, context)?,
+						"swap" => swap(stack)?,
 						"swap_call" => {
-							let (x, v) = (pop(stack)?, pop(stack)?);
-							stack.push(x);
-							call(v, stack, context)?;
+							swap(stack)?;
+							call(stack, context)?;
 						}
-						"_if_" => match (pop(stack)?, pop(stack)?) {
-							(b, Value::Bool(true)) => {
-								call(b, stack, context)?;
-								let c = pop(stack)?;
-								stack.push(Value::Some(Box::new(c)))
+						"_if_" => {
+							swap(stack)?;
+							match pop(stack)? {
+								Value::Bool(true) => {
+									call(stack, context)?;
+									let c = pop(stack)?;
+									stack.push(Value::Some(Box::new(c)))
+								},
+								Value::Bool(false) => stack.push(Value::None),
+								a => Err(format!("invalid if args: {}, {}", a, pop(stack)?))?,
 							}
-							(_, Value::Bool(false)) => stack.push(Value::None),
-							(b, a) => Err(format!("invalid if args: {}, {}", a, b))?,
-						},
+						}
 						"_else_" => match (pop(stack)?, pop(stack)?) {
 							(_, Value::Some(a)) => stack.push(*a),
 							(b, Value::None) => stack.push(b),
@@ -223,10 +228,14 @@ fn interpret_test() {
 			Value::Int(6)
 		])
 	);
-	let chars: Vec<char> = "{2 mul}@3 {2 * 3} call".chars().collect();
+	let chars: Vec<char> = "{2 mul}@3".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Int(6), Value::Int(6)]));
+	assert_eq!(interpret(&trees), Ok(vec![Value::Int(6)]));
+	let chars: Vec<char> = "{2 * 3} call".chars().collect();
+	let tokens = tokenize(&chars).unwrap();
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Int(6)]));
 	let chars: Vec<char> = "if true 1".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
