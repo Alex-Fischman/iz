@@ -6,7 +6,7 @@ type Operator<'a> = (&'a str, &'a str, usize, usize);
 // Grouped by precedence; highest first
 // (&[name, func, left args, right args], (right assoc))
 pub const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "call_with", 1, 1)], false),
+	(&[("@", "swap_call", 1, 1)], false),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
 	(

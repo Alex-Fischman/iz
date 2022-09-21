@@ -8,15 +8,9 @@ pub enum Value<'a> {
 	Bool(bool),
 	String(String),
 	Group(Vec<Value<'a>>),
-	Block(Block<'a>),
+	Block(Vec<Tree<'a>>),
 	None,
 	Some(Box<Value<'a>>),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Block<'a> {
-	Code(Vec<Tree<'a>>),
-	Lazy(Box<Value<'a>>),
 }
 
 impl<'a> std::fmt::Display for Value<'a> {
@@ -39,14 +33,17 @@ impl<'a> std::fmt::Display for Value<'a> {
 	}
 }
 
-use std::collections::HashMap;
 #[derive(Debug)]
 struct Context<'a, 'b> {
 	last: Option<&'a mut Context<'a, 'b>>,
-	vars: HashMap<String, Value<'b>>,
+	vars: std::collections::HashMap<String, Value<'b>>,
 }
 
 impl<'a, 'b> Context<'a, 'b> {
+	fn new(last: Option<&'a mut Context<'a, 'b>>) -> Context<'a, 'b> {
+		Context { last, vars: std::collections::HashMap::new() }
+	}
+
 	fn set<'c>(&'c mut self, key: &str, value: Value<'b>) {
 		fn find<'a, 'b, 'c>(
 			context: &'c mut Context<'a, 'b>,
@@ -71,7 +68,11 @@ impl<'a, 'b> Context<'a, 'b> {
 }
 
 pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
-	fn interpret<'a>(trees: &[Tree<'a>], stack: &mut Vec<Value<'a>>) -> Result<(), String> {
+	fn interpret<'a>(
+		trees: &[Tree<'a>],
+		stack: &mut Vec<Value<'a>>,
+		context: &mut Context,
+	) -> Result<(), String> {
 		fn pop<'a>(stack: &mut Vec<Value<'a>>) -> Result<Value<'a>, String> {
 			stack.pop().ok_or_else(|| "no value on stack".to_owned())
 		}
@@ -86,25 +87,23 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 				(b, a) => Err(format!("invalid eq args: {}, {}", a, b))?,
 			}
 		}
-		fn call<'a>(b: &Block<'a>, stack: &mut Vec<Value<'a>>) -> Result<(), String> {
-			match b {
-				Block::Code(v) => interpret(v, stack),
-				Block::Lazy(v) => {
-					stack.push(*v.clone());
-					Ok(())
-				}
-			}
-		}
-		fn to_block(v: Value) -> Block {
+		fn call<'a>(
+			v: Value<'a>,
+			stack: &mut Vec<Value<'a>>,
+			context: &mut Context,
+		) -> Result<(), String> {
 			match v {
-				Value::Block(b) => b,
-				v => Block::Lazy(Box::new(v)),
+				Value::Block(v) => interpret(&v, stack, context),
+				v => {
+					stack.push(v);
+					Ok(())
+				},
 			}
 		}
 		for tree in trees {
 			match &tree.data {
 				Parsed::Name(i) => {
-					interpret(&tree.children, stack)?;
+					interpret(&tree.children, stack, context)?;
 					match i.as_str() {
 						"true" => stack.push(Value::Bool(true)),
 						"false" => stack.push(Value::Bool(false)),
@@ -144,20 +143,18 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a >= b)),
 							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
 						},
-						"call" => match pop(stack)? {
-							Value::Block(b) => call(&b, stack)?,
-							v => Err(format!("invalid call arg: {}", v))?,
-						},
-						"call_with" => match (pop(stack)?, pop(stack)?) {
-							(x, Value::Block(b)) => {
-								stack.push(x);
-								call(&b, stack)?;
-							}
-							(u, v) => Err(format!("invalid call_with args: {}, {}", u, v))?,
-						},
+						"call" => {
+							let v = pop(stack)?;
+							call(v, stack, context)?;
+						}
+						"swap_call" => {
+							let (x, v) = (pop(stack)?, pop(stack)?);
+							stack.push(x);
+							call(v, stack, context)?;
+						}
 						"_if_" => match (pop(stack)?, pop(stack)?) {
 							(b, Value::Bool(true)) => {
-								call(&to_block(b), stack)?;
+								call(b, stack, context)?;
 								let c = pop(stack)?;
 								stack.push(Value::Some(Box::new(c)))
 							}
@@ -175,13 +172,13 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
 				Parsed::Number(n) => stack.push(Value::Int(*n)),
-				Parsed::Brackets(Bracket::Round) => interpret(&tree.children, stack)?,
+				Parsed::Brackets(Bracket::Round) => interpret(&tree.children, stack, context)?,
 				Parsed::Brackets(Bracket::Curly) => {
-					stack.push(Value::Block(Block::Code(tree.children.clone())))
+					stack.push(Value::Block(tree.children.clone()))
 				}
 				Parsed::Brackets(Bracket::Square) => {
 					let mut s = vec![];
-					interpret(&tree.children, &mut s)?;
+					interpret(&tree.children, &mut s, context)?;
 					stack.push(Value::Group(s));
 				}
 			}
@@ -189,7 +186,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		Ok(())
 	}
 	let mut stack = vec![];
-	interpret(trees, &mut stack)?;
+	interpret(trees, &mut stack, &mut Context::new(None))?;
 	Ok(stack)
 }
 
