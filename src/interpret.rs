@@ -34,36 +34,22 @@ impl<'a> std::fmt::Display for Value<'a> {
 }
 
 #[derive(Debug)]
-struct Context<'a, 'b> {
-	last: Option<&'a mut Context<'a, 'b>>,
-	vars: std::collections::HashMap<String, Value<'b>>,
-}
+struct Context<'a>(Vec<std::collections::HashMap<String, Value<'a>>>);
 
-impl<'a, 'b> Context<'a, 'b> {
-	fn new(last: Option<&'a mut Context<'a, 'b>>) -> Context<'a, 'b> {
-		Context { last, vars: std::collections::HashMap::new() }
+impl<'a> Context<'a> {
+	fn set(&mut self, key: &str, value: Value<'a>) {
+		match self.0.iter_mut().find(|frame| frame.contains_key(key)) {
+			Some(frame) => frame,
+			None => self.0.last_mut().unwrap(),
+		}
+		.insert(key.to_owned(), value);
 	}
 
-	fn set<'c>(&'c mut self, key: &str, value: Value<'b>) {
-		fn find<'a, 'b, 'c>(
-			context: &'c mut Context<'a, 'b>,
-			key: &str,
-		) -> Option<&'c mut Context<'a, 'b>> {
-			if context.vars.contains_key(key) {
-				Some(context)
-			} else {
-				match &mut context.last {
-					Some(last) => find(last, key),
-					None => None,
-				}
-			}
-		}
-		match find(self, key) {
-			Some(context) => context,
-			None => self,
-		}
-		.vars
-		.insert(key.to_owned(), value);
+	fn get<'c>(&'c self, key: &str) -> Result<&'c Value<'a>, String> {
+		self.0
+			.iter()
+			.find_map(|frame| frame.get(key))
+			.ok_or_else(|| format!("var {} not found", key))
 	}
 }
 
@@ -71,7 +57,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 	fn interpret<'a>(
 		trees: &[Tree<'a>],
 		stack: &mut Vec<Value<'a>>,
-		context: &mut Context,
+		context: &mut Context<'a>,
 	) -> Result<(), String> {
 		fn pop<'a>(stack: &mut Vec<Value<'a>>) -> Result<Value<'a>, String> {
 			stack.pop().ok_or_else(|| "no value on stack".to_owned())
@@ -89,14 +75,19 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		}
 		fn call<'a>(
 			stack: &mut Vec<Value<'a>>,
-			context: &mut Context,
+			context: &mut Context<'a>,
 		) -> Result<(), String> {
 			match pop(stack)? {
-				Value::Block(v) => interpret(&v, stack, context),
+				Value::Block(v) => {
+					context.0.push(std::collections::HashMap::new());
+					let out = interpret(&v, stack, context);
+					context.0.pop();
+					out
+				},
 				v => {
 					stack.push(v);
 					Ok(())
-				},
+				}
 			}
 		}
 		fn swap(stack: &mut Vec<Value>) -> Result<(), String> {
@@ -107,6 +98,16 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		}
 		for tree in trees {
 			match &tree.data {
+				Parsed::Name(i) if i == "assign" => {
+					let key = match tree.children.get(0) {
+						Some(Tree { data: Parsed::Name(key), .. }) => key,
+						Some(v) => Err(format!("invalid var name: {:?}", v))?,
+						None => Err("no var name".to_owned())?,
+					};
+					interpret(&tree.children[1..], stack, context)?;
+					let value = pop(stack)?;
+					context.set(key, value);
+				}
 				Parsed::Name(i) => {
 					interpret(&tree.children, stack, context)?;
 					match i.as_str() {
@@ -161,7 +162,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 									call(stack, context)?;
 									let c = pop(stack)?;
 									stack.push(Value::Some(Box::new(c)))
-								},
+								}
 								Value::Bool(false) => stack.push(Value::None),
 								a => Err(format!("invalid if args: {}, {}", a, pop(stack)?))?,
 							}
@@ -171,8 +172,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							(b, Value::None) => stack.push(b),
 							(b, a) => Err(format!("invalid else args: {}, {}", a, b))?,
 						},
-						"assign" => todo!(),
-						s => Err(format!("unknown symbol {}", s))?,
+						s => stack.push(context.get(s)?.clone()),
 					}
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
@@ -191,7 +191,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		Ok(())
 	}
 	let mut stack = vec![];
-	interpret(trees, &mut stack, &mut Context::new(None))?;
+	interpret(trees, &mut stack, &mut Context(vec![std::collections::HashMap::new()]))?;
 	Ok(stack)
 }
 
@@ -244,4 +244,12 @@ fn interpret_test() {
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
 	assert_eq!(interpret(&trees), Ok(vec![Value::Int(1)]));
+	let chars: Vec<char> = "i = 1 + 2 i".chars().collect();
+	let tokens = tokenize(&chars).unwrap();
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Int(3)]));
+	let chars: Vec<char> = "{i = 1 + 2} call i".chars().collect();
+	let tokens = tokenize(&chars).unwrap();
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Err("var i not found".to_owned()));
 }
