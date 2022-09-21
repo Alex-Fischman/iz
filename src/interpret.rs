@@ -33,26 +33,8 @@ impl<'a> std::fmt::Display for Value<'a> {
 	}
 }
 
-#[derive(Debug)]
-struct Context<'a>(Vec<std::collections::HashMap<String, Value<'a>>>);
-
-impl<'a> Context<'a> {
-	fn set(&mut self, key: &str, value: Value<'a>) {
-		match self.0.iter_mut().find(|frame| frame.contains_key(key)) {
-			Some(frame) => frame,
-			None => self.0.last_mut().unwrap(),
-		}
-		.insert(key.to_owned(), value);
-	}
-
-	fn get<'c>(&'c self, key: &str) -> Result<&'c Value<'a>, String> {
-		self.0
-			.iter()
-			.find_map(|frame| frame.get(key))
-			.ok_or_else(|| format!("var {} not found", key))
-	}
-}
-
+use std::collections::HashMap;
+type Context<'a> = Vec<HashMap<String, Value<'a>>>;
 pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 	fn interpret<'a>(
 		trees: &[Tree<'a>],
@@ -79,11 +61,11 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		) -> Result<(), String> {
 			match pop(stack)? {
 				Value::Block(v) => {
-					context.0.push(std::collections::HashMap::new());
+					context.push(HashMap::new());
 					let out = interpret(&v, stack, context);
-					context.0.pop();
+					context.pop();
 					out
-				},
+				}
 				v => {
 					stack.push(v);
 					Ok(())
@@ -105,8 +87,11 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 						None => Err("no var name".to_owned())?,
 					};
 					interpret(&tree.children[1..], stack, context)?;
-					let value = pop(stack)?;
-					context.set(key, value);
+					match context.iter_mut().find(|frame| frame.contains_key(key)) {
+						Some(frame) => frame,
+						None => context.last_mut().unwrap(),
+					}
+					.insert(key.to_owned(), pop(stack)?);
 				}
 				Parsed::Name(i) => {
 					interpret(&tree.children, stack, context)?;
@@ -172,7 +157,13 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							(b, Value::None) => stack.push(b),
 							(b, a) => Err(format!("invalid else args: {}, {}", a, b))?,
 						},
-						s => stack.push(context.get(s)?.clone()),
+						key => stack.push(
+							context
+								.iter()
+								.find_map(|frame| frame.get(key))
+								.ok_or_else(|| format!("var {} not found", key))?
+								.clone(),
+						),
 					}
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
@@ -191,7 +182,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		Ok(())
 	}
 	let mut stack = vec![];
-	interpret(trees, &mut stack, &mut Context(vec![std::collections::HashMap::new()]))?;
+	interpret(trees, &mut stack, &mut vec![HashMap::new()])?;
 	Ok(stack)
 }
 
