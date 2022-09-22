@@ -119,10 +119,6 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							let (b, a) = (pop(stack)?, pop(stack)?);
 							stack.push(Value::Bool(eq(&a, &b)?));
 						}
-						"ne" => {
-							let (b, a) = (pop(stack)?, pop(stack)?);
-							stack.push(Value::Bool(!eq(&a, &b)?));
-						}
 						"lt" => match (pop(stack)?, pop(stack)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a < b)),
 							(b, a) => Err(format!("invalid lt args: {}, {}", a, b))?,
@@ -130,14 +126,6 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 						"gt" => match (pop(stack)?, pop(stack)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
 							(b, a) => Err(format!("invalid gt args: {}, {}", a, b))?,
-						},
-						"le" => match (pop(stack)?, pop(stack)?) {
-							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a <= b)),
-							(b, a) => Err(format!("invalid le args: {}, {}", a, b))?,
-						},
-						"ge" => match (pop(stack)?, pop(stack)?) {
-							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a >= b)),
-							(b, a) => Err(format!("invalid ge args: {}, {}", a, b))?,
 						},
 						"call" => call(stack, context)?,
 						"swap" => swap(stack)?,
@@ -185,13 +173,18 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		}
 		Ok(())
 	}
-	let prelude = [("@", ["swap", "call"]), ("ne", ["eq", "not"])];
+	let prelude: [(&str, &[&str]); 4] = [
+		("swap_call", &["swap", "call"]),
+		("ne", &["eq", "not"]),
+		("le", &["gt", "not"]),
+		("ge", &["lt", "not"]),
+	];
 	let prelude = prelude.into_iter().map(|(key, idents)| {
 		(
 			key.to_owned(),
 			Value::Block(
 				idents
-					.into_iter()
+					.iter()
 					.map(|name| crate::parse::ident(name, Location(0, 0, &[])))
 					.collect(),
 			),
