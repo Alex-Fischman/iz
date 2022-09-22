@@ -147,6 +147,21 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 							(b, Value::None) => stack.push(b),
 							_ => Err(Error("invalid args".to_owned(), l))?,
 						},
+						"_while_" => {
+							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
+							while {
+								stack.push(a.clone());
+								call(stack, context, l)?;
+								match pop(stack, l)? {
+									Value::Bool(b) => b,
+									_ => Err(Error("invalid args".to_owned(), l))?,
+								}
+							} {
+								stack.push(b.clone());
+								call(stack, context, l)?;
+							}
+						}
+						"print" => print!("{}", pop(stack, l)?),
 						key => {
 							stack.push(
 								context
@@ -209,4 +224,5 @@ fn interpret_test() {
 	assert_eq!(f("i = 1 + 2 i"), Ok(vec![Value::Int(3)]));
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("var not found".to_owned(), Location(17, 1))));
 	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("not@true"), Ok(vec![Value::Bool(false)]));
 }
