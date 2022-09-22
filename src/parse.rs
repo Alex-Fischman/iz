@@ -6,7 +6,8 @@ type Operator<'a> = (&'a str, &'a str, usize, usize);
 // Grouped by precedence; highest first
 // (&[name, func, left args, right args], (right assoc))
 pub const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "swap_call", 1, 1)], false),
+	(&[("@", "@", 1, 1)], false),
+	(&[("!", "not", 0, 1)], true),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
 	(
@@ -40,19 +41,19 @@ pub enum Parsed {
 	Brackets(Bracket),
 }
 
-fn ident<'a>(i: &str, location: Location<'a>) -> Tree<'a> {
+pub fn ident<'a>(i: &str, location: Location<'a>) -> Tree<'a> {
 	Tree { data: Parsed::Name(i.to_owned()), location, children: vec![] }
 }
-fn string(s: String, location: Location) -> Tree {
+pub fn string(s: String, location: Location) -> Tree {
 	Tree { data: Parsed::String(s), location, children: vec![] }
 }
-fn number(n: i64, location: Location) -> Tree {
+pub fn number(n: i64, location: Location) -> Tree {
 	Tree { data: Parsed::Number(n), location, children: vec![] }
 }
-fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
+pub fn brackets<'a>(b: Bracket, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
 	Tree { data: Parsed::Brackets(b), location, children }
 }
-fn operator<'a>(i: &str, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
+pub fn operator<'a>(i: &str, location: Location<'a>, children: Vec<Tree<'a>>) -> Tree<'a> {
 	Tree { data: Parsed::Name(i.to_owned()), location, children }
 }
 

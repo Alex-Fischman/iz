@@ -1,6 +1,7 @@
 use crate::parse::Parsed;
 use crate::parse::Tree;
 use crate::tokenize::Bracket;
+use crate::tokenize::Location;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value<'a> {
@@ -110,6 +111,10 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
 							(b, a) => Err(format!("invalid mul args: {}, {}", a, b))?,
 						},
+						"not" => match pop(stack)? {
+							Value::Bool(b) => stack.push(Value::Bool(!b)),
+							a => Err(format!("invalid not arg: {}", a))?,
+						},
 						"eq" => {
 							let (b, a) = (pop(stack)?, pop(stack)?);
 							stack.push(Value::Bool(eq(&a, &b)?));
@@ -136,10 +141,6 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 						},
 						"call" => call(stack, context)?,
 						"swap" => swap(stack)?,
-						"swap_call" => {
-							swap(stack)?;
-							call(stack, context)?;
-						}
 						"_if_" => {
 							swap(stack)?;
 							match pop(stack)? {
@@ -157,13 +158,16 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 							(b, Value::None) => stack.push(b),
 							(b, a) => Err(format!("invalid else args: {}, {}", a, b))?,
 						},
-						key => stack.push(
-							context
-								.iter()
-								.find_map(|frame| frame.get(key))
-								.ok_or_else(|| format!("var {} not found", key))?
-								.clone(),
-						),
+						key => {
+							stack.push(
+								context
+									.iter()
+									.find_map(|frame| frame.get(key))
+									.ok_or_else(|| format!("var {} not found", key))?
+									.clone(),
+							);
+							call(stack, context)?;
+						}
 					}
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
@@ -181,8 +185,22 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		}
 		Ok(())
 	}
+	let prelude: HashMap<String, Value> = [("@", ["swap", "call"]), ("ne", ["eq", "not"])]
+		.into_iter()
+		.map(|(key, idents)| {
+			(
+				key.to_owned(),
+				Value::Block(
+					idents
+						.into_iter()
+						.map(|name| crate::parse::ident(name, Location(0, 0, &[])))
+						.collect(),
+				),
+			)
+		})
+		.collect();
 	let mut stack = vec![];
-	interpret(trees, &mut stack, &mut vec![HashMap::new()])?;
+	interpret(trees, &mut stack, &mut vec![prelude])?;
 	Ok(stack)
 }
 
@@ -202,6 +220,10 @@ fn interpret_test() {
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
 	assert_eq!(interpret(&trees), Ok(vec![Value::Int(-1)]));
+	let chars: Vec<char> = "1 != 2".chars().collect();
+	let tokens = tokenize(&chars).unwrap();
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Bool(true)]));
 	let chars: Vec<char> = "1 > 2".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
@@ -243,4 +265,8 @@ fn interpret_test() {
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
 	assert_eq!(interpret(&trees), Err("var i not found".to_owned()));
+	let chars: Vec<char> = "!true".chars().collect();
+	let tokens = tokenize(&chars).unwrap();
+	let trees = parse(&tokens).unwrap();
+	assert_eq!(interpret(&trees), Ok(vec![Value::Bool(false)]));
 }
