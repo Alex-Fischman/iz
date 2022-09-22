@@ -52,7 +52,7 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 				(Value::Group(a), Value::Group(b)) => {
 					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b, l)?))
 				}
-				_ => Err(Error("invalid eq args".to_owned(), l))?,
+				_ => Err(Error("invalid _eq_ args".to_owned(), l))?,
 			}
 		}
 		fn call(
@@ -67,10 +67,7 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 					context.pop();
 					out
 				}
-				v => {
-					stack.push(v);
-					Ok(())
-				}
+				_ => Err(Error("invalid _call_ args".to_owned(), l))?,
 			}
 		}
 		fn swap(stack: &mut Vec<Value>, l: Location) -> Result<(), Error> {
@@ -170,7 +167,9 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 									.ok_or_else(|| Error("var not found".to_owned(), l))?
 									.clone(),
 							);
-							call(stack, context, l)?;
+							if let Value::Block(_) = stack.last().unwrap() {
+								call(stack, context, l)?;
+							}
 						}
 					}
 				}
@@ -221,8 +220,8 @@ fn interpret_test() {
 	);
 	assert_eq!(f("{2 mul}@3"), Ok(vec![Value::Int(6)]));
 	assert_eq!(f("{2 * 3} call"), Ok(vec![Value::Int(6)]));
-	assert_eq!(f("if true 1"), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
-	assert_eq!(f("if true 1 else 2"), Ok(vec![Value::Int(1)]));
+	assert_eq!(f("if true {1}"), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
+	assert_eq!(f("if true {1} else {2}"), Ok(vec![Value::Int(1)]));
 	assert_eq!(f("i = 1 + 2 i"), Ok(vec![Value::Int(3)]));
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("var not found".to_owned(), Location(17, 1))));
 	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
