@@ -40,9 +40,4 @@ fn main() {
 	}
 }
 
-const PRELUDE: &str = "
-swap_call = {swap call}
-ne = {eq not}
-le = {gt not}
-ge = {lt not}
-";
+const PRELUDE_PATH: &str = "/home/alex/Programming/iz/examples/prelude.iz";

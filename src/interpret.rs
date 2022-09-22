@@ -1,6 +1,6 @@
 use crate::parse::{parse, Parsed, Tree};
 use crate::tokenize::{tokenize, Bracket};
-use crate::{Error, Location, PRELUDE};
+use crate::{Error, Location, PRELUDE_PATH};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -52,7 +52,7 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 				(Value::Group(a), Value::Group(b)) => {
 					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b, l)?))
 				}
-				_ => Err(Error("invalid args".to_owned(), l))?,
+				_ => Err(Error("invalid eq args".to_owned(), l))?,
 			}
 		}
 		fn call(
@@ -100,36 +100,36 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 					match i.as_str() {
 						"true" => stack.push(Value::Bool(true)),
 						"false" => stack.push(Value::Bool(false)),
-						"add" => match (pop(stack, l)?, pop(stack, l)?) {
+						"_add_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a + b)),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _add_ args".to_owned(), l))?,
 						},
-						"sub" => match (pop(stack, l)?, pop(stack, l)?) {
+						"_sub_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a - b)),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _sub_ args".to_owned(), l))?,
 						},
-						"mul" => match (pop(stack, l)?, pop(stack, l)?) {
+						"_mul_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _mul_ args".to_owned(), l))?,
 						},
-						"not" => match pop(stack, l)? {
+						"_not_" => match pop(stack, l)? {
 							Value::Bool(b) => stack.push(Value::Bool(!b)),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _not_ args".to_owned(), l))?,
 						},
-						"eq" => {
+						"_eq_" => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							stack.push(Value::Bool(eq(&a, &b, l)?));
 						}
-						"lt" => match (pop(stack, l)?, pop(stack, l)?) {
+						"_lt_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a < b)),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _lt_ args".to_owned(), l))?,
 						},
-						"gt" => match (pop(stack, l)?, pop(stack, l)?) {
+						"_gt_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
-						"call" => call(stack, context, l)?,
-						"swap" => swap(stack, l)?,
+						"_call_" => call(stack, context, l)?,
+						"_swap_" => swap(stack, l)?,
 						"_if_" => {
 							swap(stack, l)?;
 							match pop(stack, l)? {
@@ -139,13 +139,13 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 									stack.push(Value::Some(Box::new(c)))
 								}
 								Value::Bool(false) => stack.push(Value::None),
-								_ => Err(Error("invalid args".to_owned(), l))?,
+								_ => Err(Error("invalid _if_ args".to_owned(), l))?,
 							}
 						}
 						"_else_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(_, Value::Some(a)) => stack.push(*a),
 							(b, Value::None) => stack.push(b),
-							_ => Err(Error("invalid args".to_owned(), l))?,
+							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
 						},
 						"_while_" => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
@@ -154,14 +154,14 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 								call(stack, context, l)?;
 								match pop(stack, l)? {
 									Value::Bool(b) => b,
-									_ => Err(Error("invalid args".to_owned(), l))?,
+									_ => Err(Error("invalid _while_ args".to_owned(), l))?,
 								}
 							} {
 								stack.push(b.clone());
 								call(stack, context, l)?;
 							}
 						}
-						"print" => print!("{}", pop(stack, l)?),
+						"_print_" => print!("{}", pop(stack, l)?),
 						key => {
 							stack.push(
 								context
@@ -189,7 +189,10 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 		}
 		Ok(())
 	}
-	let prelude = PRELUDE.chars().collect::<Vec<char>>();
+	let prelude = std::fs::read_to_string(PRELUDE_PATH)
+		.map_err(|_| Error("could not read prelude".to_owned(), Location(0, 0)))?
+		.chars()
+		.collect::<Vec<char>>();
 	let mut stack = vec![];
 	let mut context = vec![HashMap::new()];
 	interpret(&parse(&tokenize(&prelude)?)?, &mut stack, &mut context)?;
@@ -199,12 +202,11 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 
 #[test]
 fn interpret_test() {
-	let f = |s: &str| {
-		interpret(&parse(&tokenize(&s.chars().collect::<Vec<char>>()).unwrap()).unwrap())
-	};
-	assert_eq!(f("true 1 sub"), Err(Error("invalid args".to_owned(), Location(7, 3))));
-	assert_eq!(f("1 sub"), Err(Error("no value on stack".to_owned(), Location(2, 3))));
+	let f = |s: &str| interpret(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
+	assert_eq!(f("true 1 sub"), Err(Error("invalid _sub_ args".to_owned(), Location(21, 5))));
+	assert_eq!(f("1 sub"), Err(Error("no value on stack".to_owned(), Location(21, 5))));
 	assert_eq!(f("1 - 2"), Ok(vec![Value::Int(-1)]));
+	assert_eq!(f("1 - 2 - 3"), Ok(vec![Value::Int(-4)]));
 	assert_eq!(f("1 != 2"), Ok(vec![Value::Bool(true)]));
 	assert_eq!(f("1 > 2"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(

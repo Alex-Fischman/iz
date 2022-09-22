@@ -106,7 +106,7 @@ pub fn parse(tokens: &[Token]) -> Result<Vec<Tree>, Error> {
 #[test]
 fn parse_test() {
 	use crate::tokenize::tokenize;
-	let f = |s: &str| parse(&tokenize(&s.chars().collect::<Vec<char>>()).unwrap());
+	let f = |s: &str| parse(&tokenize(&s.chars().collect::<Vec<char>>())?);
 	assert_eq!(f("{"), Err(Error("missing close bracket".to_owned(), Location(0, 0))));
 	assert_eq!(f(")"), Err(Error("extra close bracket".to_owned(), Location(0, 1))));
 	assert_eq!(f("({)}"), Err(Error("extra close bracket".to_owned(), Location(2, 1))));
