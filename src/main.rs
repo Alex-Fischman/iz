@@ -38,3 +38,10 @@ fn main() -> Result<(), String> {
 		}),
 	}
 }
+
+const PRELUDE: &str = "
+swap_call = {swap call}
+ne = {eq not}
+le = {gt not}
+ge = {lt not}
+";
