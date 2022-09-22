@@ -185,22 +185,20 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		}
 		Ok(())
 	}
-	let prelude: HashMap<String, Value> = [("@", ["swap", "call"]), ("ne", ["eq", "not"])]
-		.into_iter()
-		.map(|(key, idents)| {
-			(
-				key.to_owned(),
-				Value::Block(
-					idents
-						.into_iter()
-						.map(|name| crate::parse::ident(name, Location(0, 0, &[])))
-						.collect(),
-				),
-			)
-		})
-		.collect();
+	let prelude = [("@", ["swap", "call"]), ("ne", ["eq", "not"])];
+	let prelude = prelude.into_iter().map(|(key, idents)| {
+		(
+			key.to_owned(),
+			Value::Block(
+				idents
+					.into_iter()
+					.map(|name| crate::parse::ident(name, Location(0, 0, &[])))
+					.collect(),
+			),
+		)
+	});
 	let mut stack = vec![];
-	interpret(trees, &mut stack, &mut vec![prelude])?;
+	interpret(trees, &mut stack, &mut vec![prelude.collect()])?;
 	Ok(stack)
 }
 
