@@ -200,31 +200,32 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 fn interpret_test() {
 	use crate::parse::parse;
 	use crate::tokenize::tokenize;
-	let chars: Vec<char> = "true 1 sub".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Err(Error("invalid args".to_owned(), Location(7, 3))));
-	let chars: Vec<char> = "1 sub".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Err(Error("no value on stack".to_owned(), Location(2, 3))));
-	let chars: Vec<char> = "1 - 2".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Int(-1)]));
-	let chars: Vec<char> = "1 != 2".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Bool(true)]));
-	let chars: Vec<char> = "1 > 2".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Bool(false)]));
-	let chars: Vec<char> = "1 2 [3 4] 5 6".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
 	assert_eq!(
-		interpret(&trees),
+		interpret(
+			&parse(&tokenize(&"true 1 sub".chars().collect::<Vec<char>>()).unwrap()).unwrap()
+		),
+		Err(Error("invalid args".to_owned(), Location(7, 3)))
+	);
+	assert_eq!(
+		interpret(&parse(&tokenize(&"1 sub".chars().collect::<Vec<char>>()).unwrap()).unwrap()),
+		Err(Error("no value on stack".to_owned(), Location(2, 3)))
+	);
+	assert_eq!(
+		interpret(&parse(&tokenize(&"1 - 2".chars().collect::<Vec<char>>()).unwrap()).unwrap()),
+		Ok(vec![Value::Int(-1)])
+	);
+	assert_eq!(
+		interpret(&parse(&tokenize(&"1 != 2".chars().collect::<Vec<char>>()).unwrap()).unwrap()),
+		Ok(vec![Value::Bool(true)])
+	);
+	assert_eq!(
+		interpret(&parse(&tokenize(&"1 > 2".chars().collect::<Vec<char>>()).unwrap()).unwrap()),
+		Ok(vec![Value::Bool(false)])
+	);
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"1 2 [3 4] 5 6".chars().collect::<Vec<char>>()).unwrap()).unwrap()
+		),
 		Ok(vec![
 			Value::Int(1),
 			Value::Int(2),
@@ -233,32 +234,46 @@ fn interpret_test() {
 			Value::Int(6)
 		])
 	);
-	let chars: Vec<char> = "{2 mul}@3".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Int(6)]));
-	let chars: Vec<char> = "{2 * 3} call".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Int(6)]));
-	let chars: Vec<char> = "if true 1".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
-	let chars: Vec<char> = "if true 1 else 2".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Int(1)]));
-	let chars: Vec<char> = "i = 1 + 2 i".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Int(3)]));
-	let chars: Vec<char> = "{i = 1 + 2} call i".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Err(Error("var not found".to_owned(), Location(17, 1))));
-	let chars: Vec<char> = "!true".chars().collect();
-	let tokens = tokenize(&chars).unwrap();
-	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Ok(vec![Value::Bool(false)]));
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"{2 mul}@3".chars().collect::<Vec<char>>()).unwrap()).unwrap()
+		),
+		Ok(vec![Value::Int(6)])
+	);
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"{2 * 3} call".chars().collect::<Vec<char>>()).unwrap()).unwrap()
+		),
+		Ok(vec![Value::Int(6)])
+	);
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"if true 1".chars().collect::<Vec<char>>()).unwrap()).unwrap()
+		),
+		Ok(vec![Value::Some(Box::new(Value::Int(1)))])
+	);
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"if true 1 else 2".chars().collect::<Vec<char>>()).unwrap())
+				.unwrap()
+		),
+		Ok(vec![Value::Int(1)])
+	);
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"i = 1 + 2 i".chars().collect::<Vec<char>>()).unwrap()).unwrap()
+		),
+		Ok(vec![Value::Int(3)])
+	);
+	assert_eq!(
+		interpret(
+			&parse(&tokenize(&"{i = 1 + 2} call i".chars().collect::<Vec<char>>()).unwrap())
+				.unwrap()
+		),
+		Err(Error("var not found".to_owned(), Location(17, 1)))
+	);
+	assert_eq!(
+		interpret(&parse(&tokenize(&"!true".chars().collect::<Vec<char>>()).unwrap()).unwrap()),
+		Ok(vec![Value::Bool(false)])
+	);
 }

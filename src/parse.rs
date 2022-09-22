@@ -118,14 +118,12 @@ fn parse_test() {
 		parse(&tokenize(&"({)}".chars().collect::<Vec<char>>()).unwrap()),
 		Err(Error("extra close bracket".to_owned(), Location(2, 1)))
 	);
-	let chars: Vec<char> = "{}".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"{}".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![brackets(Bracket::Curly, Location(0, 2), vec![])],
 	);
-	let chars: Vec<char> = "[{   }]".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"[{   }]".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![brackets(
 			Bracket::Square,
 			Location(0, 7),
@@ -140,18 +138,16 @@ fn parse_test() {
 		parse(&tokenize(&"1 =".chars().collect::<Vec<char>>()).unwrap()),
 		Err(Error("not enough operator arguments".to_owned(), Location(2, 1)))
 	);
-	let chars: Vec<char> = "a + b".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"a + b".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![ident(
 			"add",
 			Location(2, 1),
 			vec![ident("a", Location(0, 1), vec![]), ident("b", Location(4, 1), vec![])],
 		)],
 	);
-	let chars: Vec<char> = "a - b * c".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"a - b * c".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![ident(
 			"sub",
 			Location(2, 1),
@@ -165,9 +161,8 @@ fn parse_test() {
 			],
 		)]
 	);
-	let chars: Vec<char> = "a * b * c".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"a * b * c".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![ident(
 			"mul",
 			Location(6, 1),
@@ -181,9 +176,8 @@ fn parse_test() {
 			],
 		)]
 	);
-	let chars: Vec<char> = "a = b = c".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"a = b = c".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![ident(
 			"assign",
 			Location(2, 1),
@@ -197,9 +191,8 @@ fn parse_test() {
 			],
 		)]
 	);
-	let chars: Vec<char> = "[(a) + ({3 * 97})]".chars().collect();
 	assert_eq!(
-		parse(&tokenize(&chars).unwrap()).unwrap(),
+		parse(&tokenize(&"[(a) + ({3 * 97})]".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
 		vec![brackets(
 			Bracket::Square,
 			Location(0, 18),

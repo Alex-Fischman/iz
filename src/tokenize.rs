@@ -112,9 +112,8 @@ fn tokenize_test() {
 		tokenize(&"\"\\a".chars().collect::<Vec<char>>()),
 		Err(Error("missing valid escape character".to_owned(), Location(2, 0)))
 	);
-	let chars = "214s2135**ad_fe2 _-_".chars().collect::<Vec<char>>();
 	assert_eq!(
-		tokenize(&chars).unwrap(),
+		tokenize(&"214s2135**ad_fe2 _-_".chars().collect::<Vec<char>>()).unwrap(),
 		vec![
 			Token::Ident("214s2135".to_owned(), Location(0, 8)),
 			Token::Ident("**".to_owned(), Location(8, 2)),
@@ -124,17 +123,25 @@ fn tokenize_test() {
 			Token::Ident("_".to_owned(), Location(19, 1)),
 		]
 	);
-	let chars = "\"\"".chars().collect::<Vec<char>>();
-	assert_eq!(tokenize(&chars).unwrap(), vec![Token::String("".to_owned(), Location(1, 0))]);
-	let chars = "5_84_39".chars().collect::<Vec<char>>();
-	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Number(58439, Location(0, 7))]);
-	let chars = ")".chars().collect::<Vec<char>>();
-	assert_eq!(tokenize(&chars).unwrap(), vec![Token::Closer(Bracket::Round, Location(0, 1))]);
-	let chars = "a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = 1_000_000 (c = {a})"
-		.chars()
-		.collect::<Vec<char>>();
 	assert_eq!(
-		tokenize(&chars).unwrap(),
+		tokenize(&"\"\"".chars().collect::<Vec<char>>()).unwrap(),
+		vec![Token::String("".to_owned(), Location(1, 0))]
+	);
+	assert_eq!(
+		tokenize(&"5_84_39".chars().collect::<Vec<char>>()).unwrap(),
+		vec![Token::Number(58439, Location(0, 7))]
+	);
+	assert_eq!(
+		tokenize(&")".chars().collect::<Vec<char>>()).unwrap(),
+		vec![Token::Closer(Bracket::Round, Location(0, 1))]
+	);
+	assert_eq!(
+		tokenize(
+			&"a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = 1_000_000 (c = {a})"
+				.chars()
+				.collect::<Vec<char>>()
+		)
+		.unwrap(),
 		vec![
 			Token::Ident("a".to_owned(), Location(0, 1)),
 			Token::Ident("=".to_owned(), Location(2, 1)),
