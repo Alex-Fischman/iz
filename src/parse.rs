@@ -106,49 +106,32 @@ pub fn parse(tokens: &[Token]) -> Result<Vec<Tree>, Error> {
 #[test]
 fn parse_test() {
 	use crate::tokenize::tokenize;
+	let f = |s: &str| parse(&tokenize(&s.chars().collect::<Vec<char>>()).unwrap());
+	assert_eq!(f("{"), Err(Error("missing close bracket".to_owned(), Location(0, 0))));
+	assert_eq!(f(")"), Err(Error("extra close bracket".to_owned(), Location(0, 1))));
+	assert_eq!(f("({)}"), Err(Error("extra close bracket".to_owned(), Location(2, 1))));
+	assert_eq!(f("{}"), Ok(vec![brackets(Bracket::Curly, Location(0, 2), vec![])]),);
 	assert_eq!(
-		parse(&tokenize(&"{".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error("missing close bracket".to_owned(), Location(0, 0)))
-	);
-	assert_eq!(
-		parse(&tokenize(&")".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error("extra close bracket".to_owned(), Location(0, 1)))
-	);
-	assert_eq!(
-		parse(&tokenize(&"({)}".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error("extra close bracket".to_owned(), Location(2, 1)))
-	);
-	assert_eq!(
-		parse(&tokenize(&"{}".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![brackets(Bracket::Curly, Location(0, 2), vec![])],
-	);
-	assert_eq!(
-		parse(&tokenize(&"[{   }]".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![brackets(
+		f("[{   }]"),
+		Ok(vec![brackets(
 			Bracket::Square,
 			Location(0, 7),
 			vec![brackets(Bracket::Curly, Location(1, 5), vec![],)],
-		)]
+		)])
 	);
+	assert_eq!(f("+ 1"), Err(Error("not enough operator arguments".to_owned(), Location(0, 1))));
+	assert_eq!(f("1 ="), Err(Error("not enough operator arguments".to_owned(), Location(2, 1))));
 	assert_eq!(
-		parse(&tokenize(&"+ 1".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error("not enough operator arguments".to_owned(), Location(0, 1)))
-	);
-	assert_eq!(
-		parse(&tokenize(&"1 =".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error("not enough operator arguments".to_owned(), Location(2, 1)))
-	);
-	assert_eq!(
-		parse(&tokenize(&"a + b".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![ident(
+		f("a + b"),
+		Ok(vec![ident(
 			"add",
 			Location(2, 1),
 			vec![ident("a", Location(0, 1), vec![]), ident("b", Location(4, 1), vec![])],
-		)],
+		)]),
 	);
 	assert_eq!(
-		parse(&tokenize(&"a - b * c".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![ident(
+		f("a - b * c"),
+		Ok(vec![ident(
 			"sub",
 			Location(2, 1),
 			vec![
@@ -159,11 +142,11 @@ fn parse_test() {
 					vec![ident("b", Location(4, 1), vec![]), ident("c", Location(8, 1), vec![])],
 				),
 			],
-		)]
+		)])
 	);
 	assert_eq!(
-		parse(&tokenize(&"a * b * c".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![ident(
+		f("a * b * c"),
+		Ok(vec![ident(
 			"mul",
 			Location(6, 1),
 			vec![
@@ -174,11 +157,11 @@ fn parse_test() {
 				),
 				ident("c", Location(8, 1), vec![]),
 			],
-		)]
+		)])
 	);
 	assert_eq!(
-		parse(&tokenize(&"a = b = c".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![ident(
+		f("a = b = c"),
+		Ok(vec![ident(
 			"assign",
 			Location(2, 1),
 			vec![
@@ -189,11 +172,11 @@ fn parse_test() {
 					vec![ident("b", Location(4, 1), vec![]), ident("c", Location(8, 1), vec![])],
 				),
 			],
-		)]
+		)])
 	);
 	assert_eq!(
-		parse(&tokenize(&"[(a) + ({3 * 97})]".chars().collect::<Vec<char>>()).unwrap()).unwrap(),
-		vec![brackets(
+		f("[(a) + ({3 * 97})]"),
+		Ok(vec![brackets(
 			Bracket::Square,
 			Location(0, 18),
 			vec![ident(
@@ -214,12 +197,12 @@ fn parse_test() {
 							vec![ident(
 								"mul",
 								Location(11, 1),
-								vec![number(3, Location(9, 1)), number(97, Location(13, 2)),],
+								vec![number(3, Location(9, 1)), number(97, Location(13, 2))],
 							)],
 						)],
 					),
 				],
 			)],
-		)]
+		)])
 	);
 }

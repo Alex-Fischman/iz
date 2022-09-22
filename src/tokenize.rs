@@ -100,49 +100,33 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 
 #[test]
 fn tokenize_test() {
+	let f = |s: &str| tokenize(&s.chars().collect::<Vec<char>>());
+	assert_eq!(f("\"\"\""), Err(Error("no end quote".to_owned(), Location(3, 0))));
 	assert_eq!(
-		tokenize(&"\"\"\"".chars().collect::<Vec<char>>()),
-		Err(Error("no end quote".to_owned(), Location(3, 0)))
-	);
-	assert_eq!(
-		tokenize(&"\"\\".chars().collect::<Vec<char>>()),
+		f("\"\\"),
 		Err(Error("missing valid escape character".to_owned(), Location(2, 0)))
 	);
 	assert_eq!(
-		tokenize(&"\"\\a".chars().collect::<Vec<char>>()),
+		f("\"\\a"),
 		Err(Error("missing valid escape character".to_owned(), Location(2, 0)))
 	);
 	assert_eq!(
-		tokenize(&"214s2135**ad_fe2 _-_".chars().collect::<Vec<char>>()).unwrap(),
-		vec![
+		f("214s2135**ad_fe2 _-_"),
+		Ok(vec![
 			Token::Ident("214s2135".to_owned(), Location(0, 8)),
 			Token::Ident("**".to_owned(), Location(8, 2)),
 			Token::Ident("ad_fe2".to_owned(), Location(10, 6)),
 			Token::Ident("_".to_owned(), Location(17, 1)),
 			Token::Ident("-".to_owned(), Location(18, 1)),
 			Token::Ident("_".to_owned(), Location(19, 1)),
-		]
+		])
 	);
+	assert_eq!(f("\"\""), Ok(vec![Token::String("".to_owned(), Location(1, 0))]));
+	assert_eq!(f("5_84_39"), Ok(vec![Token::Number(58439, Location(0, 7))]));
+	assert_eq!(f(")"), Ok(vec![Token::Closer(Bracket::Round, Location(0, 1))]));
 	assert_eq!(
-		tokenize(&"\"\"".chars().collect::<Vec<char>>()).unwrap(),
-		vec![Token::String("".to_owned(), Location(1, 0))]
-	);
-	assert_eq!(
-		tokenize(&"5_84_39".chars().collect::<Vec<char>>()).unwrap(),
-		vec![Token::Number(58439, Location(0, 7))]
-	);
-	assert_eq!(
-		tokenize(&")".chars().collect::<Vec<char>>()).unwrap(),
-		vec![Token::Closer(Bracket::Round, Location(0, 1))]
-	);
-	assert_eq!(
-		tokenize(
-			&"a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = 1_000_000 (c = {a})"
-				.chars()
-				.collect::<Vec<char>>()
-		)
-		.unwrap(),
-		vec![
+		f("a = \"text with  s, \ts, \\ns, \\\"s, and \\\\s\"\nb = 1_000_000 (c = {a})"),
+		Ok(vec![
 			Token::Ident("a".to_owned(), Location(0, 1)),
 			Token::Ident("=".to_owned(), Location(2, 1)),
 			Token::String("text with  s, \ts, \ns, \"s, and \\s".to_owned(), Location(5, 35)),
@@ -156,6 +140,6 @@ fn tokenize_test() {
 			Token::Ident("a".to_owned(), Location(62, 1)),
 			Token::Closer(Bracket::Curly, Location(63, 1)),
 			Token::Closer(Bracket::Round, Location(64, 1)),
-		]
+		])
 	);
 }
