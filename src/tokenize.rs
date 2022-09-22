@@ -1,5 +1,4 @@
-use crate::Error;
-use crate::Location;
+use crate::{Error, Location};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bracket {
@@ -39,14 +38,14 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 								Some('"') => s.push('\"'),
 								Some('n') => s.push('\n'),
 								Some('t') => s.push('\t'),
-								_ => Err(Error::new(
-									"missing valid escape character",
+								_ => Err(Error(
+									"missing valid escape character".to_owned(),
 									Location(i, 0),
 								))?,
 							}
 						}
 						Some(c) => s.push(*c),
-						None => Err(Error::new("no end quote", Location(i, 0)))?,
+						None => Err(Error("no end quote".to_owned(), Location(i, 0)))?,
 					}
 					i += 1;
 				}
@@ -71,26 +70,24 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 						search(chars, i, |c: &char| is_splitter(*c) || is_alphanumeric(*c))
 					},
 				);
+				let cs = &chars[l.0..l.0 + l.1];
 				t.push(
-					match chars[l.0..l.0 + l.1].iter().rev().try_fold(
-						(0, 1, false),
-						|(a, b, z), c| match c {
-							'0' => Some((a, b * 10, true)),
-							'1' => Some((a + b, b * 10, true)),
-							'2' => Some((a + b * 2, b * 10, true)),
-							'3' => Some((a + b * 3, b * 10, true)),
-							'4' => Some((a + b * 4, b * 10, true)),
-							'5' => Some((a + b * 5, b * 10, true)),
-							'6' => Some((a + b * 6, b * 10, true)),
-							'7' => Some((a + b * 7, b * 10, true)),
-							'8' => Some((a + b * 8, b * 10, true)),
-							'9' => Some((a + b * 9, b * 10, true)),
-							'_' => Some((a, b, z)),
-							_ => None,
-						},
-					) {
+					match cs.iter().rev().try_fold((0, 1, false), |(a, b, z), c| match c {
+						'0' => Some((a, b * 10, true)),
+						'1' => Some((a + b, b * 10, true)),
+						'2' => Some((a + b * 2, b * 10, true)),
+						'3' => Some((a + b * 3, b * 10, true)),
+						'4' => Some((a + b * 4, b * 10, true)),
+						'5' => Some((a + b * 5, b * 10, true)),
+						'6' => Some((a + b * 6, b * 10, true)),
+						'7' => Some((a + b * 7, b * 10, true)),
+						'8' => Some((a + b * 8, b * 10, true)),
+						'9' => Some((a + b * 9, b * 10, true)),
+						'_' => Some((a, b, z)),
+						_ => None,
+					}) {
 						Some((n, _, z)) if z => Token::Number(n, l),
-						_ => Token::Ident(chars[l.0..l.0 + l.1].iter().collect(), l),
+						_ => Token::Ident(cs.iter().collect(), l),
 					},
 				);
 				i += l.1 - 1;
@@ -105,15 +102,15 @@ pub fn tokenize(chars: &[char]) -> Result<Vec<Token>, Error> {
 fn tokenize_test() {
 	assert_eq!(
 		tokenize(&"\"\"\"".chars().collect::<Vec<char>>()),
-		Err(Error::new("no end quote", Location(3, 0)))
+		Err(Error("no end quote".to_owned(), Location(3, 0)))
 	);
 	assert_eq!(
 		tokenize(&"\"\\".chars().collect::<Vec<char>>()),
-		Err(Error::new("missing valid escape character", Location(2, 0)))
+		Err(Error("missing valid escape character".to_owned(), Location(2, 0)))
 	);
 	assert_eq!(
 		tokenize(&"\"\\a".chars().collect::<Vec<char>>()),
-		Err(Error::new("missing valid escape character", Location(2, 0)))
+		Err(Error("missing valid escape character".to_owned(), Location(2, 0)))
 	);
 	let chars = "214s2135**ad_fe2 _-_".chars().collect::<Vec<char>>();
 	assert_eq!(

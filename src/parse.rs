@@ -1,7 +1,5 @@
-use crate::tokenize::Bracket;
-use crate::tokenize::Token;
-use crate::Error;
-use crate::Location;
+use crate::tokenize::{Bracket, Token};
+use crate::{Error, Location};
 
 type Operator<'a> = (&'a str, &'a str, usize, usize);
 // Grouped by precedence; highest first
@@ -42,8 +40,8 @@ pub enum Parsed {
 	Brackets(Bracket),
 }
 
-pub fn ident(i: &str, location: Location) -> Tree {
-	Tree { data: Parsed::Name(i.to_owned()), location, children: vec![] }
+pub fn ident(i: &str, location: Location, children: Vec<Tree>) -> Tree {
+	Tree { data: Parsed::Name(i.to_owned()), location, children }
 }
 pub fn string(s: String, location: Location) -> Tree {
 	Tree { data: Parsed::String(s), location, children: vec![] }
@@ -54,24 +52,21 @@ pub fn number(n: i64, location: Location) -> Tree {
 pub fn brackets(b: Bracket, location: Location, children: Vec<Tree>) -> Tree {
 	Tree { data: Parsed::Brackets(b), location, children }
 }
-pub fn operator(i: &str, location: Location, children: Vec<Tree>) -> Tree {
-	Tree { data: Parsed::Name(i.to_owned()), location, children }
-}
 
 pub fn parse(tokens: &[Token]) -> Result<Vec<Tree>, Error> {
-	fn parse(
-		tokens: &[Token],
-		i: &mut usize,
-		end: Option<Bracket>,
-	) -> Result<Vec<Tree>, Error> {
+	fn parse(tokens: &[Token], i: &mut usize, end: Option<Bracket>) -> Result<Vec<Tree>, Error> {
 		let mut asts = vec![];
 		loop {
 			asts.push(match (end, tokens.get(*i)) {
-				(Some(_), None) => Err(Error::new("missing close bracket", Location(0, 0)))?,
+				(Some(_), None) => {
+					Err(Error("missing close bracket".to_owned(), Location(0, 0)))?
+				}
 				(Some(end), Some(Token::Closer(b, _))) if *b == end => break,
 				(None, None) => break,
-				(_, Some(Token::Closer(_, l))) => Err(Error::new("extra close bracket", *l))?,
-				(_, Some(Token::Ident(s, l))) => ident(s, *l),
+				(_, Some(Token::Closer(_, l))) => {
+					Err(Error("extra close bracket".to_owned(), *l))?
+				}
+				(_, Some(Token::Ident(s, l))) => ident(s, *l, vec![]),
 				(_, Some(Token::String(s, l))) => string(s.clone(), *l),
 				(_, Some(Token::Number(n, l))) => number(*n, *l),
 				(_, Some(Token::Opener(b, l))) => {
@@ -92,12 +87,12 @@ pub fn parse(tokens: &[Token]) -> Result<Vec<Tree>, Error> {
 					let l = ast.location;
 					if let Some(op) = ops.iter().find(|op| op.0 == i) {
 						if j < op.2 || j + op.3 >= asts.len() {
-							Err(Error::new("not enough operator arguments", l))?
+							Err(Error("not enough operator arguments".to_owned(), l))?
 						}
 						asts.remove(j);
 						let c: Vec<Tree> = asts.drain(j - op.2..j + op.3).collect();
 						j -= op.2;
-						asts.insert(j, operator(op.1, l, c));
+						asts.insert(j, ident(op.1, l, c));
 					}
 				}
 				j = if *right { j.wrapping_sub(1) } else { j + 1 }
@@ -105,8 +100,7 @@ pub fn parse(tokens: &[Token]) -> Result<Vec<Tree>, Error> {
 		}
 		Ok(asts)
 	}
-	let trees = parse(tokens, &mut 0, None)?;
-	Ok(trees)
+	parse(tokens, &mut 0, None)
 }
 
 #[test]
@@ -114,15 +108,15 @@ fn parse_test() {
 	use crate::tokenize::tokenize;
 	assert_eq!(
 		parse(&tokenize(&"{".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error::new("missing close bracket", Location(0, 0)))
+		Err(Error("missing close bracket".to_owned(), Location(0, 0)))
 	);
 	assert_eq!(
 		parse(&tokenize(&")".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error::new("extra close bracket", Location(0, 1)))
+		Err(Error("extra close bracket".to_owned(), Location(0, 1)))
 	);
 	assert_eq!(
 		parse(&tokenize(&"({)}".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error::new("extra close bracket", Location(2, 1)))
+		Err(Error("extra close bracket".to_owned(), Location(2, 1)))
 	);
 	let chars: Vec<char> = "{}".chars().collect();
 	assert_eq!(
@@ -140,33 +134,33 @@ fn parse_test() {
 	);
 	assert_eq!(
 		parse(&tokenize(&"+ 1".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error::new("not enough operator arguments", Location(0, 1)))
+		Err(Error("not enough operator arguments".to_owned(), Location(0, 1)))
 	);
 	assert_eq!(
 		parse(&tokenize(&"1 =".chars().collect::<Vec<char>>()).unwrap()),
-		Err(Error::new("not enough operator arguments", Location(2, 1)))
+		Err(Error("not enough operator arguments".to_owned(), Location(2, 1)))
 	);
 	let chars: Vec<char> = "a + b".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![operator(
+		vec![ident(
 			"add",
 			Location(2, 1),
-			vec![ident("a", Location(0, 1)), ident("b", Location(4, 1))],
+			vec![ident("a", Location(0, 1), vec![]), ident("b", Location(4, 1), vec![])],
 		)],
 	);
 	let chars: Vec<char> = "a - b * c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![operator(
+		vec![ident(
 			"sub",
 			Location(2, 1),
 			vec![
-				ident("a", Location(0, 1)),
-				operator(
+				ident("a", Location(0, 1), vec![]),
+				ident(
 					"mul",
 					Location(6, 1),
-					vec![ident("b", Location(4, 1)), ident("c", Location(8, 1))],
+					vec![ident("b", Location(4, 1), vec![]), ident("c", Location(8, 1), vec![])],
 				),
 			],
 		)]
@@ -174,31 +168,31 @@ fn parse_test() {
 	let chars: Vec<char> = "a * b * c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![operator(
+		vec![ident(
 			"mul",
 			Location(6, 1),
 			vec![
-				operator(
+				ident(
 					"mul",
 					Location(2, 1),
-					vec![ident("a", Location(0, 1)), ident("b", Location(4, 1))],
+					vec![ident("a", Location(0, 1), vec![]), ident("b", Location(4, 1), vec![])],
 				),
-				ident("c", Location(8, 1)),
+				ident("c", Location(8, 1), vec![]),
 			],
 		)]
 	);
 	let chars: Vec<char> = "a = b = c".chars().collect();
 	assert_eq!(
 		parse(&tokenize(&chars).unwrap()).unwrap(),
-		vec![operator(
+		vec![ident(
 			"assign",
 			Location(2, 1),
 			vec![
-				ident("a", Location(0, 1)),
-				operator(
+				ident("a", Location(0, 1), vec![]),
+				ident(
 					"assign",
 					Location(6, 1),
-					vec![ident("b", Location(4, 1)), ident("c", Location(8, 1))],
+					vec![ident("b", Location(4, 1), vec![]), ident("c", Location(8, 1), vec![])],
 				),
 			],
 		)]
@@ -209,18 +203,22 @@ fn parse_test() {
 		vec![brackets(
 			Bracket::Square,
 			Location(0, 18),
-			vec![operator(
+			vec![ident(
 				"add",
 				Location(5, 1),
 				vec![
-					brackets(Bracket::Round, Location(1, 3), vec![ident("a", Location(2, 1))],),
+					brackets(
+						Bracket::Round,
+						Location(1, 3),
+						vec![ident("a", Location(2, 1), vec![])]
+					),
 					brackets(
 						Bracket::Round,
 						Location(7, 10),
 						vec![brackets(
 							Bracket::Curly,
 							Location(8, 8),
-							vec![operator(
+							vec![ident(
 								"mul",
 								Location(11, 1),
 								vec![number(3, Location(9, 1)), number(97, Location(13, 2)),],
