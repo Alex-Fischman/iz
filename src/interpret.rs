@@ -1,20 +1,21 @@
 use crate::parse::Parsed;
 use crate::parse::Tree;
 use crate::tokenize::Bracket;
-use crate::tokenize::Location;
+use crate::Error;
+use crate::Location;
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Value<'a> {
+pub enum Value {
 	Int(i64),
 	Bool(bool),
 	String(String),
-	Group(Vec<Value<'a>>),
-	Block(Vec<Tree<'a>>),
+	Group(Vec<Value>),
+	Block(Vec<Tree>),
+	Some(Box<Value>),
 	None,
-	Some(Box<Value<'a>>),
 }
 
-impl<'a> std::fmt::Display for Value<'a> {
+impl std::fmt::Display for Value {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			Value::Int(i) => write!(f, "{}", i),
@@ -35,32 +36,29 @@ impl<'a> std::fmt::Display for Value<'a> {
 }
 
 use std::collections::HashMap;
-type Context<'a> = Vec<HashMap<String, Value<'a>>>;
-pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
-	fn interpret<'a>(
-		trees: &[Tree<'a>],
-		stack: &mut Vec<Value<'a>>,
-		context: &mut Context<'a>,
-	) -> Result<(), String> {
-		fn pop<'a>(stack: &mut Vec<Value<'a>>) -> Result<Value<'a>, String> {
-			stack.pop().ok_or_else(|| "no value on stack".to_owned())
+type Context = Vec<HashMap<String, Value>>;
+pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
+	fn interpret(
+		trees: &[Tree],
+		stack: &mut Vec<Value>,
+		context: &mut Context,
+	) -> Result<(), Error> {
+		fn pop(stack: &mut Vec<Value>, location: Location) -> Result<Value, Error> {
+			stack.pop().ok_or_else(|| Error::new("no value on stack", location))
 		}
-		fn eq(a: &Value, b: &Value) -> Result<bool, String> {
+		fn eq(a: &Value, b: &Value, l: Location) -> Result<bool, Error> {
 			match (a, b) {
 				(Value::Int(a), Value::Int(b)) => Ok(a == b),
 				(Value::Bool(a), Value::Bool(b)) => Ok(a == b),
 				(Value::String(a), Value::String(b)) => Ok(a == b),
 				(Value::Group(a), Value::Group(b)) => {
-					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b)?))
+					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b, l)?))
 				}
-				(b, a) => Err(format!("invalid eq args: {}, {}", a, b))?,
+				_ => Err(Error::new("invalid eq args", l))?,
 			}
 		}
-		fn call<'a>(
-			stack: &mut Vec<Value<'a>>,
-			context: &mut Context<'a>,
-		) -> Result<(), String> {
-			match pop(stack)? {
+		fn call(stack: &mut Vec<Value>, context: &mut Context, location: Location) -> Result<(), Error> {
+			match pop(stack, location)? {
 				Value::Block(v) => {
 					context.push(HashMap::new());
 					let out = interpret(&v, stack, context);
@@ -73,8 +71,8 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 				}
 			}
 		}
-		fn swap(stack: &mut Vec<Value>) -> Result<(), String> {
-			let (b, a) = (pop(stack)?, pop(stack)?);
+		fn swap(stack: &mut Vec<Value>, location: Location) -> Result<(), Error> {
+			let (b, a) = (pop(stack, location)?, pop(stack, location)?);
 			stack.push(b);
 			stack.push(a);
 			Ok(())
@@ -84,77 +82,77 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 				Parsed::Name(i) if i == "assign" => {
 					let key = match tree.children.get(0) {
 						Some(Tree { data: Parsed::Name(key), .. }) => key,
-						Some(v) => Err(format!("invalid var name: {:?}", v))?,
-						None => Err("no var name".to_owned())?,
+						Some(_) => Err(Error::new("invalid var name", tree.location))?,
+						None => Err(Error::new("no var name", tree.location))?,
 					};
 					interpret(&tree.children[1..], stack, context)?;
 					match context.iter_mut().find(|frame| frame.contains_key(key)) {
 						Some(frame) => frame,
 						None => context.last_mut().unwrap(),
 					}
-					.insert(key.to_owned(), pop(stack)?);
+					.insert(key.to_owned(), pop(stack, tree.location)?);
 				}
 				Parsed::Name(i) => {
 					interpret(&tree.children, stack, context)?;
 					match i.as_str() {
 						"true" => stack.push(Value::Bool(true)),
 						"false" => stack.push(Value::Bool(false)),
-						"add" => match (pop(stack)?, pop(stack)?) {
+						"add" => match (pop(stack, tree.location)?, pop(stack, tree.location)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a + b)),
-							(b, a) => Err(format!("invalid add args: {}, {}", a, b))?,
+							_ => Err(Error::new("invalid add args", tree.location))?,
 						},
-						"sub" => match (pop(stack)?, pop(stack)?) {
+						"sub" => match (pop(stack, tree.location)?, pop(stack, tree.location)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a - b)),
-							(b, a) => Err(format!("invalid sub args: {}, {}", a, b))?,
+							_ => Err(Error::new("invalid sub args", tree.location))?,
 						},
-						"mul" => match (pop(stack)?, pop(stack)?) {
+						"mul" => match (pop(stack, tree.location)?, pop(stack, tree.location)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
-							(b, a) => Err(format!("invalid mul args: {}, {}", a, b))?,
+							_ => Err(Error::new("invalid mul args", tree.location))?,
 						},
-						"not" => match pop(stack)? {
+						"not" => match pop(stack, tree.location)? {
 							Value::Bool(b) => stack.push(Value::Bool(!b)),
-							a => Err(format!("invalid not arg: {}", a))?,
+							_ => Err(Error::new("invalid not args", tree.location))?,
 						},
 						"eq" => {
-							let (b, a) = (pop(stack)?, pop(stack)?);
-							stack.push(Value::Bool(eq(&a, &b)?));
+							let (b, a) = (pop(stack, tree.location)?, pop(stack, tree.location)?);
+							stack.push(Value::Bool(eq(&a, &b, tree.location)?));
 						}
-						"lt" => match (pop(stack)?, pop(stack)?) {
+						"lt" => match (pop(stack, tree.location)?, pop(stack, tree.location)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a < b)),
-							(b, a) => Err(format!("invalid lt args: {}, {}", a, b))?,
+							_ => Err(Error::new("invalid lt args", tree.location))?,
 						},
-						"gt" => match (pop(stack)?, pop(stack)?) {
+						"gt" => match (pop(stack, tree.location)?, pop(stack, tree.location)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
-							(b, a) => Err(format!("invalid gt args: {}, {}", a, b))?,
+							_ => Err(Error::new("invalid gt args", tree.location))?,
 						},
-						"call" => call(stack, context)?,
-						"swap" => swap(stack)?,
+						"call" => call(stack, context, tree.location)?,
+						"swap" => swap(stack, tree.location)?,
 						"_if_" => {
-							swap(stack)?;
-							match pop(stack)? {
+							swap(stack, tree.location)?;
+							match pop(stack, tree.location)? {
 								Value::Bool(true) => {
-									call(stack, context)?;
-									let c = pop(stack)?;
+									call(stack, context, tree.location)?;
+									let c = pop(stack, tree.location)?;
 									stack.push(Value::Some(Box::new(c)))
 								}
 								Value::Bool(false) => stack.push(Value::None),
-								a => Err(format!("invalid if args: {}, {}", a, pop(stack)?))?,
+								_ => Err(Error::new("invalid if args", tree.location))?,
 							}
 						}
-						"_else_" => match (pop(stack)?, pop(stack)?) {
+						"_else_" => match (pop(stack, tree.location)?, pop(stack, tree.location)?) {
 							(_, Value::Some(a)) => stack.push(*a),
 							(b, Value::None) => stack.push(b),
-							(b, a) => Err(format!("invalid else args: {}, {}", a, b))?,
+							_ => Err(Error::new("invalid else args", tree.location))?,
 						},
 						key => {
 							stack.push(
 								context
 									.iter()
 									.find_map(|frame| frame.get(key))
-									.ok_or_else(|| format!("var {} not found", key))?
+									.ok_or_else(|| Error::new("var not found", tree.location))?
 									.clone(),
 							);
-							call(stack, context)?;
+							call(stack, context, tree.location)?;
 						}
 					}
 				}
@@ -183,10 +181,7 @@ pub fn interpret<'a>(trees: &[Tree<'a>]) -> Result<Vec<Value<'a>>, String> {
 		(
 			key.to_owned(),
 			Value::Block(
-				idents
-					.iter()
-					.map(|name| crate::parse::ident(name, Location(0, 0, &[])))
-					.collect(),
+				idents.iter().map(|name| crate::parse::ident(name, Location(0, 0))).collect(),
 			),
 		)
 	});
@@ -202,11 +197,11 @@ fn interpret_test() {
 	let chars: Vec<char> = "true 1 sub".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Err("invalid sub args: true, 1".to_owned()));
+	assert_eq!(interpret(&trees), Err(Error::new("invalid sub args", Location(7, 3))));
 	let chars: Vec<char> = "1 sub".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Err("no value on stack".to_owned()));
+	assert_eq!(interpret(&trees), Err(Error::new("no value on stack", Location(2, 3))));
 	let chars: Vec<char> = "1 - 2".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
@@ -255,7 +250,7 @@ fn interpret_test() {
 	let chars: Vec<char> = "{i = 1 + 2} call i".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
-	assert_eq!(interpret(&trees), Err("var i not found".to_owned()));
+	assert_eq!(interpret(&trees), Err(Error::new("var not found", Location(17, 1))));
 	let chars: Vec<char> = "!true".chars().collect();
 	let tokens = tokenize(&chars).unwrap();
 	let trees = parse(&tokens).unwrap();
