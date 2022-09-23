@@ -233,4 +233,5 @@ fn interpret_test() {
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("var not found".to_owned(), Location(17, 1))));
 	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("not@true"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
 }

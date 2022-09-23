@@ -1,3 +1,8 @@
 ne = {eq not}
 le = {gt not}
 ge = {lt not}
+nop = {}
+dup = {
+	x = nop
+	x x
+}
