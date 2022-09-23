@@ -6,3 +6,4 @@ dup = {
 	x = nop
 	x x
 }
+pop = {x = nop}
