@@ -1,21 +1,4 @@
-add = {_add_}
-sub = {_sub_}
-mul = {_mul_}
-not = {_not_}
-
-call = {_call_}
-swap = {_swap_}
 swap_call = {swap call}
-
-eq = {_eq_}
-lt = {_lt_}
-gt = {_gt_}
 ne = {eq not}
 le = {gt not}
 ge = {lt not}
-
-print = {_print_}
-
-if = {_if_}
-else = {_else_}
-while = {_while_}
