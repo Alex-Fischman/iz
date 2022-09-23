@@ -5,7 +5,7 @@ type Operator<'a> = (&'a str, &'a str, usize, usize);
 // Grouped by precedence; highest first
 // (&[name, func, left args, right args], (right assoc))
 pub const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "swap_call", 1, 1)], false),
+	(&[("@", "@", 1, 1)], false),
 	(&[("!", "not", 0, 1)], true),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
@@ -20,7 +20,7 @@ pub const OPERATORS: &[(&[Operator], bool)] = &[
 		],
 		false,
 	),
-	(&[("=", "assign", 1, 1)], true),
+	(&[("=", "=", 1, 1)], true),
 	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
 	(&[("else", "_else_", 1, 1)], true),
 ];
@@ -162,12 +162,12 @@ fn parse_test() {
 	assert_eq!(
 		f("a = b = c"),
 		Ok(vec![ident(
-			"assign",
+			"=",
 			Location(2, 1),
 			vec![
 				ident("a", Location(0, 1), vec![]),
 				ident(
-					"assign",
+					"=",
 					Location(6, 1),
 					vec![ident("b", Location(4, 1), vec![]), ident("c", Location(8, 1), vec![])],
 				),

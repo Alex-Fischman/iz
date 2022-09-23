@@ -79,7 +79,7 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 		for tree in trees {
 			let l = tree.location;
 			match &tree.data {
-				Parsed::Name(i) if i == "assign" => {
+				Parsed::Name(i) if i == "=" => {
 					let key = match tree.children.get(0) {
 						Some(Tree { data: Parsed::Name(key), .. }) => key,
 						Some(_) => Err(Error("invalid var name".to_owned(), l))?,
@@ -91,6 +91,13 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 						None => context.last_mut().unwrap(),
 					}
 					.insert(key.to_owned(), pop(stack, l)?);
+				}
+				Parsed::Name(i) if i == "@" => {
+					interpret(&tree.children[1..], stack, context)?;
+					interpret(&tree.children[0..1], stack, context)?;
+					if let Some(Value::Block(_)) = stack.last() {
+						call(stack, context, l)?;
+					}
 				}
 				Parsed::Name(i) => {
 					interpret(&tree.children, stack, context)?;
@@ -167,7 +174,7 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 									.ok_or_else(|| Error("var not found".to_owned(), l))?
 									.clone(),
 							);
-							if let Value::Block(_) = stack.last().unwrap() {
+							if let Some(Value::Block(_)) = stack.last() {
 								call(stack, context, l)?;
 							}
 						}
