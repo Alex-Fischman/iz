@@ -52,6 +52,10 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 				(Value::Group(a), Value::Group(b)) => {
 					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b, l)?))
 				}
+				(Value::Block(_a), Value::Block(_b)) => Ok(false),
+				(Value::Some(a), Value::Some(b)) => eq(a, b, l),
+				(Value::Some(_), Value::None) | (Value::None, Value::Some(_)) => Ok(false),
+				(Value::None, Value::None) => Ok(true),
 				_ => Err(Error("invalid _eq_ args".to_owned(), l))?,
 			}
 		}
