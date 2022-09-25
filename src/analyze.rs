@@ -2,7 +2,7 @@ use crate::parse::{parse, Parsed, Tree as ParseTree};
 use crate::tokenize::{tokenize, Bracket};
 use crate::{Error, Location, PRELUDE_PATH};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Type {
 	Int,
 	Bool,
@@ -12,21 +12,7 @@ pub enum Type {
 	Option(Box<Type>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Tree {
-	pub io: Io,
-	pub data: Parsed,
-	pub location: Location,
-	pub children: Vec<Tree>,
-}
-
-impl Tree {
-	fn new(tree: &ParseTree, io: Io, children: Vec<Tree>) -> Tree {
-		Tree { io, data: tree.data.clone(), location: tree.location, children }
-	}
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Io {
 	pub inputs: Vec<Type>,
 	pub outputs: Vec<Type>,
@@ -71,6 +57,20 @@ impl Io {
 		self.inputs.extend(c.iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 		Ok(())
+	}
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tree {
+	pub io: Io,
+	pub data: Parsed,
+	pub location: Location,
+	pub children: Vec<Tree>,
+}
+
+impl Tree {
+	fn new(tree: &ParseTree, io: Io, children: Vec<Tree>) -> Tree {
+		Tree { io, data: tree.data.clone(), location: tree.location, children }
 	}
 }
 

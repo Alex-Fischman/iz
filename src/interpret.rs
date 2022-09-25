@@ -35,7 +35,7 @@ impl std::fmt::Display for Value {
 }
 
 use std::collections::HashMap;
-type Context = Vec<HashMap<String, Value>>;
+type Context = Vec<HashMap<(String, Type), Value>>;
 pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 	fn interpret(
 		trees: &[Tree],
@@ -91,11 +91,15 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 						None => Err(Error("no var name".to_owned(), l))?,
 					};
 					interpret(&tree.children[1..], stack, context)?;
-					match context.iter_mut().find(|frame| frame.contains_key(key)) {
+					let t = tree.io.inputs.last().unwrap();
+					let frame = match context
+						.iter_mut()
+						.find(|frame| frame.contains_key(&(key.clone(), t.clone())))
+					{
 						Some(frame) => frame,
 						None => context.last_mut().unwrap(),
-					}
-					.insert(key.to_owned(), pop(stack, l)?);
+					};
+					frame.insert((key.to_owned(), t.clone()), pop(stack, l)?);
 				}
 				Parsed::Name(i) if i == "@" => {
 					interpret(&tree.children[1..], stack, context)?;
@@ -177,7 +181,12 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 						(key, _, _) => stack.push(
 							context
 								.iter()
-								.find_map(|frame| frame.get(key))
+								.find_map(|frame| {
+									frame.get(&(
+										key.to_owned(),
+										tree.io.outputs.last().unwrap().clone(),
+									))
+								})
 								.ok_or_else(|| Error("var not found".to_owned(), l))?
 								.clone(),
 						),
