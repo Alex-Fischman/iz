@@ -1,4 +1,5 @@
-use crate::parse::{parse, Parsed, Tree};
+use crate::analyze::{analyze, Tree};
+use crate::parse::{parse, Parsed};
 use crate::tokenize::{tokenize, Bracket};
 use crate::{Error, Location, PRELUDE_PATH};
 
@@ -205,14 +206,15 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 		.collect::<Vec<char>>();
 	let mut stack = vec![];
 	let mut context = vec![HashMap::new()];
-	interpret(&parse(&tokenize(&prelude)?)?, &mut stack, &mut context)?;
+	interpret(&analyze(&parse(&tokenize(&prelude)?)?)?, &mut stack, &mut context)?;
 	interpret(trees, &mut stack, &mut context)?;
 	Ok(stack)
 }
 
 #[test]
 fn interpret_test() {
-	let f = |s: &str| interpret(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
+	let f =
+		|s: &str| interpret(&analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?)?);
 	assert_eq!(f("true 1 sub"), Err(Error("invalid _sub_ args".to_owned(), Location(7, 3))));
 	assert_eq!(f("1 sub"), Err(Error("no value on stack".to_owned(), Location(2, 3))));
 	assert_eq!(f("1 - 2"), Ok(vec![Value::Int(-1)]));

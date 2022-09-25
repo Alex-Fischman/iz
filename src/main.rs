@@ -1,3 +1,4 @@
+mod analyze;
 mod interpret;
 mod parse;
 mod tokenize;
@@ -18,6 +19,7 @@ fn main() {
 		match (|| {
 			let tokens = tokenize::tokenize(&chars)?;
 			let trees = parse::parse(&tokens)?;
+			let trees = analyze::analyze(&trees)?;
 			interpret::interpret(&trees)
 		})() {
 			Ok(values) => Ok(values),
