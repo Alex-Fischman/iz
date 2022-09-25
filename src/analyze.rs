@@ -150,16 +150,14 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 							vec![],
 						),
 						"print" => Io::new(vec![last()?], vec![]),
-						key => {
-							Io::new(
-								vec![],
-								vec![context
-									.iter()
-									.find_map(|frame| frame.get(key))
-									.ok_or_else(|| Error("var not found".to_owned(), l))?
-									.clone()],
-							)
-						}
+						key => Io::new(
+							vec![],
+							vec![context
+								.iter()
+								.find_map(|frame| frame.get(key))
+								.ok_or_else(|| Error("var not found".to_owned(), l))?
+								.clone()],
+						),
 					};
 				}
 				Parsed::Number(_) => {
