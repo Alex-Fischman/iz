@@ -28,8 +28,8 @@ impl Tree {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Io {
-	inputs: Vec<Type>,
-	outputs: Vec<Type>,
+	pub inputs: Vec<Type>,
+	pub outputs: Vec<Type>,
 }
 
 impl Io {

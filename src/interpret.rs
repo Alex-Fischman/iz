@@ -1,4 +1,4 @@
-use crate::analyze::{analyze, Tree};
+use crate::analyze::{analyze, Tree, Type};
 use crate::parse::{parse, Parsed};
 use crate::tokenize::{tokenize, Bracket};
 use crate::{Error, Location, PRELUDE_PATH};
@@ -100,45 +100,43 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 				Parsed::Name(i) if i == "@" => {
 					interpret(&tree.children[1..], stack, context)?;
 					interpret(&tree.children[0..1], stack, context)?;
-					if let Some(Value::Block(_)) = stack.last() {
-						call(stack, context, l)?;
-					}
 				}
 				Parsed::Name(i) => {
 					interpret(&tree.children, stack, context)?;
-					match i.as_str() {
-						"true" => stack.push(Value::Bool(true)),
-						"false" => stack.push(Value::Bool(false)),
-						"add" => match (pop(stack, l)?, pop(stack, l)?) {
+					use Type::*;
+					match (i.as_str(), tree.io.inputs.as_slice(), tree.io.outputs.as_slice()) {
+						("true", [], [Bool]) => stack.push(Value::Bool(true)),
+						("false", [], [Bool]) => stack.push(Value::Bool(false)),
+						("add", [Int, Int], [Int]) => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a + b)),
 							_ => Err(Error("invalid _add_ args".to_owned(), l))?,
 						},
-						"sub" => match (pop(stack, l)?, pop(stack, l)?) {
+						("sub", [Int, Int], [Int]) => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a - b)),
 							_ => Err(Error("invalid _sub_ args".to_owned(), l))?,
 						},
-						"mul" => match (pop(stack, l)?, pop(stack, l)?) {
+						("mul", [Int, Int], [Int]) => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
 							_ => Err(Error("invalid _mul_ args".to_owned(), l))?,
 						},
-						"not" => match pop(stack, l)? {
+						("not", [Bool], [Bool]) => match pop(stack, l)? {
 							Value::Bool(b) => stack.push(Value::Bool(!b)),
 							_ => Err(Error("invalid _not_ args".to_owned(), l))?,
 						},
-						"eq" => {
+						("eq", [_, _], [Bool]) => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							stack.push(Value::Bool(eq(&a, &b, l)?));
 						}
-						"lt" => match (pop(stack, l)?, pop(stack, l)?) {
+						("lt", [Int, Int], [Bool]) => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a < b)),
 							_ => Err(Error("invalid _lt_ args".to_owned(), l))?,
 						},
-						"gt" => match (pop(stack, l)?, pop(stack, l)?) {
+						("gt", [Int, Int], [Bool]) => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
-						"call" => call(stack, context, l)?,
-						"_if_" => {
+						("call", _, _) => call(stack, context, l)?,
+						("_if_", [Bool, a], [Option(b)]) if *a == **b => {
 							swap(stack, l)?;
 							match pop(stack, l)? {
 								Value::Bool(true) => {
@@ -150,12 +148,18 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 								_ => Err(Error("invalid _if_ args".to_owned(), l))?,
 							}
 						}
-						"_else_" => match (pop(stack, l)?, pop(stack, l)?) {
-							(_, Value::Some(a)) => stack.push(*a),
-							(b, Value::None) => stack.push(b),
-							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
-						},
-						"_while_" => {
+						("_else_", [Option(a), b], [c]) if **a == *b && b == c => {
+							match (pop(stack, l)?, pop(stack, l)?) {
+								(_, Value::Some(a)) => stack.push(*a),
+								(b, Value::None) => stack.push(b),
+								_ => Err(Error("invalid _else_ args".to_owned(), l))?,
+							}
+						}
+						("_while_", [Block(a), Block(b)], [])
+							if a.inputs.is_empty()
+								&& a.outputs == vec![Bool] && b.inputs.is_empty()
+								&& b.outputs.is_empty() =>
+						{
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							while {
 								stack.push(a.clone());
@@ -169,19 +173,14 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 								call(stack, context, l)?;
 							}
 						}
-						"print" => print!("{}", pop(stack, l)?),
-						key => {
-							stack.push(
-								context
-									.iter()
-									.find_map(|frame| frame.get(key))
-									.ok_or_else(|| Error("var not found".to_owned(), l))?
-									.clone(),
-							);
-							// if let Some(Value::Block(_)) = stack.last() {
-							// 	call(stack, context, l)?;
-							// }
-						}
+						("print", _, []) => print!("{}", pop(stack, l)?),
+						(key, _, _) => stack.push(
+							context
+								.iter()
+								.find_map(|frame| frame.get(key))
+								.ok_or_else(|| Error("var not found".to_owned(), l))?
+								.clone(),
+						),
 					}
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
@@ -235,7 +234,7 @@ fn interpret_test() {
 			Value::Int(6)
 		])
 	);
-	assert_eq!(f("{2 mul}@3"), Ok(vec![Value::Int(6)]));
+	assert_eq!(f("(2 mul)@3"), Ok(vec![Value::Int(6)]));
 	assert_eq!(f("{2 * 3} call"), Ok(vec![Value::Int(6)]));
 	assert_eq!(f("if true {1}"), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
 	assert_eq!(f("if true {1} else {2}"), Ok(vec![Value::Int(1)]));
