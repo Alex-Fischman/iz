@@ -75,7 +75,7 @@ impl Tree {
 }
 
 use std::collections::HashMap;
-type Context = Vec<HashMap<String, Type>>;
+type Context = Vec<HashMap<String, Vec<Type>>>;
 pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 	fn analyze(
 		trees: &[ParseTree],
@@ -97,11 +97,12 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 						children = vec![a, b];
 						let last = io.last().map_err(|s| Error(s, l))?;
 						t = Io::new(vec![last.clone()], vec![]);
-						match context.iter_mut().find(|frame| frame.contains_key(key)) {
-							Some(frame) => frame,
-							None => context.last_mut().unwrap(),
-						}
-						.insert(key.to_owned(), last.clone());
+						let frame =
+							match context.iter_mut().find(|frame| frame.contains_key(key)) {
+								Some(frame) => frame,
+								None => context.last_mut().unwrap(),
+							};
+						frame.entry(key.to_owned()).or_insert(vec![]).push(last.clone());
 					}
 					s => {
 						return Err(Error(format!("expected name and value, found: {:?}", s), l))
@@ -152,11 +153,15 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 						"print" => Io::new(vec![last()?], vec![]),
 						key => Io::new(
 							vec![],
-							vec![context
+							vec![match context
 								.iter()
 								.find_map(|frame| frame.get(key))
 								.ok_or_else(|| Error("var not found".to_owned(), l))?
-								.clone()],
+								.as_slice()
+							{
+								[t] => t.clone(),
+								_ => todo!(),
+							}],
 						),
 					};
 				}
