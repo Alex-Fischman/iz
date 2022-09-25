@@ -7,3 +7,5 @@ dup = {
 	x x
 }
 pop = {x = nop}
+
+# todo: define swap the same way as dup

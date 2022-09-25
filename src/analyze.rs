@@ -8,180 +8,195 @@ pub enum Type {
 	Bool,
 	String,
 	Group(Vec<Type>),
-	Block(Vec<Type>, Vec<Type>),
+	Block(Io),
 	Option(Box<Type>),
-}
-
-fn eq(a: &Type, b: &Type) -> Result<(), String> {
-	match (a, b) {
-		(Type::Int, Type::Int)
-		| (Type::Bool, Type::Bool)
-		| (Type::String, Type::String)
-		| (Type::Block(..), Type::Block(..)) => Ok(()),
-		(Type::Group(a), Type::Group(b)) => {
-			a.iter().zip(b).try_fold((), |_, (a, b)| eq(a, b))
-		}
-		(Type::Option(a), Type::Option(b)) => eq(a, b),
-		(a, b) => Err(format!("types aren't equal: {:?}, {:?}", a, b)),
-	}
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tree {
-	pub inputs: Vec<Type>,
-	pub outputs: Vec<Type>,
+	pub io: Io,
 	pub data: Parsed,
 	pub location: Location,
 	pub children: Vec<Tree>,
 }
 
 impl Tree {
-	fn new(
-		tree: &ParseTree,
-		inputs: Vec<Type>,
-		outputs: Vec<Type>,
-		children: Vec<Tree>,
-	) -> Tree {
-		Tree { inputs, outputs, data: tree.data.clone(), location: tree.location, children }
+	fn new(tree: &ParseTree, io: Io, children: Vec<Tree>) -> Tree {
+		Tree { io, data: tree.data.clone(), location: tree.location, children }
+	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Io {
+	inputs: Vec<Type>,
+	outputs: Vec<Type>,
+}
+
+impl Io {
+	fn new(inputs: Vec<Type>, outputs: Vec<Type>) -> Io {
+		Io { inputs, outputs }
+	}
+
+	fn last(&self) -> Result<&Type, String> {
+		self.outputs.last().ok_or_else(|| "no value on stack".to_owned())
+	}
+
+	fn combine(&mut self, other: &Io) -> Result<(), String> {
+		fn eq(a: &Type, b: &Type) -> Result<(), String> {
+			match (a, b) {
+				(Type::Int, Type::Int)
+				| (Type::Bool, Type::Bool)
+				| (Type::String, Type::String) => Ok(()),
+				(Type::Group(c), Type::Group(d)) if c.len() == d.len() => {
+					c.iter().zip(d).try_fold((), |_, (e, f)| eq(e, f))
+				}
+				(Type::Block(c), Type::Block(d))
+					if c.inputs.len() == d.inputs.len()
+						&& c.outputs.len() == d.outputs.len() =>
+				{
+					c.inputs.iter().zip(&d.inputs).try_fold((), |_, (e, f)| eq(e, f))?;
+					c.outputs.iter().zip(&d.outputs).try_fold((), |_, (e, f)| eq(e, f))?;
+					Ok(())
+				}
+				(Type::Option(c), Type::Option(d)) => eq(c, d),
+				(a, b) => Err(format!("types aren't equal: {:?}, {:?}", a, b)),
+			}
+		}
+		if other.inputs.len() <= self.outputs.len() {
+			let a = self.outputs.drain(self.outputs.len() - other.inputs.len()..);
+			let b = &other.inputs;
+			for (a, b) in a.zip(b) {
+				eq(&a, b)?
+			}
+		} else {
+			let b = &other.inputs[other.inputs.len() - self.outputs.len()..];
+			let a = self.outputs.drain(..);
+			for (a, b) in a.zip(b) {
+				eq(&a, b)?
+			}
+			let c = &other.inputs[..other.inputs.len() - self.outputs.len()];
+			self.inputs.extend(c.iter().cloned());
+		}
+		self.outputs.extend(other.outputs.iter().cloned());
+		Ok(())
 	}
 }
 
 use std::collections::HashMap;
-type Context = Vec<HashMap<String, (Vec<Type>, Vec<Type>)>>;
+type Context = Vec<HashMap<String, Type>>;
 pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 	fn analyze(
 		trees: &[ParseTree],
-		stack: &mut Vec<Type>,
+		io: &mut Io,
 		context: &mut Context,
 	) -> Result<Vec<Tree>, Error> {
-		fn last(stack: &mut [Type], l: Location) -> Result<&Type, Error> {
-			stack.last().ok_or_else(|| Error("no type on stack".to_owned(), l))
-		}
-		fn pop(stack: &mut Vec<Type>, l: Location) -> Result<Type, Error> {
-			stack.pop().ok_or_else(|| Error("no type on stack".to_owned(), l))
-		}
 		let mut out = vec![];
 		for tree in trees {
 			let l = tree.location;
-			out.push(match &tree.data {
-				Parsed::Name(i) if i == "=" => {
-					let key = match tree.children.get(0) {
-						Some(ParseTree { data: Parsed::Name(key), .. }) => key,
-						Some(_) => Err(Error("invalid var name".to_owned(), l))?,
-						None => Err(Error("no var name".to_owned(), l))?,
-					};
-					let mut rest = analyze(&tree.children[1..], stack, context)?;
-					let io = (vec![pop(stack, l)?], vec![]);
-					match context.iter_mut().find(|frame| frame.contains_key(key)) {
-						Some(frame) => frame,
-						None => context.last_mut().unwrap(),
+			let children;
+			let t;
+			match &tree.data {
+				Parsed::Name(i) if i == "=" => match tree.children.as_slice() {
+					s @ [a @ ParseTree { data: Parsed::Name(key), children: cs, .. }, _]
+						if cs.is_empty() =>
+					{
+						let a = Tree::new(a, Io::new(vec![], vec![]), vec![]);
+						let b = analyze(&s[1..], io, context)?.remove(0);
+						children = vec![a, b];
+						let last = io.last().map_err(|s| Error(s, l))?;
+						t = Io::new(vec![last.clone()], vec![]);
+						match context.iter_mut().find(|frame| frame.contains_key(key)) {
+							Some(frame) => frame,
+							None => context.last_mut().unwrap(),
+						}
+						.insert(key.to_owned(), last.clone());
 					}
-					.insert(key.to_owned(), io.clone());
-					rest.insert(0, Tree::new(&tree.children[0], vec![], vec![], vec![]));
-					Tree::new(tree, io.0, io.1, rest)
+					s => {
+						return Err(Error(format!("expected name and value, found: {:?}", s), l))
+					}
+				},
+				Parsed::Name(i) if i == "@" => {
+					let mut a = Io::new(vec![], vec![]);
+					let mut xs = analyze(&tree.children[1..], &mut a, context)?;
+					let x = analyze(&tree.children[0..1], &mut a, context)?.remove(0);
+					xs.insert(0, x);
+					children = xs;
+					match a.outputs.pop() {
+						Some(Type::Block(io)) => a.combine(&io).map_err(|s| Error(s, l))?,
+						Some(t) => a.outputs.push(t),
+						None => {}
+					}
+					t = a;
 				}
 				Parsed::Name(i) => {
-					let children = analyze(&tree.children, stack, context)?;
-					let (inputs, outputs) = match i.as_str() {
-						"@" => match stack.as_slice() {
-							[.., Type::Block(i, o), _] if i.len() == 1 => (
-								vec![Type::Block(i.clone(), o.clone()), i[0].clone()],
-								o.clone(),
-							),
-							[.., f, x] => {
-								Err(Error(format!("invalid @ types: {:?}, {:?}", f, x), l))?
-							}
-							_ => Err(Error("no type on stack".to_owned(), l))?,
-						},
-						"true" | "false" => (vec![], vec![Type::Bool]),
-						"add" | "sub" | "mul" => (vec![Type::Int, Type::Int], vec![Type::Int]),
-						"not" => (vec![Type::Bool], vec![Type::Bool]),
-						"eq" => (
-							vec![last(stack, l)?.clone(), last(stack, l)?.clone()],
-							vec![Type::Bool],
+					children = analyze(&tree.children, io, context)?;
+					let last = || io.last().cloned().map_err(|s| Error(s, l));
+					t = match i.as_str() {
+						"true" | "false" => Io::new(vec![], vec![Type::Bool]),
+						"add" | "sub" | "mul" => {
+							Io::new(vec![Type::Int, Type::Int], vec![Type::Int])
+						}
+						"not" => Io::new(vec![Type::Bool], vec![Type::Bool]),
+						"eq" => Io::new(vec![last()?, last()?], vec![Type::Bool]),
+						"lt" | "gt" => Io::new(vec![Type::Int, Type::Int], vec![Type::Bool]),
+						"call" => todo!(),
+						"swap" => todo!(),
+						"_if_" => Io::new(
+							vec![Type::Bool, last()?],
+							vec![Type::Option(Box::new(last()?))],
 						),
-						"lt" | "gt" => (vec![Type::Int, Type::Int], vec![Type::Bool]),
-						"call" => match last(stack, l)? {
-							Type::Block(i, o) => {
-								let mut io = (i.clone(), o.clone());
-								io.0.push(Type::Block(i.clone(), o.clone()));
-								io
-							}
-							t => Err(Error(format!("expected block, found {:?}", t), l))?,
-						},
-						"swap" => match stack.as_slice() {
-							[.., a, b] => {
-								(vec![a.clone(), b.clone()], vec![b.clone(), a.clone()])
-							}
-							_ => Err(Error("no type on stack".to_owned(), l))?,
-						},
-						"_if_" => (
-							vec![Type::Bool, last(stack, l)?.clone()],
-							vec![Type::Option(Box::new(last(stack, l)?.clone()))],
+						"_else_" => Io::new(
+							vec![Type::Option(Box::new(last()?)), last()?],
+							vec![last()?],
 						),
-						"_else_" => (
+						"_while_" => Io::new(
 							vec![
-								Type::Option(Box::new(last(stack, l)?.clone())),
-								last(stack, l)?.clone(),
-							],
-							vec![last(stack, l)?.clone()],
-						),
-						"_while_" => (
-							vec![
-								Type::Block(vec![], vec![Type::Bool]),
-								Type::Block(vec![], vec![]),
+								Type::Block(Io::new(vec![], vec![Type::Bool])),
+								Type::Block(Io::new(vec![], vec![])),
 							],
 							vec![],
 						),
-						"print" => (vec![last(stack, l)?.clone()], vec![]),
+						"print" => Io::new(vec![last()?], vec![]),
 						key => {
-							let t = context
-								.iter()
-								.find_map(|frame| frame.get(key))
-								.ok_or_else(|| Error(format!("var {} not found", key), l))?;
-							match t.1.get(0) {
-								Some(Type::Block(i, o)) if t.0.is_empty() && t.1.len() == 1 => {
-									(i.clone(), o.clone())
+							let mut a = Io::new(
+								vec![],
+								vec![context
+									.iter()
+									.find_map(|frame| frame.get(key))
+									.ok_or_else(|| Error("var not found".to_owned(), l))?
+									.clone()],
+							);
+							match a.outputs.pop() {
+								Some(Type::Block(io)) => {
+									a.combine(&io).map_err(|s| Error(s, l))?
 								}
-								_ => t.clone(),
+								Some(t) => a.outputs.push(t),
+								None => {}
 							}
+							a
 						}
 					};
-					for (a, b) in inputs.iter().zip(stack.drain(stack.len() - inputs.len()..)) {
-						eq(a, &b).map_err(|s| Error(s, l))?
-					}
-					stack.extend(outputs.clone());
-					Tree::new(tree, inputs, outputs, children)
-				}
-				Parsed::String(_) => {
-					stack.push(Type::String);
-					Tree::new(tree, vec![], vec![Type::String], vec![])
 				}
 				Parsed::Number(_) => {
-					stack.push(Type::Int);
-					Tree::new(tree, vec![], vec![Type::Int], vec![])
+					children = analyze(&tree.children, io, context)?;
+					t = Io::new(vec![], vec![Type::Int]);
 				}
-				Parsed::Brackets(Bracket::Round) => {
-					let mut s = vec![];
-					let children = analyze(&tree.children, &mut s, context)?;
-					stack.extend(s.clone());
-					Tree::new(tree, vec![], s, children)
+				Parsed::String(_) => {
+					children = analyze(&tree.children, io, context)?;
+					t = Io::new(vec![], vec![Type::String]);
 				}
-				Parsed::Brackets(Bracket::Curly) => {
-					let mut s = stack.clone();
-					let mut c = context.clone();
-					c.push(HashMap::new());
-					let _children = analyze(&tree.children, &mut s, &mut c)?;
-					c.pop();
-					todo!("accumulate bracketed types and block");
+				Parsed::Brackets(b) => {
+					let mut a = Io::new(vec![], vec![]);
+					children = analyze(&tree.children, &mut a, context)?;
+					t = match b {
+						Bracket::Round => a,
+						Bracket::Curly => Io::new(vec![], vec![Type::Block(a)]),
+						Bracket::Square => Io::new(a.inputs, vec![Type::Group(a.outputs)]),
+					};
 				}
-				Parsed::Brackets(Bracket::Square) => {
-					let mut s = vec![];
-					let children = analyze(&tree.children, &mut s, context)?;
-					stack.push(Type::Group(s.clone()));
-					Tree::new(tree, vec![], vec![Type::Group(s)], children)
-				}
-			});
+			}
+			io.combine(&t).map_err(|s| Error(s, l))?;
+			out.push(Tree::new(tree, t, children));
 		}
 		Ok(out)
 	}
@@ -189,10 +204,15 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 		.map_err(|_| Error("could not read prelude".to_owned(), Location(0, 0)))?
 		.chars()
 		.collect::<Vec<char>>();
-	let mut stack = vec![];
+	let mut io = Io::new(vec![], vec![]);
 	let mut context = vec![HashMap::new()];
-	analyze(&parse(&tokenize(&prelude)?)?, &mut stack, &mut context)?;
-	analyze(trees, &mut stack, &mut context)
+	analyze(&parse(&tokenize(&prelude)?)?, &mut io, &mut context)?;
+	let out = analyze(trees, &mut io, &mut context)?;
+	if io.inputs.is_empty() {
+		Ok(out)
+	} else {
+		Err(Error(format!("program expected inputs: {:?}", io.inputs), Location(0, 0)))
+	}
 }
 
 #[test]
