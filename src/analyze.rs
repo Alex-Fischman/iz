@@ -62,21 +62,13 @@ impl Io {
 				(a, b) => Err(format!("types aren't equal: {:?}, {:?}", a, b)),
 			}
 		}
-		if other.inputs.len() <= self.outputs.len() {
-			let a = self.outputs.drain(self.outputs.len() - other.inputs.len()..);
-			let b = &other.inputs;
-			for (a, b) in a.zip(b) {
-				eq(&a, b)?
-			}
-		} else {
-			let b = &other.inputs[other.inputs.len() - self.outputs.len()..];
-			let a = self.outputs.drain(..);
-			for (a, b) in a.zip(b) {
-				eq(&a, b)?
-			}
-			let c = &other.inputs[..other.inputs.len() - self.outputs.len()];
-			self.inputs.extend(c.iter().cloned());
-		}
+		let (x, y) = (other.inputs.len(), self.outputs.len());
+		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
+		let a = self.outputs.drain(i..);
+		let b = &other.inputs[j..];
+		a.zip(b).try_fold((), |_, (a, b)| eq(&a, b))?;
+		let c = &other.inputs[..j];
+		self.inputs.extend(c.iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 		Ok(())
 	}
@@ -139,8 +131,14 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 						"not" => Io::new(vec![Type::Bool], vec![Type::Bool]),
 						"eq" => Io::new(vec![last()?, last()?], vec![Type::Bool]),
 						"lt" | "gt" => Io::new(vec![Type::Int, Type::Int], vec![Type::Bool]),
-						"call" => todo!(),
-						"swap" => todo!(),
+						"call" => match last()? {
+							Type::Block(Io { inputs, outputs }) => {
+								let mut i = inputs.clone();
+								i.push(Type::Block(Io::new(inputs.clone(), outputs.clone())));
+								Io::new(i, outputs.clone())
+							}
+							t => Err(Error(format!("expected block, found {:?}", t), l))?,
+						},
 						"_if_" => Io::new(
 							vec![Type::Bool, last()?],
 							vec![Type::Option(Box::new(last()?))],
@@ -211,12 +209,42 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 	if io.inputs.is_empty() {
 		Ok(out)
 	} else {
-		Err(Error(format!("program expected inputs: {:?}", io.inputs), Location(0, 0)))
+		Err(Error(format!("program expected {:?}", io.inputs), Location(0, 0)))
 	}
 }
 
 #[test]
 fn analyze_test() {
+	let mut io = Io::new(vec![], vec![Type::Bool]);
+	io.combine(&Io::new(vec![Type::Int, Type::Bool], vec![Type::Int])).unwrap();
+	assert_eq!(io, Io::new(vec![Type::Int], vec![Type::Int]));
 	let f = |s: &str| analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
-	assert!(f("1 2 add").is_ok());
+	assert_eq!(
+		f("1 2 add"),
+		Ok(vec![
+			Tree {
+				io: Io::new(vec![], vec![Type::Int]),
+				data: Parsed::Number(1),
+				location: Location(0, 1),
+				children: vec![]
+			},
+			Tree {
+				io: Io::new(vec![], vec![Type::Int]),
+				data: Parsed::Number(2),
+				location: Location(2, 1),
+				children: vec![]
+			},
+			Tree {
+				io: Io::new(vec![Type::Int, Type::Int], vec![Type::Int]),
+				data: Parsed::Name("add".to_owned()),
+				location: Location(4, 3),
+				children: vec![]
+			}
+		])
+	);
+	assert_eq!(
+		f("true 2 add"),
+		Err(Error("types aren't equal: Bool, Int".to_owned(), Location(7, 3)))
+	);
+	assert_eq!(f("2 add"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 }

@@ -1,11 +1,12 @@
-ne = {eq not}
-le = {gt not}
-ge = {lt not}
-nop = {}
-dup = {
-	x = nop
-	x x
-}
-pop = {x = nop}
+# ne = {eq not}
+# le = {gt not}
+# ge = {lt not}
+# nop = {}
+# dup = {
+# 	x = nop
+# 	x x
+# }
+# pop = {x = nop}
 
-# todo: define swap the same way as dup
+# todo: define `swap` the same way as `dup`
+# also `not` can be done with `if`, as well as `and` and `or`

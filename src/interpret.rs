@@ -138,7 +138,6 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
 						"call" => call(stack, context, l)?,
-						"swap" => swap(stack, l)?,
 						"_if_" => {
 							swap(stack, l)?;
 							match pop(stack, l)? {
@@ -179,9 +178,9 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 									.ok_or_else(|| Error("var not found".to_owned(), l))?
 									.clone(),
 							);
-							if let Some(Value::Block(_)) = stack.last() {
-								call(stack, context, l)?;
-							}
+							// if let Some(Value::Block(_)) = stack.last() {
+							// 	call(stack, context, l)?;
+							// }
 						}
 					}
 				}
@@ -215,11 +214,16 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 fn interpret_test() {
 	let f =
 		|s: &str| interpret(&analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?)?);
-	assert_eq!(f("true 1 sub"), Err(Error("invalid _sub_ args".to_owned(), Location(7, 3))));
-	assert_eq!(f("1 sub"), Err(Error("no value on stack".to_owned(), Location(2, 3))));
+	assert_eq!(
+		f("true 1 sub"),
+		Err(Error("types aren't equal: Bool, Int".to_owned(), Location(7, 3)))
+	);
+	assert_eq!(f("1 sub"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 	assert_eq!(f("1 - 2"), Ok(vec![Value::Int(-1)]));
+	assert_eq!(f("1 2 sub"), Ok(vec![Value::Int(-1)]));
 	assert_eq!(f("1 - 2 - 3"), Ok(vec![Value::Int(-4)]));
-	assert_eq!(f("1 != 2"), Ok(vec![Value::Bool(true)]));
+	assert_eq!(f("1 == 2"), Ok(vec![Value::Bool(false)]));
+	// assert_eq!(f("1 != 2"), Ok(vec![Value::Bool(true)]));
 	assert_eq!(f("1 > 2"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(
 		f("1 2 [3 4] 5 6"),
@@ -239,7 +243,7 @@ fn interpret_test() {
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("var not found".to_owned(), Location(17, 1))));
 	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("not@true"), Ok(vec![Value::Bool(false)]));
-	assert_eq!(f("1 nop"), Ok(vec![Value::Int(1)]));
-	assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
-	assert_eq!(f("1 pop"), Ok(vec![]));
+	// assert_eq!(f("1 nop"), Ok(vec![Value::Int(1)]));
+	// assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
+	// assert_eq!(f("1 pop"), Ok(vec![]));
 }
