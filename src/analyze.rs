@@ -113,11 +113,6 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 					let x = analyze(&tree.children[0..1], &mut a, context)?.remove(0);
 					xs.insert(0, x);
 					children = xs;
-					match a.outputs.pop() {
-						Some(Type::Block(io)) => a.combine(&io).map_err(|s| Error(s, l))?,
-						Some(t) => a.outputs.push(t),
-						None => {}
-					}
 					t = a;
 				}
 				Parsed::Name(i) => {
@@ -156,22 +151,14 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 						),
 						"print" => Io::new(vec![last()?], vec![]),
 						key => {
-							let mut a = Io::new(
+							Io::new(
 								vec![],
 								vec![context
 									.iter()
 									.find_map(|frame| frame.get(key))
 									.ok_or_else(|| Error("var not found".to_owned(), l))?
 									.clone()],
-							);
-							match a.outputs.pop() {
-								Some(Type::Block(io)) => {
-									a.combine(&io).map_err(|s| Error(s, l))?
-								}
-								Some(t) => a.outputs.push(t),
-								None => {}
-							}
-							a
+							)
 						}
 					};
 				}
