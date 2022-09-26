@@ -23,6 +23,7 @@ impl Io {
 		Io { inputs, outputs }
 	}
 
+	#[deprecated(note="replace uses of last with type vars")]
 	fn last(&self) -> Result<&Type, String> {
 		self.outputs.last().ok_or_else(|| "no value on stack".to_owned())
 	}
