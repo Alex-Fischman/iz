@@ -19,7 +19,7 @@ pub struct Io {
 }
 
 impl Io {
-	fn new(inputs: Vec<Type>, outputs: Vec<Type>) -> Io {
+	pub fn new(inputs: Vec<Type>, outputs: Vec<Type>) -> Io {
 		Io { inputs, outputs }
 	}
 
@@ -75,7 +75,7 @@ impl Tree {
 }
 
 use std::collections::HashMap;
-type Context = Vec<HashMap<String, Vec<Type>>>;
+type Context = Vec<HashMap<String, Type>>;
 pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 	fn analyze(
 		trees: &[ParseTree],
@@ -102,7 +102,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 								Some(frame) => frame,
 								None => context.last_mut().unwrap(),
 							};
-						frame.entry(key.to_owned()).or_insert(vec![]).push(last.clone());
+						frame.insert(key.to_owned(), last.clone());
 					}
 					s => {
 						return Err(Error(format!("expected name and value, found: {:?}", s), l))
@@ -151,18 +151,15 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 							vec![],
 						),
 						"print" => Io::new(vec![last()?], vec![]),
-						key => Io::new(
-							vec![],
-							vec![match context
-								.iter()
-								.find_map(|frame| frame.get(key))
-								.ok_or_else(|| Error("var not found".to_owned(), l))?
-								.as_slice()
-							{
-								[t] => t.clone(),
-								_ => todo!(),
-							}],
-						),
+						key => match context
+							.iter()
+							.find_map(|frame| frame.get(key))
+							.ok_or_else(|| Error("var not found".to_owned(), l))?
+							.clone()
+						{
+							Type::Block(io) => io,
+							a => Io::new(vec![], vec![a]),
+						},
 					};
 				}
 				Parsed::Number(_) => {
@@ -237,4 +234,5 @@ fn analyze_test() {
 		Err(Error("types aren't equal: Bool, Int".to_owned(), Location(7, 3)))
 	);
 	assert_eq!(f("2 add"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
+	assert_eq!(f("nop").unwrap()[0].io.outputs, vec![]);
 }

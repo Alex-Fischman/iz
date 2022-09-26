@@ -35,7 +35,7 @@ impl std::fmt::Display for Value {
 }
 
 use std::collections::HashMap;
-type Context = Vec<HashMap<(String, Type), Value>>;
+type Context = Vec<HashMap<String, Value>>;
 pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 	fn interpret(
 		trees: &[Tree],
@@ -91,15 +91,11 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 						None => Err(Error("no var name".to_owned(), l))?,
 					};
 					interpret(&tree.children[1..], stack, context)?;
-					let t = tree.io.inputs.last().unwrap();
-					let frame = match context
-						.iter_mut()
-						.find(|frame| frame.contains_key(&(key.clone(), t.clone())))
-					{
+					let frame = match context.iter_mut().find(|frame| frame.contains_key(key)) {
 						Some(frame) => frame,
 						None => context.last_mut().unwrap(),
 					};
-					frame.insert((key.to_owned(), t.clone()), pop(stack, l)?);
+					frame.insert(key.to_owned(), pop(stack, l)?);
 				}
 				Parsed::Name(i) if i == "@" => {
 					interpret(&tree.children[1..], stack, context)?;
@@ -178,18 +174,18 @@ pub fn interpret(trees: &[Tree]) -> Result<Vec<Value>, Error> {
 							}
 						}
 						("print", _, []) => print!("{}", pop(stack, l)?),
-						(key, _, _) => stack.push(
-							context
-								.iter()
-								.find_map(|frame| {
-									frame.get(&(
-										key.to_owned(),
-										tree.io.outputs.last().unwrap().clone(),
-									))
-								})
-								.ok_or_else(|| Error("var not found".to_owned(), l))?
-								.clone(),
-						),
+						(key, _, _) => {
+							stack.push(
+								context
+									.iter()
+									.find_map(|frame| frame.get(key))
+									.ok_or_else(|| Error("var not found".to_owned(), l))?
+									.clone(),
+							);
+							if let Some(Value::Block(_)) = stack.last() {
+								call(stack, context, l)?
+							}
+						}
 					}
 				}
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
@@ -251,7 +247,7 @@ fn interpret_test() {
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("var not found".to_owned(), Location(17, 1))));
 	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("not@true"), Ok(vec![Value::Bool(false)]));
-	// assert_eq!(f("1 nop"), Ok(vec![Value::Int(1)]));
+	assert_eq!(f("1 nop"), Ok(vec![Value::Int(1)]));
 	// assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
 	// assert_eq!(f("1 pop"), Ok(vec![]));
 }
