@@ -28,21 +28,24 @@ impl Io {
 		self.outputs.last().ok_or_else(|| "no value on stack".to_owned())
 	}
 
-	fn combine(&mut self, other: &Io) -> Result<(), String> {
-		fn eq(a: &Type, b: &Type) -> Result<(), String> {
+	fn combine(&mut self, other: &mut Io) -> Result<(), String> {
+		fn eq(a: &mut Type, b: &mut Type) -> Result<(), String> {
 			match (a, b) {
 				(Type::Int, Type::Int)
 				| (Type::Bool, Type::Bool)
 				| (Type::String, Type::String) => Ok(()),
 				(Type::Group(c), Type::Group(d)) if c.len() == d.len() => {
-					c.iter().zip(d).try_fold((), |_, (e, f)| eq(e, f))
+					c.iter_mut().zip(d).try_fold((), |_, (e, f)| eq(e, f))
 				}
 				(Type::Block(c), Type::Block(d))
 					if c.inputs.len() == d.inputs.len()
 						&& c.outputs.len() == d.outputs.len() =>
 				{
-					c.inputs.iter().zip(&d.inputs).try_fold((), |_, (e, f)| eq(e, f))?;
-					c.outputs.iter().zip(&d.outputs).try_fold((), |_, (e, f)| eq(e, f))?;
+					c.inputs.iter_mut().zip(&mut d.inputs).try_fold((), |_, (e, f)| eq(e, f))?;
+					c.outputs
+						.iter_mut()
+						.zip(&mut d.outputs)
+						.try_fold((), |_, (e, f)| eq(e, f))?;
 					Ok(())
 				}
 				(Type::Option(c), Type::Option(d)) => eq(c, d),
@@ -52,8 +55,8 @@ impl Io {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
 		let a = self.outputs.drain(i..);
-		let b = &other.inputs[j..];
-		a.zip(b).try_fold((), |_, (a, b)| eq(&a, b))?;
+		let b = &mut other.inputs[j..];
+		a.zip(b).try_fold((), |_, (mut a, b)| eq(&mut a, b))?;
 		let c = &other.inputs[..j];
 		self.inputs.extend(c.iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
@@ -87,7 +90,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 		for tree in trees {
 			let l = tree.location;
 			let children;
-			let t;
+			let mut t;
 			match &tree.data {
 				Parsed::Name(i) if i == "=" => match tree.children.as_slice() {
 					s @ [a @ ParseTree { data: Parsed::Name(key), children: cs, .. }, _]
@@ -181,7 +184,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 					};
 				}
 			}
-			io.combine(&t).map_err(|s| Error(s, l))?;
+			io.combine(&mut t).map_err(|s| Error(s, l))?;
 			out.push(Tree::new(tree, t, children));
 		}
 		Ok(out)
@@ -204,7 +207,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 #[test]
 fn analyze_test() {
 	let mut io = Io::new(vec![], vec![Type::Bool]);
-	io.combine(&Io::new(vec![Type::Int, Type::Bool], vec![Type::Int])).unwrap();
+	io.combine(&mut Io::new(vec![Type::Int, Type::Bool], vec![Type::Int])).unwrap();
 	assert_eq!(io, Io::new(vec![Type::Int], vec![Type::Int]));
 	let f = |s: &str| analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
 	assert_eq!(
