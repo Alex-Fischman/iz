@@ -10,6 +10,7 @@ pub enum Type {
 	Group(Vec<Type>),
 	Block(Io),
 	Option(Box<Type>),
+	Unknown,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -23,9 +24,8 @@ impl Io {
 		Io { inputs, outputs }
 	}
 
-	#[deprecated(note = "replace uses of last with type vars")]
-	fn last(&self) -> Result<&Type, String> {
-		self.outputs.last().ok_or_else(|| "no value on stack".to_owned())
+	fn last(&self, l: Location) -> Result<&Type, Error> {
+		self.outputs.last().ok_or_else(|| Error("no value on stack".to_owned(), l))
 	}
 
 	fn combine(&mut self, other: &mut Io) -> Result<(), String> {
@@ -49,6 +49,10 @@ impl Io {
 					Ok(())
 				}
 				(Type::Option(c), Type::Option(d)) => eq(c, d),
+				(c @ Type::Unknown, d) | (d, c @ Type::Unknown) => {
+					*c = d.clone();
+					Ok(())
+				}
 				(a, b) => Err(format!("types aren't equal: {:?}, {:?}", a, b)),
 			}
 		}
@@ -99,7 +103,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 						let a = Tree::new(a, Io::new(vec![], vec![]), vec![]);
 						let b = analyze(&s[1..], io, context)?.remove(0);
 						children = vec![a, b];
-						let last = io.last().map_err(|s| Error(s, l))?;
+						let last = io.last(l)?;
 						t = Io::new(vec![last.clone()], vec![]);
 						let frame =
 							match context.iter_mut().find(|frame| frame.contains_key(key)) {
@@ -122,16 +126,16 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 				}
 				Parsed::Name(i) => {
 					children = analyze(&tree.children, io, context)?;
-					let last = || io.last().cloned().map_err(|s| Error(s, l));
 					t = match i.as_str() {
 						"true" | "false" => Io::new(vec![], vec![Type::Bool]),
 						"add" | "sub" | "mul" => {
 							Io::new(vec![Type::Int, Type::Int], vec![Type::Int])
 						}
 						"not" => Io::new(vec![Type::Bool], vec![Type::Bool]),
-						"eq" => Io::new(vec![last()?, last()?], vec![Type::Bool]),
+						// todo: missing link
+						"eq" => Io::new(vec![Type::Unknown, Type::Unknown], vec![Type::Bool]),
 						"lt" | "gt" => Io::new(vec![Type::Int, Type::Int], vec![Type::Bool]),
-						"call" => match last()? {
+						"call" => match io.last(l)? {
 							Type::Block(Io { inputs, outputs }) => {
 								let mut i = inputs.clone();
 								i.push(Type::Block(Io::new(inputs.clone(), outputs.clone())));
@@ -140,12 +144,12 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 							t => Err(Error(format!("expected block, found {:?}", t), l))?,
 						},
 						"_if_" => Io::new(
-							vec![Type::Bool, last()?],
-							vec![Type::Option(Box::new(last()?))],
+							vec![Type::Bool, Type::Unknown],
+							vec![Type::Option(Box::new(Type::Unknown))], // todo: missing link
 						),
 						"_else_" => Io::new(
-							vec![Type::Option(Box::new(last()?)), last()?],
-							vec![last()?],
+							vec![Type::Option(Box::new(Type::Unknown)), Type::Unknown],
+							vec![Type::Unknown], // todo: missing link
 						),
 						"_while_" => Io::new(
 							vec![
@@ -154,7 +158,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<Vec<Tree>, Error> {
 							],
 							vec![],
 						),
-						"print" => Io::new(vec![last()?], vec![]),
+						"print" => Io::new(vec![Type::Unknown], vec![]),
 						key => match context
 							.iter()
 							.find_map(|frame| frame.get(key))
