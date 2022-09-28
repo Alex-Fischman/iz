@@ -244,6 +244,7 @@ fn analyze_test() {
 	let mut io = Io::new(vec![], vec![1]);
 	io.combine(&mut Io::new(vec![0, 1], vec![0]), &mut types).unwrap();
 	assert_eq!(io, Io::new(vec![0], vec![0]));
+
 	let f = |s: &str| analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
 	assert_eq!(
 		f("1 2 add").unwrap().0,
@@ -274,4 +275,6 @@ fn analyze_test() {
 	);
 	assert_eq!(f("2 add"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 	assert_eq!(f("nop").unwrap().0[0].io.outputs, vec![]);
+	assert_eq!(f("1 dup").unwrap().0[1].io.inputs, vec![12]);
+	assert_eq!(f("1 dup").unwrap().0[1].io.outputs, vec![12, 12]);
 }
