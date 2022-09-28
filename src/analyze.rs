@@ -120,14 +120,14 @@ pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 						let a = Tree::new(a, Io::new(vec![], vec![]), vec![]);
 						let b = analyze(&s[1..], io, context, types)?.remove(0);
 						children = vec![a, b];
-						let last = io.last(l)?;
-						t = Io::new(vec![last], vec![]);
+						let v = new_var(types);
+						t = Io::new(vec![v], vec![]);
 						let frame =
 							match context.iter_mut().find(|frame| frame.contains_key(key)) {
 								Some(frame) => frame,
 								None => context.last_mut().unwrap(),
 							};
-						frame.insert(key.to_owned(), last);
+						frame.insert(key.to_owned(), v);
 					}
 					s => {
 						return Err(Error(format!("expected name and value, found: {:?}", s), l))
