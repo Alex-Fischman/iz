@@ -19,8 +19,8 @@ fn main() {
 		match (|| {
 			let tokens = tokenize::tokenize(&chars)?;
 			let trees = parse::parse(&tokens)?;
-			let trees = analyze::analyze(&trees)?;
-			interpret::interpret(&trees)
+			let (trees, types) = analyze::analyze(&trees)?;
+			interpret::interpret(&trees, &types)
 		})() {
 			Ok(values) => Ok(values),
 			Err(Error(message, location)) => Err(if location.0 == 0 && location.1 == 0 {

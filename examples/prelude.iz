@@ -1,4 +1,4 @@
-# ne = {eq not}
+ne = {eq not}
 le = {gt not}
 ge = {lt not}
 nop = {}
