@@ -103,6 +103,36 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 			types.push(t);
 			types.len() - 1
 		}
+		fn clone_vars(
+			i: usize,
+			types: &mut Vec<Type>,
+			vars: &mut HashMap<usize, usize>,
+		) -> usize {
+			match types[i].clone() {
+				Type::Int | Type::Bool | Type::String => i,
+				Type::Group(ts) => add_type(
+					Type::Group(ts.into_iter().map(|t| clone_vars(t, types, vars)).collect()),
+					types,
+				),
+				Type::Block(io) => add_type(
+					Type::Block(Io::new(
+						io.inputs.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
+						io.outputs.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
+					)),
+					types,
+				),
+				Type::Option(t) => add_type(Type::Option(clone_vars(t, types, vars)), types),
+				Type::Unknown => match vars.get(&i) {
+					Some(j) => *j,
+					None => {
+						let v = add_type(Type::Unknown, types);
+						vars.insert(i, v);
+						println!("{:?}", vars);
+						v
+					}
+				},
+			}
+		}
 		let mut out = vec![];
 		for tree in parse_trees {
 			let l = tree.location;
@@ -180,23 +210,20 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 								.iter()
 								.find_map(|frame| frame.get(key))
 								.ok_or_else(|| Error("var not found".to_owned(), l))?;
-							fn find_vars(i: usize, types: &mut Vec<Type>) {
-								match types[i].clone() {
-									Type::Int | Type::Bool | Type::String => {}
-									Type::Group(ts) => {
-										ts.into_iter().for_each(|t| find_vars(t, types))
-									}
-									Type::Block(io) => {
-										io.inputs.into_iter().for_each(|t| find_vars(t, types));
-										io.outputs.into_iter().for_each(|t| find_vars(t, types));
-									}
-									Type::Option(t) => find_vars(t, types),
-									Type::Unknown => todo!("need to clone vars and update refs"),
+							match types[a].clone() {
+								Type::Block(io) => {
+									let mut vars = HashMap::new();
+									Io::new(
+										io.inputs
+											.into_iter()
+											.map(|t| clone_vars(t, types, &mut vars))
+											.collect(),
+										io.outputs
+											.into_iter()
+											.map(|t| clone_vars(t, types, &mut vars))
+											.collect(),
+									)
 								}
-							}
-							find_vars(a, types);
-							match &types[a] {
-								Type::Block(io) => io.clone(),
 								_ => Io::new(vec![], vec![a]),
 							}
 						}
@@ -265,6 +292,6 @@ fn analyze_test() {
 	);
 	assert_eq!(f("2 add"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 	assert_eq!(f("nop").unwrap().0[0].io.outputs, vec![]);
-	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.inputs, vec![22]);
-	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.outputs, vec![22, 22]);
+	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.inputs, vec![18]);
+	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.outputs, vec![18, 18]);
 }
