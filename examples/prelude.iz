@@ -13,6 +13,6 @@ ge = {lt _not_}
 
 mod = {
 	b = nop a = nop
-	while {a > b} {a = a - b}
+	while {a >= b} {a = a - b}
 	a
 }
