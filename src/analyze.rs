@@ -92,23 +92,19 @@ impl Tree {
 
 use std::collections::HashMap;
 type Context = Vec<HashMap<String, usize>>;
-pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
+pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 	fn analyze(
-		trees: &[ParseTree],
+		parse_trees: &[ParseTree],
 		io: &mut Io,
 		context: &mut Context,
 		types: &mut Vec<Type>,
 	) -> Result<Vec<Tree>, Error> {
-		fn new_var(types: &mut Vec<Type>) -> usize {
-			types.push(Type::Unknown);
-			types.len() - 1
-		}
 		fn add_type(t: Type, types: &mut Vec<Type>) -> usize {
 			types.push(t);
 			types.len() - 1
 		}
 		let mut out = vec![];
-		for tree in trees {
+		for tree in parse_trees {
 			let l = tree.location;
 			let children;
 			let mut t;
@@ -120,7 +116,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 						let a = Tree::new(a, Io::new(vec![], vec![]), vec![]);
 						let b = analyze(&s[1..], io, context, types)?.remove(0);
 						children = vec![a, b];
-						let v = new_var(types);
+						let v = add_type(Type::Unknown, types);
 						t = Io::new(vec![v], vec![]);
 						let frame =
 							match context.iter_mut().find(|frame| frame.contains_key(key)) {
@@ -148,7 +144,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 						"add" | "sub" | "mul" => Io::new(vec![0, 0], vec![0]),
 						"not" => Io::new(vec![1], vec![1]),
 						"eq" => {
-							let v = new_var(types);
+							let v = add_type(Type::Unknown, types);
 							Io::new(vec![v, v], vec![1])
 						}
 						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
@@ -164,11 +160,11 @@ pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 							t => Err(Error(format!("expected block, found {:?}", t), l))?,
 						},
 						"_if_" => {
-							let v = new_var(types);
+							let v = add_type(Type::Unknown, types);
 							Io::new(vec![1, v], vec![add_type(Type::Option(v), types)])
 						}
 						"_else_" => {
-							let v = new_var(types);
+							let v = add_type(Type::Unknown, types);
 							Io::new(vec![add_type(Type::Option(v), types), v], vec![v])
 						}
 						"_while_" => Io::new(
@@ -178,7 +174,7 @@ pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 							],
 							vec![],
 						),
-						"print" => Io::new(vec![new_var(types)], vec![]),
+						"print" => Io::new(vec![add_type(Type::Unknown, types)], vec![]),
 						key => {
 							let a = *context
 								.iter()
@@ -223,10 +219,11 @@ pub fn analyze(trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
 	let mut io = Io::new(vec![], vec![]);
 	let mut context = vec![HashMap::new()];
 	let mut types = vec![Type::Int, Type::Bool, Type::String];
-	analyze(&parse(&tokenize(&prelude)?)?, &mut io, &mut context, &mut types)?;
-	let out = analyze(trees, &mut io, &mut context, &mut types)?;
+	let mut trees = vec![];
+	trees.extend(analyze(&parse(&tokenize(&prelude)?)?, &mut io, &mut context, &mut types)?);
+	trees.append(&mut analyze(parse_trees, &mut io, &mut context, &mut types)?);
 	if io.inputs.is_empty() {
-		Ok((out, types))
+		Ok((trees, types))
 	} else {
 		Err(Error(
 			format!(
@@ -246,35 +243,13 @@ fn analyze_test() {
 	assert_eq!(io, Io::new(vec![0], vec![0]));
 
 	let f = |s: &str| analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
-	assert_eq!(
-		f("1 2 add").unwrap().0,
-		vec![
-			Tree {
-				io: Io::new(vec![], vec![0]),
-				data: Parsed::Number(1),
-				location: Location(0, 1),
-				children: vec![]
-			},
-			Tree {
-				io: Io::new(vec![], vec![0]),
-				data: Parsed::Number(2),
-				location: Location(2, 1),
-				children: vec![]
-			},
-			Tree {
-				io: Io::new(vec![0, 0], vec![0]),
-				data: Parsed::Name("add".to_owned()),
-				location: Location(4, 3),
-				children: vec![]
-			}
-		],
-	);
+	assert_eq!(f("1 2 add").unwrap().0.last().unwrap().io, Io::new(vec![0, 0], vec![0]));
 	assert_eq!(
 		f("true 2 add"),
 		Err(Error("types aren't equal: Bool, Int".to_owned(), Location(7, 3)))
 	);
 	assert_eq!(f("2 add"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 	assert_eq!(f("nop").unwrap().0[0].io.outputs, vec![]);
-	assert_eq!(f("1 dup").unwrap().0[1].io.inputs, vec![12]);
-	assert_eq!(f("1 dup").unwrap().0[1].io.outputs, vec![12, 12]);
+	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.inputs, vec![12]);
+	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.outputs, vec![12, 12]);
 }

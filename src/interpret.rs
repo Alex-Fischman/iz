@@ -1,7 +1,7 @@
-use crate::analyze::{analyze, Tree, Type};
-use crate::parse::{parse, Parsed};
-use crate::tokenize::{tokenize, Bracket};
-use crate::{Error, Location, PRELUDE_PATH};
+use crate::analyze::{Tree, Type};
+use crate::parse::Parsed;
+use crate::tokenize::Bracket;
+use crate::{Error, Location};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -204,14 +204,8 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 		}
 		Ok(())
 	}
-	let prelude = std::fs::read_to_string(PRELUDE_PATH)
-		.map_err(|_| Error("could not read prelude".to_owned(), Location(0, 0)))?
-		.chars()
-		.collect::<Vec<char>>();
 	let mut stack = vec![];
 	let mut context = vec![HashMap::new()];
-	let prelude = &analyze(&parse(&tokenize(&prelude)?)?)?;
-	interpret(&prelude.0, &mut stack, &mut context, &prelude.1)?;
 	interpret(trees, &mut stack, &mut context, types)?;
 	Ok(stack)
 }
@@ -219,6 +213,9 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 #[test]
 fn interpret_test() {
 	let f = |s: &str| {
+		use crate::analyze::analyze;
+		use crate::parse::parse;
+		use crate::tokenize::tokenize;
 		let (trees, types) = &analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?)?;
 		interpret(trees, types)
 	};
@@ -231,7 +228,7 @@ fn interpret_test() {
 	assert_eq!(f("1 2 sub"), Ok(vec![Value::Int(-1)]));
 	assert_eq!(f("1 - 2 - 3"), Ok(vec![Value::Int(-4)]));
 	assert_eq!(f("1 == 2"), Ok(vec![Value::Bool(false)]));
-	// assert_eq!(f("1 != 2"), Ok(vec![Value::Bool(true)]));
+	assert_eq!(f("1 != 2"), Ok(vec![Value::Bool(true)]));
 	assert_eq!(f("1 > 2"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(
 		f("1 2 [3 4] 5 6"),
@@ -252,6 +249,7 @@ fn interpret_test() {
 	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("not@true"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("1 nop"), Ok(vec![Value::Int(1)]));
-	// assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
+	assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
 	assert_eq!(f("1 pop"), Ok(vec![]));
+	// assert_eq!(f("true pop 1 pop"), Ok(vec![]));
 }
