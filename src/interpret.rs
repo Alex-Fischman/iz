@@ -124,10 +124,6 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
 							_ => Err(Error("invalid _mul_ args".to_owned(), l))?,
 						},
-						("not", [Bool], [Bool]) => match pop(stack, l)? {
-							Value::Bool(b) => stack.push(Value::Bool(!b)),
-							_ => Err(Error("invalid _not_ args".to_owned(), l))?,
-						},
 						("eq", [_, _], [Bool]) => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							stack.push(Value::Bool(eq(&a, &b, l)?));

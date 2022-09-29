@@ -172,7 +172,6 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					t = match i.as_str() {
 						"true" | "false" => Io::new(vec![], vec![1]),
 						"add" | "sub" | "mul" => Io::new(vec![0, 0], vec![0]),
-						"not" => Io::new(vec![1], vec![1]),
 						"eq" => {
 							let v = add_type(Type::Unknown, types);
 							Io::new(vec![v, v], vec![1])
