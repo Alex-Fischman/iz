@@ -6,7 +6,7 @@ type Operator<'a> = (&'a str, &'a str, usize, usize);
 // (&[name, func, left args, right args], (right assoc))
 pub const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("@", "@", 1, 1)], false),
-	(&[("!", "not", 0, 1)], true),
+	(&[("not", "_not_", 0, 1)], true),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
 	(
@@ -20,6 +20,7 @@ pub const OPERATORS: &[(&[Operator], bool)] = &[
 		],
 		false,
 	),
+	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
 	(&[("=", "=", 1, 1)], true),
 	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
 	(&[("else", "_else_", 1, 1)], true),

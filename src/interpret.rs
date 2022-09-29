@@ -237,12 +237,12 @@ fn interpret_test() {
 	assert_eq!(f("if true {1} else {2}"), Ok(vec![Value::Int(1)]));
 	assert_eq!(f("i = 1 + 2 i"), Ok(vec![Value::Int(3)]));
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("i not found".to_owned(), Location(17, 1))));
-	assert_eq!(f("!true"), Ok(vec![Value::Bool(false)]));
-	assert_eq!(f("not@true"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("not true"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("_not_@true"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("1 nop"), Ok(vec![Value::Int(1)]));
 	assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
 	assert_eq!(f("1 pop"), Ok(vec![]));
 	assert_eq!(f("true pop 1 pop"), Ok(vec![]));
-	assert_eq!(f("true false and"), Ok(vec![Value::Bool(false)]));
-	assert_eq!(f("true false or"), Ok(vec![Value::Bool(true)]));
+	assert_eq!(f("true and false"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("true or  false"), Ok(vec![Value::Bool(true)]));
 }

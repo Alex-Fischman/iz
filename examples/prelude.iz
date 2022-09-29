@@ -3,10 +3,10 @@ pop = {x = nop}
 dup = {x = nop x x}
 swap = {b = nop a = nop b a}
 
-not = {b = nop         if b {false} else {true}}
-and = {b = nop a = nop if a {b}     else {false}}
-or  = {b = nop a = nop if a {true}  else {b}}
+_not_ = {b = nop         if b {false} else {true}}
+_and_ = {b = nop a = nop if a {b}     else {false}}
+_or_  = {b = nop a = nop if a {true}  else {b}}
 
-ne = {eq not}
-le = {gt not}
-ge = {lt not}
+ne = {eq _not_}
+le = {gt _not_}
+ge = {lt _not_}
