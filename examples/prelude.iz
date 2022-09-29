@@ -1,6 +1,6 @@
-nop = {}
-pop = {x = nop}
-dup = {x = nop x x}
+nop  = {}
+drop = {x = nop}
+dup  = {x = nop x x}
 swap = {b = nop a = nop b a}
 
 _not_ = {b = nop         if b {false} else {true}}
