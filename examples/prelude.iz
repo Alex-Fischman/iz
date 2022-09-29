@@ -1,18 +1,11 @@
 nop = {}
 pop = {x = nop}
-dup = {
-	x = nop
-	x x
-}
-swap = {
-	a = nop
-	b = nop
-	a b
-}
+dup = {x = nop x x}
+swap = {b = nop a = nop b a}
 
-not = {b = nop if b {false} else {true}}
-and = {a = nop b = nop if b {a} else {false}}
-or = {a = nop b = nop if b {true} else {a}}
+not = {b = nop         if b {false} else {true}}
+and = {b = nop a = nop if a {b}     else {false}}
+or  = {b = nop a = nop if a {true}  else {b}}
 
 ne = {eq not}
 le = {gt not}
