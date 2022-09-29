@@ -77,12 +77,6 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				_ => Err(Error("invalid _call_ args".to_owned(), l))?,
 			}
 		}
-		fn swap(stack: &mut Vec<Value>, l: Location) -> Result<(), Error> {
-			let (b, a) = (pop(stack, l)?, pop(stack, l)?);
-			stack.push(b);
-			stack.push(a);
-			Ok(())
-		}
 		for tree in trees {
 			let l = tree.location;
 			match &tree.data {
@@ -137,21 +131,22 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
 						("call", _, _) => call(stack, context, types, l)?,
-						("_if_", _, _) => {
-							swap(stack, l)?;
-							match pop(stack, l)? {
-								Value::Bool(true) => {
-									call(stack, context, types, l)?;
-									let c = pop(stack, l)?;
-									stack.push(Value::Some(Box::new(c)))
-								}
-								Value::Bool(false) => stack.push(Value::None),
-								_ => Err(Error("invalid _if_ args".to_owned(), l))?,
+						("_if_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
+							(b, Value::Bool(true)) => {
+								stack.push(b);
+								call(stack, context, types, l)?;
+								let c = pop(stack, l)?;
+								stack.push(Value::Some(Box::new(c)))
 							}
-						}
+							(_, Value::Bool(false)) => stack.push(Value::None),
+							_ => Err(Error("invalid _if_ args".to_owned(), l))?,
+						},
 						("_else_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
 							(_, Value::Some(a)) => stack.push(*a),
-							(b, Value::None) => stack.push(b),
+							(b, Value::None) => {
+								stack.push(b);
+								call(stack, context, types, l)?;
+							}
 							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
 						},
 						("_while_", _, _) => {

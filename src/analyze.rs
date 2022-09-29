@@ -127,7 +127,6 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					None => {
 						let v = add_type(Type::Unknown, types);
 						vars.insert(i, v);
-						println!("{:?}", vars);
 						v
 					}
 				},
@@ -190,11 +189,20 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						},
 						"_if_" => {
 							let v = add_type(Type::Unknown, types);
-							Io::new(vec![1, v], vec![add_type(Type::Option(v), types)])
+							Io::new(
+								vec![1, add_type(Type::Block(Io::new(vec![], vec![v])), types)],
+								vec![add_type(Type::Option(v), types)],
+							)
 						}
 						"_else_" => {
 							let v = add_type(Type::Unknown, types);
-							Io::new(vec![add_type(Type::Option(v), types), v], vec![v])
+							Io::new(
+								vec![
+									add_type(Type::Option(v), types),
+									add_type(Type::Block(Io::new(vec![], vec![v])), types),
+								],
+								vec![v],
+							)
 						}
 						"_while_" => Io::new(
 							vec![
@@ -208,7 +216,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							let a = *context
 								.iter()
 								.find_map(|frame| frame.get(key))
-								.ok_or_else(|| Error("var not found".to_owned(), l))?;
+								.ok_or_else(|| Error(format!("\"{}\" not found", key), l))?;
 							match types[a].clone() {
 								Type::Block(io) => {
 									let mut vars = HashMap::new();
