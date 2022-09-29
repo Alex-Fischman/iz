@@ -243,4 +243,6 @@ fn interpret_test() {
 	assert_eq!(f("1 dup"), Ok(vec![Value::Int(1), Value::Int(1)]));
 	assert_eq!(f("1 pop"), Ok(vec![]));
 	assert_eq!(f("true pop 1 pop"), Ok(vec![]));
+	assert_eq!(f("true false and"), Ok(vec![Value::Bool(false)]));
+	assert_eq!(f("true false or"), Ok(vec![Value::Bool(true)]));
 }

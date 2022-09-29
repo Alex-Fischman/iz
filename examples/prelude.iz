@@ -11,8 +11,8 @@ swap = {
 }
 
 not = {b = nop if b {false} else {true}}
-# todo: and
-# todo: or
+and = {a = nop b = nop if b {a} else {false}}
+or = {a = nop b = nop if b {true} else {a}}
 
 ne = {eq not}
 le = {gt not}
