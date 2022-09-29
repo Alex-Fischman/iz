@@ -292,6 +292,6 @@ fn analyze_test() {
 	);
 	assert_eq!(f("2 add"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 	assert_eq!(f("nop").unwrap().0[0].io.outputs, vec![]);
-	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.inputs, vec![18]);
-	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.outputs, vec![18, 18]);
+	let v = f("1 dup").unwrap().0.last().unwrap().io.inputs[0];
+	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.outputs, vec![v, v]);
 }

@@ -7,6 +7,11 @@ dup = {
 	x x
 }
 pop = {x = nop}
+swap = {
+	a = nop
+	b = nop
+	a b
+}
 
 # todo: define `swap` the same way as `dup`
 # also `not` can be done with `if`, as well as `and` and `or`
