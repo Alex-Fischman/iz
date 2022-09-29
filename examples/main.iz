@@ -1,6 +1,6 @@
 i = 0
 while {i < 5} {
-	print@i
-	print@"\n"
+	if mod@(i 2) == 0 {print@"even\n"}
+	else              {print@"odd\n"}
 	i = i + 1
 }

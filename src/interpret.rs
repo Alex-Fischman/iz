@@ -132,21 +132,13 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						},
 						("call", _, _) => call(stack, context, types, l)?,
 						("_if_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
-							(b, Value::Bool(true)) => {
-								stack.push(b);
-								call(stack, context, types, l)?;
-								let c = pop(stack, l)?;
-								stack.push(Value::Some(Box::new(c)))
-							}
+							(b, Value::Bool(true)) => stack.push(Value::Some(Box::new(b))),
 							(_, Value::Bool(false)) => stack.push(Value::None),
 							_ => Err(Error("invalid _if_ args".to_owned(), l))?,
 						},
 						("_else_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
 							(_, Value::Some(a)) => stack.push(*a),
-							(b, Value::None) => {
-								stack.push(b);
-								call(stack, context, types, l)?;
-							}
+							(b, Value::None) => stack.push(b),
 							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
 						},
 						("_while_", _, _) => {
@@ -233,8 +225,8 @@ fn interpret_test() {
 	);
 	assert_eq!(f("(2 mul)@3"), Ok(vec![Value::Int(6)]));
 	assert_eq!(f("{2 * 3} call"), Ok(vec![Value::Int(6)]));
-	assert_eq!(f("if true {1}"), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
-	assert_eq!(f("if true {1} else {2}"), Ok(vec![Value::Int(1)]));
+	assert_eq!(f("if true 1"), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
+	assert_eq!(f("if true 1 else 2"), Ok(vec![Value::Int(1)]));
 	assert_eq!(f("i = 1 + 2 i"), Ok(vec![Value::Int(3)]));
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("i not found".to_owned(), Location(17, 1))));
 	assert_eq!(f("not true"), Ok(vec![Value::Bool(false)]));
@@ -245,4 +237,7 @@ fn interpret_test() {
 	assert_eq!(f("true drop 1 drop"), Ok(vec![]));
 	assert_eq!(f("true and false"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("true or  false"), Ok(vec![Value::Bool(true)]));
+	assert_eq!(f("17 5 mod"), Ok(vec![Value::Int(2)]));
+	assert_eq!(f("mod@(5 2)"), Ok(vec![Value::Int(1)]));
+	assert_eq!(f("if false 1 else if true 2 else 3"), Ok(vec![Value::Int(2)]))
 }
