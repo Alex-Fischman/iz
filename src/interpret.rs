@@ -2,7 +2,7 @@ use crate::analyze::{Tree, Type};
 use crate::parse::Parsed;
 use crate::tokenize::Bracket;
 use crate::{Error, Location};
-type Context = crate::context::C<String, Value>;
+type Context = crate::Context<String, Value>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {

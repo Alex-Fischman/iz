@@ -44,50 +44,49 @@ fn main() {
 
 const PRELUDE_PATH: &str = "/home/alex/Programming/iz/examples/prelude.iz";
 
-mod context {
-	use std::cell::RefCell;
-	use std::collections::HashMap;
-	use std::rc::Rc;
-	#[derive(Clone, Debug, PartialEq)]
-	pub struct Context<K: Eq + std::hash::Hash, V>(Option<C<K, V>>, HashMap<K, V>);
-	#[derive(Clone, Debug, PartialEq)]
-	pub struct C<K: Eq + std::hash::Hash, V>(Rc<RefCell<Context<K, V>>>);
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::rc::Rc;
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context<K: Eq + Hash, V>(Rc<RefCell<ContextData<K, V>>>);
+#[derive(Clone, Debug, PartialEq)]
+struct ContextData<K: Eq + Hash, V>(Option<Context<K, V>>, HashMap<K, V>);
 
-	impl<K: Eq + std::hash::Hash, V> C<K, V> {
-		pub fn new(parent: Option<C<K, V>>) -> C<K, V> {
-			C(Rc::new(RefCell::new(Context(parent, HashMap::new()))))
+impl<K: Eq + Hash, V> Context<K, V> {
+	pub fn new(parent: Option<Context<K, V>>) -> Context<K, V> {
+		Context(Rc::new(RefCell::new(ContextData(parent, HashMap::new()))))
+	}
+
+	pub fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<V>
+	where
+		K: std::borrow::Borrow<Q>,
+		V: Clone,
+	{
+		match self.0.borrow().1.get(key) {
+			Some(value) => Some(value.clone()),
+			None => match &self.0.borrow().0 {
+				None => None,
+				Some(parent) => parent.get(key),
+			},
 		}
+	}
 
-		pub fn get<Q: Eq + std::hash::Hash + ?Sized>(&self, key: &Q) -> Option<V>
-		where
-			K: std::borrow::Borrow<Q>,
-			V: Clone,
-		{
-			match self.0.borrow().1.get(key) {
-				Some(value) => Some(value.clone()),
-				None => match &self.0.borrow().0 {
+	pub fn set(&self, key: K, value: V) -> Option<V> {
+		fn f<K: Eq + Hash, V>(context: &Context<K, V>, key: &K) -> Option<Context<K, V>> {
+			match context.0.borrow().1.contains_key(key) {
+				true => Some(Context(context.0.clone())),
+				false => match &context.0.borrow().0 {
 					None => None,
-					Some(parent) => parent.get(key),
+					Some(parent) => f(parent, key),
 				},
 			}
 		}
-
-		pub fn set(&self, key: K, value: V) -> Option<V> {
-			fn f<K: Eq + std::hash::Hash, V>(context: &C<K, V>, key: &K) -> Option<C<K, V>> {
-				match context.0.borrow().1.contains_key(key) {
-					true => Some(C(context.0.clone())),
-					false => match &context.0.borrow().0 {
-						None => None,
-						Some(parent) => f(parent, key),
-					},
-				}
+		if !self.0.borrow().1.contains_key(&key) && self.0.borrow().0.is_some() {
+			if let Some(context) = f(self.0.borrow().0.as_ref().unwrap(), &key) {
+				return context.0.borrow_mut().1.insert(key, value);
 			}
-			if !self.0.borrow().1.contains_key(&key) && self.0.borrow().0.is_some() {
-				if let Some(context) = f(self.0.borrow().0.as_ref().unwrap(), &key) {
-					return context.0.borrow_mut().1.insert(key, value);
-				}
-			}
-			self.0.borrow_mut().1.insert(key, value)
 		}
+		self.0.borrow_mut().1.insert(key, value)
 	}
 }

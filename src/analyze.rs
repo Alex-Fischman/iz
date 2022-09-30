@@ -2,7 +2,7 @@ use crate::parse::{parse, Parsed, Tree as ParseTree};
 use crate::tokenize::{tokenize, Bracket};
 use crate::{Error, Location, PRELUDE_PATH};
 use std::collections::HashMap;
-type Context = crate::context::C<String, usize>;
+type Context = crate::Context<String, usize>;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Type {
