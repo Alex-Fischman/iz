@@ -26,7 +26,7 @@ impl Io {
 
 	fn combine(&mut self, other: &mut Io, types: &mut Types) -> Result<(), String> {
 		fn eq(a: usize, b: usize, types: &mut Types) -> Result<(), String> {
-			match (types[a].clone(), types[b].clone()) {
+			match (types.0[a].clone(), types.0[b].clone()) {
 				(Type::Int, Type::Int)
 				| (Type::Bool, Type::Bool)
 				| (Type::String, Type::String) => Ok(()),
@@ -99,7 +99,7 @@ impl Types {
 	}
 
 	fn clone_vars(&mut self, i: usize, vars: &mut HashMap<usize, usize>) -> usize {
-		match self[i].clone() {
+		match self.0[i].clone() {
 			Type::Int | Type::Bool | Type::String => i,
 			Type::Group(ts) => {
 				let t = Type::Group(ts.into_iter().map(|t| self.clone_vars(t, vars)).collect());
@@ -125,13 +125,6 @@ impl Types {
 				}
 			},
 		}
-	}
-}
-
-impl std::ops::Index<usize> for Types {
-	type Output = Type;
-	fn index(&self, i: usize) -> &Type {
-		&self.0[i]
 	}
 }
 
@@ -195,7 +188,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						}
 						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
 						"call" => {
-							match types[*io.outputs.last().unwrap()].clone() {
+							match types.0[*io.outputs.last().unwrap()].clone() {
 								Type::Block(Io { inputs, outputs }) => {
 									let mut i = inputs.clone();
 									i.push(types.add(Type::Block(Io::new(
@@ -229,7 +222,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 								.rev()
 								.find_map(|frame| frame.get(key))
 								.ok_or_else(|| Error(format!("\"{}\" not found", key), l))?;
-							match types[a].clone() {
+							match types.0[a].clone() {
 								Type::Block(io) => {
 									let mut vars = HashMap::new();
 									Io::new(
@@ -289,7 +282,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		Err(Error(
 			format!(
 				"program expected {:?}",
-				io.inputs.iter().map(|i| &types[*i]).collect::<Vec<&Type>>()
+				io.inputs.iter().map(|i| &types.0[*i]).collect::<Vec<&Type>>()
 			),
 			Location(0, 0),
 		))
