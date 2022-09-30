@@ -24,8 +24,8 @@ impl Io {
 		Io { inputs, outputs }
 	}
 
-	fn combine(&mut self, other: &mut Io, types: &mut [Type]) -> Result<(), String> {
-		fn eq(a: usize, b: usize, types: &mut [Type]) -> Result<(), String> {
+	fn combine(&mut self, other: &mut Io, types: &mut Types) -> Result<(), String> {
+		fn eq(a: usize, b: usize, types: &mut Types) -> Result<(), String> {
 			match (types[a].clone(), types[b].clone()) {
 				(Type::Int, Type::Int)
 				| (Type::Bool, Type::Bool)
@@ -49,11 +49,11 @@ impl Io {
 				}
 				(Type::Option(c), Type::Option(d)) => eq(c, d, types),
 				(Type::Unknown, c) => {
-					types[a] = c;
+					types.0[a] = c;
 					Ok(())
 				}
 				(c, Type::Unknown) => {
-					types[b] = c;
+					types.0[b] = c;
 					Ok(())
 				}
 				(a, b) => Err(format!("types aren't equal: {:?}, {:?}", a, b)),
@@ -80,6 +80,32 @@ pub struct Tree {
 	pub children: Vec<Tree>,
 }
 
+#[derive(Debug)]
+struct Types(Vec<Type>);
+
+impl Types {
+	fn new() -> Types {
+		Types(vec![Type::Int, Type::Bool, Type::String])
+	}
+
+	fn add(&mut self, t: Type) -> usize {
+		for (i, s) in self.0.iter().enumerate() {
+			if t != Type::Unknown && *s == t {
+				return i;
+			}
+		}
+		self.0.push(t);
+		self.0.len() - 1
+	}
+}
+
+impl std::ops::Index<usize> for Types {
+	type Output = Type;
+	fn index(&self, i: usize) -> &Type {
+		&self.0[i]
+	}
+}
+
 use std::collections::HashMap;
 type Context = Vec<HashMap<String, usize>>;
 pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
@@ -87,35 +113,32 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		parse_trees: &[ParseTree],
 		io: &mut Io,
 		context: &mut Context,
-		types: &mut Vec<Type>,
+		types: &mut Types,
 	) -> Result<Vec<Tree>, Error> {
-		fn add_type(t: Type, types: &mut Vec<Type>) -> usize {
-			types.push(t);
-			types.len() - 1
-		}
-		fn clone_vars(
-			i: usize,
-			types: &mut Vec<Type>,
-			vars: &mut HashMap<usize, usize>,
-		) -> usize {
+		fn clone_vars(i: usize, types: &mut Types, vars: &mut HashMap<usize, usize>) -> usize {
 			match types[i].clone() {
 				Type::Int | Type::Bool | Type::String => i,
-				Type::Group(ts) => add_type(
-					Type::Group(ts.into_iter().map(|t| clone_vars(t, types, vars)).collect()),
-					types,
-				),
-				Type::Block(io) => add_type(
-					Type::Block(Io::new(
+				Type::Group(ts) => {
+					let t = Type::Group(
+						ts.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
+					);
+					types.add(t)
+				}
+				Type::Block(io) => {
+					let t = Type::Block(Io::new(
 						io.inputs.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
 						io.outputs.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
-					)),
-					types,
-				),
-				Type::Option(t) => add_type(Type::Option(clone_vars(t, types, vars)), types),
+					));
+					types.add(t)
+				}
+				Type::Option(t) => {
+					let t = Type::Option(clone_vars(t, types, vars));
+					types.add(t)
+				}
 				Type::Unknown => match vars.get(&i) {
 					Some(j) => *j,
 					None => {
-						let v = add_type(Type::Unknown, types);
+						let v = types.add(Type::Unknown);
 						vars.insert(i, v);
 						v
 					}
@@ -140,7 +163,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						};
 						let b = analyze(&s[1..], io, context, types)?.remove(0);
 						children = vec![a, b];
-						let v = add_type(Type::Unknown, types);
+						let v = types.add(Type::Unknown);
 						t = Io::new(vec![v], vec![]);
 						let frame =
 							match context.iter_mut().rev().find(|frame| frame.contains_key(key))
@@ -168,37 +191,39 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						"true" | "false" => Io::new(vec![], vec![1]),
 						"add" | "sub" | "mul" => Io::new(vec![0, 0], vec![0]),
 						"eq" => {
-							let v = add_type(Type::Unknown, types);
+							let v = types.add(Type::Unknown);
 							Io::new(vec![v, v], vec![1])
 						}
 						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
-						"call" => match types[*io.outputs.last().unwrap()].clone() {
-							Type::Block(Io { inputs, outputs }) => {
-								let mut i = inputs.clone();
-								i.push(add_type(
-									Type::Block(Io::new(inputs.clone(), outputs.clone())),
-									types,
-								));
-								Io::new(i, outputs.clone())
+						"call" => {
+							match types[*io.outputs.last().unwrap()].clone() {
+								Type::Block(Io { inputs, outputs }) => {
+									let mut i = inputs.clone();
+									i.push(types.add(Type::Block(Io::new(
+										inputs.clone(),
+										outputs.clone(),
+									))));
+									Io::new(i, outputs.clone())
+								}
+								t => Err(Error(format!("expected block, found {:?}", t), l))?,
 							}
-							t => Err(Error(format!("expected block, found {:?}", t), l))?,
-						},
+						}
 						"_if_" => {
-							let v = add_type(Type::Unknown, types);
-							Io::new(vec![1, v], vec![add_type(Type::Option(v), types)])
+							let v = types.add(Type::Unknown);
+							Io::new(vec![1, v], vec![types.add(Type::Option(v))])
 						}
 						"_else_" => {
-							let v = add_type(Type::Unknown, types);
-							Io::new(vec![add_type(Type::Option(v), types), v], vec![v])
+							let v = types.add(Type::Unknown);
+							Io::new(vec![types.add(Type::Option(v)), v], vec![v])
 						}
 						"_while_" => Io::new(
 							vec![
-								add_type(Type::Block(Io::new(vec![], vec![1])), types),
-								add_type(Type::Block(Io::new(vec![], vec![])), types),
+								types.add(Type::Block(Io::new(vec![], vec![1]))),
+								types.add(Type::Block(Io::new(vec![], vec![]))),
 							],
 							vec![],
 						),
-						"print" => Io::new(vec![add_type(Type::Unknown, types)], vec![]),
+						"print" => Io::new(vec![types.add(Type::Unknown)], vec![]),
 						key => {
 							let a = *context
 								.iter()
@@ -237,9 +262,9 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					children = analyze(&tree.children, &mut a, context, types)?;
 					t = match b {
 						Bracket::Round => a,
-						Bracket::Curly => Io::new(vec![], vec![add_type(Type::Block(a), types)]),
+						Bracket::Curly => Io::new(vec![], vec![types.add(Type::Block(a))]),
 						Bracket::Square => {
-							Io::new(a.inputs, vec![add_type(Type::Group(a.outputs), types)])
+							Io::new(a.inputs, vec![types.add(Type::Group(a.outputs))])
 						}
 					};
 				}
@@ -255,12 +280,12 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		.collect::<Vec<char>>();
 	let mut io = Io::new(vec![], vec![]);
 	let mut context = vec![HashMap::new()];
-	let mut types = vec![Type::Int, Type::Bool, Type::String];
+	let mut types = Types::new();
 	let mut trees = vec![];
 	trees.extend(analyze(&parse(&tokenize(&prelude)?)?, &mut io, &mut context, &mut types)?);
 	trees.append(&mut analyze(parse_trees, &mut io, &mut context, &mut types)?);
 	if io.inputs.is_empty() {
-		Ok((trees, types))
+		Ok((trees, types.0))
 	} else {
 		Err(Error(
 			format!(
@@ -274,9 +299,8 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 
 #[test]
 fn analyze_test() {
-	let mut types = vec![Type::Int, Type::Bool, Type::String];
 	let mut io = Io::new(vec![], vec![1]);
-	io.combine(&mut Io::new(vec![0, 1], vec![0]), &mut types).unwrap();
+	io.combine(&mut Io::new(vec![0, 1], vec![0]), &mut Types::new()).unwrap();
 	assert_eq!(io, Io::new(vec![0], vec![0]));
 
 	let f = |s: &str| analyze(&parse(&tokenize(&s.chars().collect::<Vec<char>>())?)?);
