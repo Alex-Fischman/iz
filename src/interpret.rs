@@ -117,7 +117,10 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						},
 						(".", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(i), Value::Group(g)) => {
-								stack.push(g[i as usize].clone())
+								stack.push(match g.get(i as usize) {
+									Some(t) => Value::Some(Box::new(t.clone())),
+									None => Value::None,
+								})
 							}
 							_ => Err(Error("invalid . args".to_owned(), l))?,
 						},
@@ -228,5 +231,5 @@ fn interpret_test() {
 	assert_eq!(f("17 5 mod"), Ok(vec![Value::Int(2)]));
 	assert_eq!(f("mod@(5 2)"), Ok(vec![Value::Int(1)]));
 	assert_eq!(f("if false 1 else if true 2 else 3"), Ok(vec![Value::Int(2)]));
-	assert_eq!(f("[1 2 3].1 print"), Ok(vec![]));
+	assert_eq!(f("[1 2 3].1"), Ok(vec![Value::Some(Box::new(Value::Int(2)))]));
 }

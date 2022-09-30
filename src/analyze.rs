@@ -171,10 +171,13 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							Io::new(vec![v, v], vec![1])
 						}
 						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
-						"." => Io::new(
-							vec![types.add(Type::Unknown), 0],
-							vec![types.add(Type::Unknown)],
-						),
+						"." => {
+							let v = types.add(Type::Unknown);
+							Io::new(
+								vec![types.add(Type::Unknown), 0],
+								vec![types.add(Type::Option(v))],
+							)
+						}
 						"_if_" => {
 							let v = types.add(Type::Unknown);
 							Io::new(vec![1, v], vec![types.add(Type::Option(v))])

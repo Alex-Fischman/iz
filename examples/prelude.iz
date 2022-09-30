@@ -2,6 +2,7 @@ nop  = {}
 drop = {x = nop}
 dup  = {x = nop x x}
 swap = {b = nop a = nop b a}
+call = {f = nop f@()}
 
 _not_ = {b = nop         if b false else true}
 _and_ = {b = nop a = nop if a b     else false}
@@ -15,9 +16,4 @@ mod = {
 	b = nop a = nop
 	while {a >= b} {a = a - b}
 	a
-}
-
-call = {
-	f = nop
-	f@()
 }
