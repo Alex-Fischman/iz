@@ -2,8 +2,6 @@ use crate::analyze::{Tree, Type};
 use crate::parse::Parsed;
 use crate::tokenize::Bracket;
 use crate::{Error, Location};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -36,7 +34,9 @@ impl std::fmt::Display for Value {
 	}
 }
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context(Option<Rc<RefCell<Context>>>, HashMap<String, Value>);
 
