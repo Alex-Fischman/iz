@@ -9,7 +9,6 @@ pub enum Type {
 	Int,
 	Bool,
 	String,
-	Group(Vec<usize>),
 	Block(Io),
 	Option(usize),
 	Unknown,
@@ -64,10 +63,6 @@ impl Types {
 	fn clone_vars(&mut self, i: usize, vars: &mut HashMap<usize, usize>) -> usize {
 		match self.0[i].clone() {
 			Type::Int | Type::Bool | Type::String => i,
-			Type::Group(ts) => {
-				let t = Type::Group(ts.into_iter().map(|t| self.clone_vars(t, vars)).collect());
-				self.add(t)
-			}
 			Type::Block(io) => {
 				let t = Type::Block(Io::new(
 					io.inputs.into_iter().map(|t| self.clone_vars(t, vars)).collect(),
@@ -94,9 +89,6 @@ impl Types {
 		match (self.0[a].clone(), self.0[b].clone()) {
 			(Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::String, Type::String) => {
 				Ok(())
-			}
-			(Type::Group(c), Type::Group(d)) if c.len() == d.len() => {
-				c.into_iter().zip(d).try_fold((), |_, (e, f)| self.eq(e, f))
 			}
 			(Type::Block(c), Type::Block(d))
 				if c.inputs.len() == d.inputs.len() && c.outputs.len() == d.outputs.len() =>
@@ -232,11 +224,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					)?;
 					t = Io::new(vec![], vec![types.add(Type::Block(a))]);
 				}
-				Parsed::Brackets(Bracket::Square) => {
-					let mut a = Io::new(vec![], vec![]);
-					children = analyze(&tree.children, &mut a, context.clone(), types)?;
-					t = Io::new(a.inputs, vec![types.add(Type::Group(a.outputs))]);
-				}
+				Parsed::Brackets(Bracket::Square) => todo!(),
 			}
 			io.combine(&t, types).map_err(|s| Error(s, l))?;
 			out.push(Tree { io: t, data: tree.data.clone(), location: l, children });

@@ -7,7 +7,6 @@ type Operator<'a> = (&'a str, &'a str, usize, usize);
 pub const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("@", "@", 1, 1)], false),
 	(&[("not", "_not_", 0, 1)], true),
-	(&[(".", ".", 1, 1)], false),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1), ("-", "sub", 1, 1)], false),
 	(

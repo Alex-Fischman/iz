@@ -9,7 +9,6 @@ pub enum Value {
 	Int(i64),
 	Bool(bool),
 	String(String),
-	Group(Vec<Value>),
 	Block(Vec<Tree>, Context),
 	Some(Box<Value>),
 	None,
@@ -21,13 +20,6 @@ impl std::fmt::Display for Value {
 			Value::Int(i) => write!(f, "{}", i),
 			Value::Bool(b) => write!(f, "{}", b),
 			Value::String(s) => write!(f, "{}", s),
-			Value::Group(v) => {
-				write!(f, "[ ")?;
-				for v in v {
-					write!(f, "{} ", v)?;
-				}
-				write!(f, "]")
-			}
 			Value::Block(..) => write!(f, "Block"),
 			Value::Some(v) => write!(f, "Some({})", v),
 			Value::None => write!(f, "None"),
@@ -50,9 +42,6 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				(Value::Int(a), Value::Int(b)) => Ok(a == b),
 				(Value::Bool(a), Value::Bool(b)) => Ok(a == b),
 				(Value::String(a), Value::String(b)) => Ok(a == b),
-				(Value::Group(a), Value::Group(b)) => {
-					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b, l)?))
-				}
 				(Value::Block(..), Value::Block(..)) => Ok(false),
 				(Value::Some(a), Value::Some(b)) => eq(a, b, l),
 				(Value::Some(_), Value::None) | (Value::None, Value::Some(_)) => Ok(false),
@@ -115,15 +104,6 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
-						(".", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
-							(Value::Int(i), Value::Group(g)) => {
-								stack.push(match g.get(i as usize) {
-									Some(t) => Value::Some(Box::new(t.clone())),
-									None => Value::None,
-								})
-							}
-							_ => Err(Error("invalid . args".to_owned(), l))?,
-						},
 						("_if_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
 							(b, Value::Bool(true)) => stack.push(Value::Some(Box::new(b))),
 							(_, Value::Bool(false)) => stack.push(Value::None),
@@ -170,11 +150,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 					tree.children.clone(),
 					Context::new(Some(context.clone())),
 				)),
-				Parsed::Brackets(Bracket::Square) => {
-					let mut s = vec![];
-					interpret(&tree.children, &mut s, context.clone(), types)?;
-					stack.push(Value::Group(s));
-				}
+				Parsed::Brackets(Bracket::Square) => todo!(),
 			}
 		}
 		Ok(())
@@ -197,6 +173,7 @@ fn interpret_test() {
 		f("true 1 sub"),
 		Err(Error("types aren't equal: Bool, Int".to_owned(), Location(7, 3)))
 	);
+	assert_eq!(f("1 2 3"), Ok(vec![Value::Int(1), Value::Int(2), Value::Int(3),]));
 	assert_eq!(f("1 sub"), Err(Error("program expected [Int]".to_owned(), Location(0, 0))));
 	assert_eq!(f("1 - 2"), Ok(vec![Value::Int(-1)]));
 	assert_eq!(f("1 2 sub"), Ok(vec![Value::Int(-1)]));
@@ -204,16 +181,6 @@ fn interpret_test() {
 	assert_eq!(f("1 == 2"), Ok(vec![Value::Bool(false)]));
 	assert_eq!(f("1 != 2"), Ok(vec![Value::Bool(true)]));
 	assert_eq!(f("1 > 2"), Ok(vec![Value::Bool(false)]));
-	assert_eq!(
-		f("1 2 [3 4] 5 6"),
-		Ok(vec![
-			Value::Int(1),
-			Value::Int(2),
-			Value::Group(vec![Value::Int(3), Value::Int(4)]),
-			Value::Int(5),
-			Value::Int(6)
-		])
-	);
 	assert_eq!(f("(2 mul)@3"), Ok(vec![Value::Int(6)]));
 	assert_eq!(f("{2 * 3} call"), Ok(vec![Value::Int(6)]));
 	assert_eq!(f("if true 1"), Ok(vec![Value::Some(Box::new(Value::Int(1)))]));
@@ -231,5 +198,4 @@ fn interpret_test() {
 	assert_eq!(f("17 5 mod"), Ok(vec![Value::Int(2)]));
 	assert_eq!(f("mod@(5 2)"), Ok(vec![Value::Int(1)]));
 	assert_eq!(f("if false 1 else if true 2 else 3"), Ok(vec![Value::Int(2)]));
-	assert_eq!(f("[1 2 3].1"), Ok(vec![Value::Some(Box::new(Value::Int(2)))]));
 }
