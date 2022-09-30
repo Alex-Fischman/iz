@@ -148,7 +148,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						let v = add_type(Type::Unknown, types);
 						t = Io::new(vec![v], vec![]);
 						let frame =
-							match context.iter_mut().find(|frame| frame.contains_key(key)) {
+							match context.iter_mut().rev().find(|frame| frame.contains_key(key)) {
 								Some(frame) => frame,
 								None => context.last_mut().unwrap(),
 							};
@@ -206,6 +206,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						key => {
 							let a = *context
 								.iter()
+								.rev()
 								.find_map(|frame| frame.get(key))
 								.ok_or_else(|| Error(format!("\"{}\" not found", key), l))?;
 							match types[a].clone() {

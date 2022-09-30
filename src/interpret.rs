@@ -87,7 +87,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						None => Err(Error("no var name".to_owned(), l))?,
 					};
 					interpret(&tree.children[1..], stack, context, types)?;
-					let frame = match context.iter_mut().find(|frame| frame.contains_key(key)) {
+					let frame = match context.iter_mut().rev().find(|frame| frame.contains_key(key)) {
 						Some(frame) => frame,
 						None => context.last_mut().unwrap(),
 					};
@@ -160,6 +160,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							stack.push(
 								context
 									.iter()
+									.rev()
 									.find_map(|frame| frame.get(key))
 									.ok_or_else(|| Error(format!("{} not found", key), l))?
 									.clone(),
