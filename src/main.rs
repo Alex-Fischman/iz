@@ -49,13 +49,12 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 #[derive(Clone, Debug, PartialEq)]
-pub struct Context<K: Eq + Hash, V>(Rc<RefCell<ContextData<K, V>>>);
-#[derive(Clone, Debug, PartialEq)]
-struct ContextData<K: Eq + Hash, V>(Option<Context<K, V>>, HashMap<K, V>);
+pub struct Context<K: Clone + Eq + Hash, V: Clone>(Rc<RefCell<ContextData<K, V>>>);
+type ContextData<K, V> = (Option<Context<K, V>>, HashMap<K, V>);
 
-impl<K: Eq + Hash, V> Context<K, V> {
+impl<K: Clone + Eq + Hash, V: Clone> Context<K, V> {
 	pub fn new(parent: Option<Context<K, V>>) -> Context<K, V> {
-		Context(Rc::new(RefCell::new(ContextData(parent, HashMap::new()))))
+		Context(Rc::new(RefCell::new((parent, HashMap::new()))))
 	}
 
 	pub fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<V>
@@ -73,20 +72,18 @@ impl<K: Eq + Hash, V> Context<K, V> {
 	}
 
 	pub fn set(&self, key: K, value: V) -> Option<V> {
-		fn f<K: Eq + Hash, V>(context: &Context<K, V>, key: &K) -> Option<Context<K, V>> {
+		fn f<K: Clone + Eq + Hash, V: Clone>(
+			context: &Context<K, V>,
+			key: &K,
+		) -> Option<Context<K, V>> {
 			match context.0.borrow().1.contains_key(key) {
-				true => Some(Context(context.0.clone())),
+				true => Some(context.clone()),
 				false => match &context.0.borrow().0 {
 					None => None,
 					Some(parent) => f(parent, key),
 				},
 			}
 		}
-		if !self.0.borrow().1.contains_key(&key) && self.0.borrow().0.is_some() {
-			if let Some(context) = f(self.0.borrow().0.as_ref().unwrap(), &key) {
-				return context.0.borrow_mut().1.insert(key, value);
-			}
-		}
-		self.0.borrow_mut().1.insert(key, value)
+		f(self, &key).unwrap_or_else(|| self.clone()).0.borrow_mut().1.insert(key, value)
 	}
 }
