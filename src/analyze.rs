@@ -84,12 +84,6 @@ pub struct Tree {
 	pub children: Vec<Tree>,
 }
 
-impl Tree {
-	fn new(tree: &ParseTree, io: Io, children: Vec<Tree>) -> Tree {
-		Tree { io, data: tree.data.clone(), location: tree.location, children }
-	}
-}
-
 use std::collections::HashMap;
 type Context = Vec<HashMap<String, usize>>;
 pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Error> {
@@ -142,7 +136,12 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					s @ [a @ ParseTree { data: Parsed::Name(key), children: cs, .. }, _]
 						if cs.is_empty() =>
 					{
-						let a = Tree::new(a, Io::new(vec![], vec![]), vec![]);
+						let a = Tree {
+							io: Io::new(vec![], vec![]),
+							data: a.data.clone(),
+							location: l,
+							children: vec![],
+						};
 						let b = analyze(&s[1..], io, context, types)?.remove(0);
 						children = vec![a, b];
 						let v = add_type(Type::Unknown, types);
@@ -250,7 +249,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 				}
 			}
 			io.combine(&mut t, types).map_err(|s| Error(s, l))?;
-			out.push(Tree::new(tree, t, children));
+			out.push(Tree { io: t, data: tree.data.clone(), location: l, children });
 		}
 		Ok(out)
 	}
