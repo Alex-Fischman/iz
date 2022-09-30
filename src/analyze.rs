@@ -97,6 +97,35 @@ impl Types {
 		self.0.push(t);
 		self.0.len() - 1
 	}
+
+	fn clone_vars(&mut self, i: usize, vars: &mut HashMap<usize, usize>) -> usize {
+		match self[i].clone() {
+			Type::Int | Type::Bool | Type::String => i,
+			Type::Group(ts) => {
+				let t = Type::Group(ts.into_iter().map(|t| self.clone_vars(t, vars)).collect());
+				self.add(t)
+			}
+			Type::Block(io) => {
+				let t = Type::Block(Io::new(
+					io.inputs.into_iter().map(|t| self.clone_vars(t, vars)).collect(),
+					io.outputs.into_iter().map(|t| self.clone_vars(t, vars)).collect(),
+				));
+				self.add(t)
+			}
+			Type::Option(t) => {
+				let t = Type::Option(self.clone_vars(t, vars));
+				self.add(t)
+			}
+			Type::Unknown => match vars.get(&i) {
+				Some(j) => *j,
+				None => {
+					let v = self.add(Type::Unknown);
+					vars.insert(i, v);
+					v
+				}
+			},
+		}
+	}
 }
 
 impl std::ops::Index<usize> for Types {
@@ -115,36 +144,6 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		context: &mut Context,
 		types: &mut Types,
 	) -> Result<Vec<Tree>, Error> {
-		fn clone_vars(i: usize, types: &mut Types, vars: &mut HashMap<usize, usize>) -> usize {
-			match types[i].clone() {
-				Type::Int | Type::Bool | Type::String => i,
-				Type::Group(ts) => {
-					let t = Type::Group(
-						ts.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
-					);
-					types.add(t)
-				}
-				Type::Block(io) => {
-					let t = Type::Block(Io::new(
-						io.inputs.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
-						io.outputs.into_iter().map(|t| clone_vars(t, types, vars)).collect(),
-					));
-					types.add(t)
-				}
-				Type::Option(t) => {
-					let t = Type::Option(clone_vars(t, types, vars));
-					types.add(t)
-				}
-				Type::Unknown => match vars.get(&i) {
-					Some(j) => *j,
-					None => {
-						let v = types.add(Type::Unknown);
-						vars.insert(i, v);
-						v
-					}
-				},
-			}
-		}
 		let mut out = vec![];
 		for tree in parse_trees {
 			let l = tree.location;
@@ -236,11 +235,11 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 									Io::new(
 										io.inputs
 											.into_iter()
-											.map(|t| clone_vars(t, types, &mut vars))
+											.map(|t| types.clone_vars(t, &mut vars))
 											.collect(),
 										io.outputs
 											.into_iter()
-											.map(|t| clone_vars(t, types, &mut vars))
+											.map(|t| types.clone_vars(t, &mut vars))
 											.collect(),
 									)
 								}
