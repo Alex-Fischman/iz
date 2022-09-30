@@ -2,6 +2,9 @@ use crate::analyze::{Tree, Type};
 use crate::parse::Parsed;
 use crate::tokenize::Bracket;
 use crate::{Error, Location};
+use std::cell::RefCell;
+use std::rc::Rc;
+type Context = crate::Context<String, Value>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -31,43 +34,6 @@ impl std::fmt::Display for Value {
 			Value::Some(v) => write!(f, "Some({})", v),
 			Value::None => write!(f, "None"),
 		}
-	}
-}
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-#[derive(Clone, Debug, PartialEq)]
-pub struct Context(Option<Rc<RefCell<Context>>>, HashMap<String, Value>);
-
-impl Context {
-	fn get(&self, key: &str) -> Option<Value> {
-		match self.1.get(key) {
-			Some(value) => Some(value.clone()),
-			None => match &self.0 {
-				None => None,
-				Some(parent) => parent.borrow().get(key),
-			},
-		}
-	}
-
-	fn set(&mut self, key: String, value: Value) {
-		fn f(context: &Rc<RefCell<Context>>, key: &str) -> Option<Rc<RefCell<Context>>> {
-			match context.borrow().1.contains_key(key) {
-				true => Some(context.clone()),
-				false => match &context.borrow().0 {
-					None => None,
-					Some(parent) => f(parent, key),
-				},
-			}
-		}
-		if !self.1.contains_key(&key) && self.0.is_some() {
-			if let Some(context) = f(self.0.as_ref().unwrap(), &key) {
-				context.borrow_mut().1.insert(key, value);
-				return;
-			}
-		}
-		self.1.insert(key, value);
 	}
 }
 
@@ -197,7 +163,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				}
 				Parsed::Brackets(Bracket::Curly) => stack.push(Value::Block(
 					tree.children.clone(),
-					Rc::new(RefCell::new(Context(Some(context.clone()), HashMap::new()))),
+					Context::new_from(context.clone()),
 				)),
 				Parsed::Brackets(Bracket::Square) => {
 					let mut s = vec![];
@@ -209,8 +175,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 		Ok(())
 	}
 	let mut stack = vec![];
-	let context = Rc::new(RefCell::new(Context(None, HashMap::new())));
-	interpret(trees, &mut stack, context, types)?;
+	interpret(trees, &mut stack, Context::new(), types)?;
 	Ok(stack)
 }
 

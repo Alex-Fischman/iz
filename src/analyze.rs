@@ -1,6 +1,10 @@
 use crate::parse::{parse, Parsed, Tree as ParseTree};
 use crate::tokenize::{tokenize, Bracket};
 use crate::{Error, Location, PRELUDE_PATH};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+type Context = crate::Context<String, usize>;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Type {
@@ -114,42 +118,6 @@ impl Types {
 			}
 			(a, b) => Err(format!("types aren't equal: {:?}, {:?}", a, b)),
 		}
-	}
-}
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-#[derive(Clone, Debug, PartialEq)]
-pub struct Context(Option<Rc<RefCell<Context>>>, HashMap<String, usize>);
-
-impl Context {
-	fn get(&self, key: &str) -> Option<usize> {
-		match self.1.get(key) {
-			Some(value) => Some(*value),
-			None => match &self.0 {
-				None => None,
-				Some(parent) => parent.borrow().get(key),
-			},
-		}
-	}
-
-	fn set(&mut self, key: String, value: usize) -> Option<usize> {
-		fn f(context: &Rc<RefCell<Context>>, key: &str) -> Option<Rc<RefCell<Context>>> {
-			match context.borrow().1.contains_key(key) {
-				true => Some(context.clone()),
-				false => match &context.borrow().0 {
-					None => None,
-					Some(parent) => f(parent, key),
-				},
-			}
-		}
-		if !self.1.contains_key(&key) && self.0.is_some() {
-			if let Some(context) = f(self.0.as_ref().unwrap(), &key) {
-				return context.borrow_mut().1.insert(key, value);
-			}
-		}
-		self.1.insert(key, value)
 	}
 }
 
@@ -276,7 +244,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					children = analyze(
 						&tree.children,
 						&mut a,
-						Rc::new(RefCell::new(Context(Some(context.clone()), HashMap::new()))),
+						Context::new_from(context.clone()),
 						types,
 					)?;
 					t = Io::new(vec![], vec![types.add(Type::Block(a))]);
@@ -297,7 +265,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		.chars()
 		.collect::<Vec<char>>();
 	let mut io = Io::new(vec![], vec![]);
-	let context = Rc::new(RefCell::new(Context(None, HashMap::new())));
+	let context = Context::new();
 	let mut types = Types::new();
 	let mut trees = vec![];
 	trees.extend(analyze(&parse(&tokenize(&prelude)?)?, &mut io, context.clone(), &mut types)?);
