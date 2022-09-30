@@ -87,10 +87,11 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						None => Err(Error("no var name".to_owned(), l))?,
 					};
 					interpret(&tree.children[1..], stack, context, types)?;
-					let frame = match context.iter_mut().rev().find(|frame| frame.contains_key(key)) {
-						Some(frame) => frame,
-						None => context.last_mut().unwrap(),
-					};
+					let frame =
+						match context.iter_mut().rev().find(|frame| frame.contains_key(key)) {
+							Some(frame) => frame,
+							None => context.last_mut().unwrap(),
+						};
 					frame.insert(key.to_owned(), pop(stack, l)?);
 				}
 				Parsed::Name(i) if i == "@" => {
