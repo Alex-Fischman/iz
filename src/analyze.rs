@@ -1,10 +1,8 @@
 use crate::parse::{parse, Parsed, Tree as ParseTree};
 use crate::tokenize::{tokenize, Bracket};
 use crate::{Error, Location, PRELUDE_PATH};
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
-type Context = crate::Context<String, usize>;
+type Context = crate::context::C<String, usize>;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Type {
@@ -125,7 +123,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 	fn analyze(
 		parse_trees: &[ParseTree],
 		io: &mut Io,
-		context: Rc<RefCell<Context>>,
+		context: Context,
 		types: &mut Types,
 	) -> Result<Vec<Tree>, Error> {
 		let mut out = vec![];
@@ -153,7 +151,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 
 					let v = types.add(Type::Unknown);
 					t = Io::new(vec![v], vec![]);
-					if let Some(w) = context.borrow_mut().set(key, v) {
+					if let Some(w) = context.set(key, v) {
 						types.eq(v, w).map_err(|s| Error(s, l))?;
 					}
 				}
@@ -205,7 +203,6 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							"print" => Io::new(vec![types.add(Type::Unknown)], vec![]),
 							key => {
 								let a = context
-									.borrow()
 									.get(key)
 									.ok_or_else(|| Error(format!("{} not found", key), l))?;
 								match types.0[a].clone() {

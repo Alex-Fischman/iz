@@ -2,9 +2,7 @@ use crate::analyze::{Tree, Type};
 use crate::parse::Parsed;
 use crate::tokenize::Bracket;
 use crate::{Error, Location};
-use std::cell::RefCell;
-use std::rc::Rc;
-type Context = crate::Context<String, Value>;
+type Context = crate::context::C<String, Value>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -12,7 +10,7 @@ pub enum Value {
 	Bool(bool),
 	String(String),
 	Group(Vec<Value>),
-	Block(Vec<Tree>, Rc<RefCell<Context>>),
+	Block(Vec<Tree>, Context),
 	Some(Box<Value>),
 	None,
 }
@@ -41,7 +39,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 	fn interpret(
 		trees: &[Tree],
 		stack: &mut Vec<Value>,
-		context: Rc<RefCell<Context>>,
+		context: Context,
 		types: &[Type],
 	) -> Result<(), Error> {
 		fn pop(stack: &mut Vec<Value>, l: Location) -> Result<Value, Error> {
@@ -78,7 +76,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						None => Err(Error("no var name".to_owned(), l))?,
 					};
 					interpret(&tree.children[1..], stack, context.clone(), types)?;
-					context.borrow_mut().set(key.to_owned(), pop(stack, l)?);
+					context.set(key.to_owned(), pop(stack, l)?);
 				}
 				Parsed::Name(i) if i == "@" => {
 					interpret(&tree.children[1..], stack, context.clone(), types)?;
@@ -146,7 +144,6 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						(key, _, _) => {
 							stack.push(
 								context
-									.borrow()
 									.get(key)
 									.ok_or_else(|| Error(format!("{} not found", key), l))?,
 							);

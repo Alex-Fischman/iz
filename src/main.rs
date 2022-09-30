@@ -44,54 +44,54 @@ fn main() {
 
 const PRELUDE_PATH: &str = "/home/alex/Programming/iz/examples/prelude.iz";
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::rc::Rc;
-#[derive(Clone, Debug, PartialEq)]
-pub struct Context<K: Eq + Hash, V>(Option<Rc<RefCell<Context<K, V>>>>, HashMap<K, V>);
+mod context {
+	use std::cell::RefCell;
+	use std::collections::HashMap;
+	use std::rc::Rc;
+	#[derive(Clone, Debug, PartialEq)]
+	pub struct Context<K: Eq + std::hash::Hash, V>(Option<C<K, V>>, HashMap<K, V>);
+	#[derive(Clone, Debug, PartialEq)]
+	pub struct C<K: Eq + std::hash::Hash, V>(Rc<RefCell<Context<K, V>>>);
 
-impl<K: Eq + Hash, V> Context<K, V> {
-	fn new() -> Rc<RefCell<Context<K, V>>> {
-		Rc::new(RefCell::new(Context(None, HashMap::new())))
-	}
-
-	fn new_from(parent: Rc<RefCell<Context<K, V>>>) -> Rc<RefCell<Context<K, V>>> {
-		Rc::new(RefCell::new(Context(Some(parent), HashMap::new())))
-	}
-
-	fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<V>
-	where
-		K: std::borrow::Borrow<Q>,
-		V: Clone,
-	{
-		match self.1.get(key) {
-			Some(value) => Some(value.clone()),
-			None => match &self.0 {
-				None => None,
-				Some(parent) => parent.borrow().get(key),
-			},
+	impl<K: Eq + std::hash::Hash, V> C<K, V> {
+		pub fn new() -> C<K, V> {
+			C(Rc::new(RefCell::new(Context(None, HashMap::new()))))
 		}
-	}
 
-	fn set(&mut self, key: K, value: V) -> Option<V> {
-		fn f<K: Eq + Hash, V>(
-			context: &Rc<RefCell<Context<K, V>>>,
-			key: &K,
-		) -> Option<Rc<RefCell<Context<K, V>>>> {
-			match context.borrow().1.contains_key(key) {
-				true => Some(context.clone()),
-				false => match &context.borrow().0 {
+		pub fn new_from(parent: C<K, V>) -> C<K, V> {
+			C(Rc::new(RefCell::new(Context(Some(parent), HashMap::new()))))
+		}
+
+		pub fn get<Q: Eq + std::hash::Hash + ?Sized>(&self, key: &Q) -> Option<V>
+		where
+			K: std::borrow::Borrow<Q>,
+			V: Clone, // todo: remove?
+		{
+			match self.0.borrow().1.get(key) {
+				Some(value) => Some(value.clone()),
+				None => match &self.0.borrow().0 {
 					None => None,
-					Some(parent) => f(parent, key),
+					Some(parent) => parent.get(key),
 				},
 			}
 		}
-		if !self.1.contains_key(&key) && self.0.is_some() {
-			if let Some(context) = f(self.0.as_ref().unwrap(), &key) {
-				return context.borrow_mut().1.insert(key, value);
+
+		pub fn set(&self, key: K, value: V) -> Option<V> {
+			fn f<K: Eq + std::hash::Hash, V>(context: &C<K, V>, key: &K) -> Option<C<K, V>> {
+				match context.0.borrow().1.contains_key(key) {
+					true => Some(C(context.0.clone())),
+					false => match &context.0.borrow().0 {
+						None => None,
+						Some(parent) => f(parent, key),
+					},
+				}
 			}
+			if !self.0.borrow().1.contains_key(&key) && self.0.borrow().0.is_some() {
+				if let Some(context) = f(self.0.borrow().0.as_ref().unwrap(), &key) {
+					return context.0.borrow_mut().1.insert(key, value);
+				}
+			}
+			self.0.borrow_mut().1.insert(key, value)
 		}
-		self.1.insert(key, value)
 	}
 }
