@@ -16,3 +16,8 @@ mod = {
 	while {a >= b} {a = a - b}
 	a
 }
+
+call = {
+	f = nop
+	f@()
+}

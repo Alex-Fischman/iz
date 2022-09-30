@@ -163,64 +163,56 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 				}
 				Parsed::Name(i) => {
 					children = analyze(&tree.children, io, context.clone(), types)?;
-					t =
-						match i.as_str() {
-							"true" | "false" => Io::new(vec![], vec![1]),
-							"add" | "sub" | "mul" => Io::new(vec![0, 0], vec![0]),
-							"eq" => {
-								let v = types.add(Type::Unknown);
-								Io::new(vec![v, v], vec![1])
-							}
-							"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
-							"call" => match types.0[*io.outputs.last().unwrap()].clone() {
-								Type::Block(Io { inputs, outputs }) => {
-									let mut i = inputs.clone();
-									i.push(types.add(Type::Block(Io::new(
-										inputs.clone(),
-										outputs.clone(),
-									))));
-									Io::new(i, outputs.clone())
+					t = match i.as_str() {
+						"true" | "false" => Io::new(vec![], vec![1]),
+						"add" | "sub" | "mul" => Io::new(vec![0, 0], vec![0]),
+						"eq" => {
+							let v = types.add(Type::Unknown);
+							Io::new(vec![v, v], vec![1])
+						}
+						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
+						"." => Io::new(
+							vec![types.add(Type::Unknown), 0],
+							vec![types.add(Type::Unknown)],
+						),
+						"_if_" => {
+							let v = types.add(Type::Unknown);
+							Io::new(vec![1, v], vec![types.add(Type::Option(v))])
+						}
+						"_else_" => {
+							let v = types.add(Type::Unknown);
+							Io::new(vec![types.add(Type::Option(v)), v], vec![v])
+						}
+						"_while_" => Io::new(
+							vec![
+								types.add(Type::Block(Io::new(vec![], vec![1]))),
+								types.add(Type::Block(Io::new(vec![], vec![]))),
+							],
+							vec![],
+						),
+						"print" => Io::new(vec![types.add(Type::Unknown)], vec![]),
+						key => {
+							let a = context
+								.get(key)
+								.ok_or_else(|| Error(format!("{} not found", key), l))?;
+							match types.0[a].clone() {
+								Type::Block(io) => {
+									let mut vars = HashMap::new();
+									Io::new(
+										io.inputs
+											.into_iter()
+											.map(|t| types.clone_vars(t, &mut vars))
+											.collect(),
+										io.outputs
+											.into_iter()
+											.map(|t| types.clone_vars(t, &mut vars))
+											.collect(),
+									)
 								}
-								t => Err(Error(format!("expected block, found {:?}", t), l))?,
-							},
-							"_if_" => {
-								let v = types.add(Type::Unknown);
-								Io::new(vec![1, v], vec![types.add(Type::Option(v))])
+								_ => Io::new(vec![], vec![a]),
 							}
-							"_else_" => {
-								let v = types.add(Type::Unknown);
-								Io::new(vec![types.add(Type::Option(v)), v], vec![v])
-							}
-							"_while_" => Io::new(
-								vec![
-									types.add(Type::Block(Io::new(vec![], vec![1]))),
-									types.add(Type::Block(Io::new(vec![], vec![]))),
-								],
-								vec![],
-							),
-							"print" => Io::new(vec![types.add(Type::Unknown)], vec![]),
-							key => {
-								let a = context
-									.get(key)
-									.ok_or_else(|| Error(format!("{} not found", key), l))?;
-								match types.0[a].clone() {
-									Type::Block(io) => {
-										let mut vars = HashMap::new();
-										Io::new(
-											io.inputs
-												.into_iter()
-												.map(|t| types.clone_vars(t, &mut vars))
-												.collect(),
-											io.outputs
-												.into_iter()
-												.map(|t| types.clone_vars(t, &mut vars))
-												.collect(),
-										)
-									}
-									_ => Io::new(vec![], vec![a]),
-								}
-							}
-						};
+						}
+					};
 				}
 				Parsed::Number(_) => t = Io::new(vec![], vec![0]),
 				Parsed::String(_) => t = Io::new(vec![], vec![2]),

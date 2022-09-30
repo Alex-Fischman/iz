@@ -115,7 +115,12 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
-						("call", _, _) => call(stack, types, l)?,
+						(".", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
+							(Value::Int(i), Value::Group(g)) => {
+								stack.push(g[i as usize].clone())
+							}
+							_ => Err(Error("invalid . args".to_owned(), l))?,
+						},
 						("_if_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
 							(b, Value::Bool(true)) => stack.push(Value::Some(Box::new(b))),
 							(_, Value::Bool(false)) => stack.push(Value::None),
@@ -222,5 +227,6 @@ fn interpret_test() {
 	assert_eq!(f("true or  false"), Ok(vec![Value::Bool(true)]));
 	assert_eq!(f("17 5 mod"), Ok(vec![Value::Int(2)]));
 	assert_eq!(f("mod@(5 2)"), Ok(vec![Value::Int(1)]));
-	assert_eq!(f("if false 1 else if true 2 else 3"), Ok(vec![Value::Int(2)]))
+	assert_eq!(f("if false 1 else if true 2 else 3"), Ok(vec![Value::Int(2)]));
+	assert_eq!(f("[1 2 3].1 print"), Ok(vec![]));
 }
