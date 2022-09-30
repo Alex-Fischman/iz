@@ -128,8 +128,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 	) -> Result<Vec<Tree>, Error> {
 		let mut out = vec![];
 		for tree in parse_trees {
-			let l = tree.location;
-			let (mut t, mut children);
+			let (l, mut t, mut children) = (tree.location, Io::new(vec![], vec![]), vec![]);
 			match &tree.data {
 				Parsed::Name(i) if i == "=" => {
 					let key = match tree.children.get(0) {
@@ -156,7 +155,6 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					}
 				}
 				Parsed::Name(i) if i == "@" => {
-					t = Io::new(vec![], vec![]);
 					children = analyze(&tree.children[1..], &mut t, context.clone(), types)?;
 					children.splice(
 						0..0,
@@ -224,16 +222,9 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							}
 						};
 				}
-				Parsed::Number(_) => {
-					children = analyze(&tree.children, io, context.clone(), types)?;
-					t = Io::new(vec![], vec![0]);
-				}
-				Parsed::String(_) => {
-					children = analyze(&tree.children, io, context.clone(), types)?;
-					t = Io::new(vec![], vec![2]);
-				}
+				Parsed::Number(_) => t = Io::new(vec![], vec![0]),
+				Parsed::String(_) => t = Io::new(vec![], vec![2]),
 				Parsed::Brackets(Bracket::Round) => {
-					t = Io::new(vec![], vec![]);
 					children = analyze(&tree.children, &mut t, context.clone(), types)?;
 				}
 				Parsed::Brackets(Bracket::Curly) => {
@@ -266,7 +257,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 	let mut types = Types::new();
 	let mut trees = vec![];
 	trees.extend(analyze(&parse(&tokenize(&prelude)?)?, &mut io, context.clone(), &mut types)?);
-	trees.append(&mut analyze(parse_trees, &mut io, context, &mut types)?);
+	trees.extend(analyze(parse_trees, &mut io, context, &mut types)?);
 	if io.inputs.is_empty() {
 		Ok((trees, types.0))
 	} else {
