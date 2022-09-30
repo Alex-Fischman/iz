@@ -24,10 +24,6 @@ impl Io {
 		Io { inputs, outputs }
 	}
 
-	fn last(&self, l: Location) -> Result<usize, Error> {
-		self.outputs.last().cloned().ok_or_else(|| Error("no value on stack".to_owned(), l))
-	}
-
 	fn combine(&mut self, other: &mut Io, types: &mut [Type]) -> Result<(), String> {
 		fn eq(a: usize, b: usize, types: &mut [Type]) -> Result<(), String> {
 			match (types[a].clone(), types[b].clone()) {
@@ -176,7 +172,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							Io::new(vec![v, v], vec![1])
 						}
 						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
-						"call" => match types[io.last(l)?].clone() {
+						"call" => match types[*io.outputs.last().unwrap()].clone() {
 							Type::Block(Io { inputs, outputs }) => {
 								let mut i = inputs.clone();
 								i.push(add_type(
