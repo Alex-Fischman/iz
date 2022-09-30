@@ -54,18 +54,14 @@ mod context {
 	pub struct C<K: Eq + std::hash::Hash, V>(Rc<RefCell<Context<K, V>>>);
 
 	impl<K: Eq + std::hash::Hash, V> C<K, V> {
-		pub fn new() -> C<K, V> {
-			C(Rc::new(RefCell::new(Context(None, HashMap::new()))))
-		}
-
-		pub fn new_from(parent: C<K, V>) -> C<K, V> {
-			C(Rc::new(RefCell::new(Context(Some(parent), HashMap::new()))))
+		pub fn new(parent: Option<C<K, V>>) -> C<K, V> {
+			C(Rc::new(RefCell::new(Context(parent, HashMap::new()))))
 		}
 
 		pub fn get<Q: Eq + std::hash::Hash + ?Sized>(&self, key: &Q) -> Option<V>
 		where
 			K: std::borrow::Borrow<Q>,
-			V: Clone, // todo: remove?
+			V: Clone,
 		{
 			match self.0.borrow().1.get(key) {
 				Some(value) => Some(value.clone()),

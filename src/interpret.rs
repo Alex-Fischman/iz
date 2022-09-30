@@ -160,7 +160,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				}
 				Parsed::Brackets(Bracket::Curly) => stack.push(Value::Block(
 					tree.children.clone(),
-					Context::new_from(context.clone()),
+					Context::new(Some(context.clone())),
 				)),
 				Parsed::Brackets(Bracket::Square) => {
 					let mut s = vec![];
@@ -172,7 +172,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 		Ok(())
 	}
 	let mut stack = vec![];
-	interpret(trees, &mut stack, Context::new(), types)?;
+	interpret(trees, &mut stack, Context::new(None), types)?;
 	Ok(stack)
 }
 

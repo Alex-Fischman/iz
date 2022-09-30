@@ -241,7 +241,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					children = analyze(
 						&tree.children,
 						&mut a,
-						Context::new_from(context.clone()),
+						Context::new(Some(context.clone())),
 						types,
 					)?;
 					t = Io::new(vec![], vec![types.add(Type::Block(a))]);
@@ -262,7 +262,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		.chars()
 		.collect::<Vec<char>>();
 	let mut io = Io::new(vec![], vec![]);
-	let context = Context::new();
+	let context = Context::new(None);
 	let mut types = Types::new();
 	let mut trees = vec![];
 	trees.extend(analyze(&parse(&tokenize(&prelude)?)?, &mut io, context.clone(), &mut types)?);
