@@ -11,7 +11,7 @@ pub enum Type {
 	String,
 	Block(Io),
 	Option(usize),
-	Unknown,
+	Var,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -74,10 +74,10 @@ impl Types {
 				let t = Type::Option(self.clone_vars(t, vars));
 				self.add(t)
 			}
-			Type::Unknown => match vars.get(&i) {
+			Type::Var => match vars.get(&i) {
 				Some(j) => *j,
 				None => {
-					let v = self.add(Type::Unknown);
+					let v = self.add(Type::Var);
 					vars.insert(i, v);
 					v
 				}
@@ -98,11 +98,11 @@ impl Types {
 				Ok(())
 			}
 			(Type::Option(c), Type::Option(d)) => self.eq(c, d),
-			(Type::Unknown, c) => {
+			(Type::Var, c) => {
 				self.0[a] = c;
 				Ok(())
 			}
-			(c, Type::Unknown) => {
+			(c, Type::Var) => {
 				self.0[b] = c;
 				Ok(())
 			}
@@ -140,7 +140,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						},
 					);
 
-					let v = types.add(Type::Unknown);
+					let v = types.add(Type::Var);
 					t = Io::new(vec![v], vec![]);
 					if let Some(w) = context.set(key, v) {
 						types.eq(v, w).map_err(|s| Error(s, l))?;
@@ -159,23 +159,23 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 						"true" | "false" => Io::new(vec![], vec![1]),
 						"add" | "sub" | "mul" => Io::new(vec![0, 0], vec![0]),
 						"eq" => {
-							let v = types.add(Type::Unknown);
+							let v = types.add(Type::Var);
 							Io::new(vec![v, v], vec![1])
 						}
 						"lt" | "gt" => Io::new(vec![0, 0], vec![1]),
 						"." => {
-							let v = types.add(Type::Unknown);
+							let v = types.add(Type::Var);
 							Io::new(
-								vec![types.add(Type::Unknown), 0],
+								vec![types.add(Type::Var), 0],
 								vec![types.add(Type::Option(v))],
 							)
 						}
 						"_if_" => {
-							let v = types.add(Type::Unknown);
+							let v = types.add(Type::Var);
 							Io::new(vec![1, v], vec![types.add(Type::Option(v))])
 						}
 						"_else_" => {
-							let v = types.add(Type::Unknown);
+							let v = types.add(Type::Var);
 							Io::new(vec![types.add(Type::Option(v)), v], vec![v])
 						}
 						"_while_" => Io::new(
@@ -185,7 +185,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							],
 							vec![],
 						),
-						"print" => Io::new(vec![types.add(Type::Unknown)], vec![]),
+						"print" => Io::new(vec![types.add(Type::Var)], vec![]),
 						key => {
 							let a = context
 								.get(key)
