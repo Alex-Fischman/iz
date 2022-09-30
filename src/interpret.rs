@@ -2,6 +2,8 @@ use crate::analyze::{Tree, Type};
 use crate::parse::Parsed;
 use crate::tokenize::Bracket;
 use crate::{Error, Location};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -9,7 +11,7 @@ pub enum Value {
 	Bool(bool),
 	String(String),
 	Group(Vec<Value>),
-	Block(Vec<Tree>),
+	Block(Vec<Tree>, Rc<RefCell<Context>>),
 	Some(Box<Value>),
 	None,
 }
@@ -27,7 +29,7 @@ impl std::fmt::Display for Value {
 				}
 				write!(f, "]")
 			}
-			Value::Block(_) => write!(f, "Block"),
+			Value::Block(..) => write!(f, "Block"),
 			Value::Some(v) => write!(f, "Some({})", v),
 			Value::None => write!(f, "None"),
 		}
@@ -35,12 +37,45 @@ impl std::fmt::Display for Value {
 }
 
 use std::collections::HashMap;
-type Context = Vec<HashMap<String, Value>>;
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context(Option<Rc<RefCell<Context>>>, HashMap<String, Value>);
+
+impl Context {
+	fn get(&self, key: &str) -> Option<Value> {
+		match self.1.get(key) {
+			Some(value) => Some(value.clone()),
+			None => match &self.0 {
+				None => None,
+				Some(parent) => parent.borrow().get(key),
+			},
+		}
+	}
+
+	fn set(&mut self, key: String, value: Value) {
+		fn f(context: &Rc<RefCell<Context>>, key: &str) -> Option<Rc<RefCell<Context>>> {
+			match context.borrow().1.contains_key(key) {
+				true => Some(context.clone()),
+				false => match &context.borrow().0 {
+					None => None,
+					Some(parent) => f(parent, key),
+				},
+			}
+		}
+		if !self.1.contains_key(&key) && self.0.is_some() {
+			if let Some(context) = f(self.0.as_ref().unwrap(), &key) {
+				context.borrow_mut().1.insert(key, value);
+				return;
+			}
+		}
+		self.1.insert(key, value);
+	}
+}
+
 pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 	fn interpret(
 		trees: &[Tree],
 		stack: &mut Vec<Value>,
-		context: &mut Context,
+		context: Rc<RefCell<Context>>,
 		types: &[Type],
 	) -> Result<(), Error> {
 		fn pop(stack: &mut Vec<Value>, l: Location) -> Result<Value, Error> {
@@ -54,26 +89,16 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				(Value::Group(a), Value::Group(b)) => {
 					a.iter().zip(b).try_fold(true, |acc, (a, b)| Ok(acc && eq(a, b, l)?))
 				}
-				(Value::Block(_a), Value::Block(_b)) => Ok(false),
+				(Value::Block(..), Value::Block(..)) => Ok(false),
 				(Value::Some(a), Value::Some(b)) => eq(a, b, l),
 				(Value::Some(_), Value::None) | (Value::None, Value::Some(_)) => Ok(false),
 				(Value::None, Value::None) => Ok(true),
 				_ => Err(Error("invalid _eq_ args".to_owned(), l))?,
 			}
 		}
-		fn call(
-			stack: &mut Vec<Value>,
-			context: &mut Context,
-			types: &[Type],
-			l: Location,
-		) -> Result<(), Error> {
+		fn call(stack: &mut Vec<Value>, types: &[Type], l: Location) -> Result<(), Error> {
 			match pop(stack, l)? {
-				Value::Block(v) => {
-					context.push(HashMap::new());
-					let out = interpret(&v, stack, context, types);
-					context.pop();
-					out
-				}
+				Value::Block(v, c) => interpret(&v, stack, c, types),
 				_ => Err(Error("invalid _call_ args".to_owned(), l))?,
 			}
 		}
@@ -86,20 +111,15 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						Some(_) => Err(Error("invalid var name".to_owned(), l))?,
 						None => Err(Error("no var name".to_owned(), l))?,
 					};
-					interpret(&tree.children[1..], stack, context, types)?;
-					let frame =
-						match context.iter_mut().rev().find(|frame| frame.contains_key(key)) {
-							Some(frame) => frame,
-							None => context.last_mut().unwrap(),
-						};
-					frame.insert(key.to_owned(), pop(stack, l)?);
+					interpret(&tree.children[1..], stack, context.clone(), types)?;
+					context.borrow_mut().set(key.to_owned(), pop(stack, l)?);
 				}
 				Parsed::Name(i) if i == "@" => {
-					interpret(&tree.children[1..], stack, context, types)?;
-					interpret(&tree.children[0..1], stack, context, types)?;
+					interpret(&tree.children[1..], stack, context.clone(), types)?;
+					interpret(&tree.children[0..1], stack, context.clone(), types)?;
 				}
 				Parsed::Name(i) => {
-					interpret(&tree.children, stack, context, types)?;
+					interpret(&tree.children, stack, context.clone(), types)?;
 					use Type::*;
 					let inputs: Vec<&Type> = tree.io.inputs.iter().map(|i| &types[*i]).collect();
 					let outputs: Vec<&Type> =
@@ -131,7 +151,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
-						("call", _, _) => call(stack, context, types, l)?,
+						("call", _, _) => call(stack, types, l)?,
 						("_if_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
 							(b, Value::Bool(true)) => stack.push(Value::Some(Box::new(b))),
 							(_, Value::Bool(false)) => stack.push(Value::None),
@@ -146,28 +166,26 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							while {
 								stack.push(a.clone());
-								call(stack, context, types, l)?;
+								call(stack, types, l)?;
 								match pop(stack, l)? {
 									Value::Bool(b) => b,
 									_ => Err(Error("invalid _while_ args".to_owned(), l))?,
 								}
 							} {
 								stack.push(b.clone());
-								call(stack, context, types, l)?;
+								call(stack, types, l)?;
 							}
 						}
 						("print", _, []) => print!("{}", pop(stack, l)?),
 						(key, _, _) => {
 							stack.push(
 								context
-									.iter()
-									.rev()
-									.find_map(|frame| frame.get(key))
-									.ok_or_else(|| Error(format!("{} not found", key), l))?
-									.clone(),
+									.borrow()
+									.get(key)
+									.ok_or_else(|| Error(format!("{} not found", key), l))?,
 							);
-							if let Some(Value::Block(_)) = stack.last() {
-								call(stack, context, types, l)?
+							if let Some(Value::Block(..)) = stack.last() {
+								call(stack, types, l)?
 							}
 						}
 					}
@@ -175,14 +193,15 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				Parsed::String(s) => stack.push(Value::String(s.clone())),
 				Parsed::Number(n) => stack.push(Value::Int(*n)),
 				Parsed::Brackets(Bracket::Round) => {
-					interpret(&tree.children, stack, context, types)?
+					interpret(&tree.children, stack, context.clone(), types)?
 				}
-				Parsed::Brackets(Bracket::Curly) => {
-					stack.push(Value::Block(tree.children.clone()))
-				}
+				Parsed::Brackets(Bracket::Curly) => stack.push(Value::Block(
+					tree.children.clone(),
+					Rc::new(RefCell::new(Context(Some(context.clone()), HashMap::new()))),
+				)),
 				Parsed::Brackets(Bracket::Square) => {
 					let mut s = vec![];
-					interpret(&tree.children, &mut s, context, types)?;
+					interpret(&tree.children, &mut s, context.clone(), types)?;
 					stack.push(Value::Group(s));
 				}
 			}
@@ -190,8 +209,8 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 		Ok(())
 	}
 	let mut stack = vec![];
-	let mut context = vec![HashMap::new()];
-	interpret(trees, &mut stack, &mut context, types)?;
+	let context = Rc::new(RefCell::new(Context(None, HashMap::new())));
+	interpret(trees, &mut stack, context, types)?;
 	Ok(stack)
 }
 
