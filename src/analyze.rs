@@ -24,7 +24,7 @@ impl Io {
 		Io { inputs, outputs }
 	}
 
-	fn combine(&mut self, other: &mut Io, types: &mut Types) -> Result<(), String> {
+	fn combine(&mut self, other: &Io, types: &mut Types) -> Result<(), String> {
 		fn eq(a: usize, b: usize, types: &mut Types) -> Result<(), String> {
 			match (types.0[a].clone(), types.0[b].clone()) {
 				(Type::Int, Type::Int)
@@ -63,7 +63,7 @@ impl Io {
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
 		self.outputs
 			.drain(i..)
-			.zip(&mut other.inputs[j..])
+			.zip(&other.inputs[j..])
 			.try_fold((), |_, (a, b)| eq(a, *b, types))?;
 		let c = &other.inputs[..j];
 		self.inputs.extend(c.iter().cloned());
@@ -141,7 +141,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 		for tree in parse_trees {
 			let l = tree.location;
 			let children;
-			let mut t;
+			let t;
 			match &tree.data {
 				Parsed::Name(i) if i == "=" => match tree.children.as_slice() {
 					s @ [a @ ParseTree { data: Parsed::Name(key), children: cs, .. }, _]
@@ -261,7 +261,7 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 					};
 				}
 			}
-			io.combine(&mut t, types).map_err(|s| Error(s, l))?;
+			io.combine(&t, types).map_err(|s| Error(s, l))?;
 			out.push(Tree { io: t, data: tree.data.clone(), location: l, children });
 		}
 		Ok(out)
