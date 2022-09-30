@@ -60,7 +60,6 @@ impl<K: Clone + Eq + Hash, V: Clone> Context<K, V> {
 	pub fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<V>
 	where
 		K: std::borrow::Borrow<Q>,
-		V: Clone,
 	{
 		match self.0.borrow().1.get(key) {
 			Some(value) => Some(value.clone()),
