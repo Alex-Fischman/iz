@@ -6,7 +6,7 @@ type Context = crate::Context<String, Value>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
-	Unit(Vec<u8>),
+	Data(Vec<u8>),
 	Block(Vec<Tree>, Context),
 	Enum(Box<Value>),
 }
@@ -14,7 +14,7 @@ pub enum Value {
 impl std::fmt::Display for Value {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			Value::Unit(data) => write!(f, "{:?}", data),
+			Value::Data(data) => write!(f, "{:?}", data),
 			Value::Block(..) => write!(f, "Block"),
 			Value::Enum(v) => write!(f, "Enum({})", v),
 		}
@@ -23,15 +23,15 @@ impl std::fmt::Display for Value {
 
 impl Value {
 	fn int(i: i64) -> Value {
-		Value::Unit(i64::to_ne_bytes(i).to_vec())
+		Value::Data(i64::to_ne_bytes(i).to_vec())
 	}
 
 	fn r#true() -> Value {
-		Value::Unit(vec![0x01])
+		Value::Data(vec![0x01])
 	}
 
 	fn r#false() -> Value {
-		Value::Unit(vec![0x00])
+		Value::Data(vec![0x00])
 	}
 }
 
@@ -73,21 +73,21 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						"true" => stack.push(Value::r#true()),
 						"false" => stack.push(Value::r#false()),
 						"add" => match (pop(stack, l)?, pop(stack, l)?) {
-							(Value::Unit(b), Value::Unit(a)) => stack.push(Value::int(
+							(Value::Data(b), Value::Data(a)) => stack.push(Value::int(
 								i64::from_ne_bytes(a.try_into().unwrap())
 									+ i64::from_ne_bytes(b.try_into().unwrap()),
 							)),
 							_ => Err(Error("invalid _add_ args".to_owned(), l))?,
 						},
 						"sub" => match (pop(stack, l)?, pop(stack, l)?) {
-							(Value::Unit(b), Value::Unit(a)) => stack.push(Value::int(
+							(Value::Data(b), Value::Data(a)) => stack.push(Value::int(
 								i64::from_ne_bytes(a.try_into().unwrap())
 									- i64::from_ne_bytes(b.try_into().unwrap()),
 							)),
 							_ => Err(Error("invalid _sub_ args".to_owned(), l))?,
 						},
 						"mul" => match (pop(stack, l)?, pop(stack, l)?) {
-							(Value::Unit(b), Value::Unit(a)) => stack.push(Value::int(
+							(Value::Data(b), Value::Data(a)) => stack.push(Value::int(
 								i64::from_ne_bytes(a.try_into().unwrap())
 									* i64::from_ne_bytes(b.try_into().unwrap()),
 							)),
@@ -95,17 +95,17 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						},
 						"eq" => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
-							stack.push(Value::Unit(vec![(a == b) as u8]));
+							stack.push(Value::Data(vec![(a == b) as u8]));
 						}
 						"lt" => match (pop(stack, l)?, pop(stack, l)?) {
-							(Value::Unit(b), Value::Unit(a)) => stack.push(Value::Unit(vec![
+							(Value::Data(b), Value::Data(a)) => stack.push(Value::Data(vec![
 								(i64::from_ne_bytes(a.try_into().unwrap())
 									< i64::from_ne_bytes(b.try_into().unwrap())) as u8,
 							])),
 							_ => Err(Error("invalid _lt_ args".to_owned(), l))?,
 						},
 						"gt" => match (pop(stack, l)?, pop(stack, l)?) {
-							(Value::Unit(b), Value::Unit(a)) => stack.push(Value::Unit(vec![
+							(Value::Data(b), Value::Data(a)) => stack.push(Value::Data(vec![
 								(i64::from_ne_bytes(a.try_into().unwrap())
 									> i64::from_ne_bytes(b.try_into().unwrap())) as u8,
 							])),
@@ -116,12 +116,12 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 								stack.push(Value::Enum(Box::new(b)))
 							}
 							(_, v) if v == Value::r#false() => {
-								stack.push(Value::Enum(Box::new(Value::Unit(vec![]))))
+								stack.push(Value::Enum(Box::new(Value::Data(vec![]))))
 							}
 							_ => Err(Error("invalid _if_ args".to_owned(), l))?,
 						},
 						"_else_" => match (pop(stack, l)?, pop(stack, l)?) {
-							(b, Value::Enum(a)) if *a == Value::Unit(vec![]) => stack.push(b),
+							(b, Value::Enum(a)) if *a == Value::Data(vec![]) => stack.push(b),
 							(_, Value::Enum(a)) => stack.push(*a),
 							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
 						},
@@ -141,13 +141,13 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							}
 						}
 						"print_int" => match pop(stack, l)? {
-							Value::Unit(v) => {
+							Value::Data(v) => {
 								print!("{}", i64::from_ne_bytes(v.try_into().unwrap()))
 							}
 							_ => Err(Error("invalid print_int args".to_owned(), l))?,
 						},
 						"print_string" => match pop(stack, l)? {
-							Value::Unit(v) => {
+							Value::Data(v) => {
 								print!("{}", std::str::from_utf8(&v).unwrap())
 							}
 							_ => Err(Error("invalid print_int args".to_owned(), l))?,
@@ -164,7 +164,7 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 						}
 					}
 				}
-				Parsed::String(s) => stack.push(Value::Unit(s.as_bytes().to_vec())),
+				Parsed::String(s) => stack.push(Value::Data(s.as_bytes().to_vec())),
 				Parsed::Number(n) => stack.push(Value::int(*n)),
 				Parsed::Brackets(Bracket::Round) => {
 					interpret(&tree.children, stack, context.clone(), types)?
