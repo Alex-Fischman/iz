@@ -8,7 +8,6 @@ type Context = crate::Context<String, Value>;
 pub enum Value {
 	Data(Vec<u8>),
 	Block(Vec<Tree>, Context),
-	Enum(Box<Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -16,7 +15,6 @@ impl std::fmt::Display for Value {
 		match self {
 			Value::Data(data) => write!(f, "{:?}", data),
 			Value::Block(..) => write!(f, "Block"),
-			Value::Enum(v) => write!(f, "Enum({})", v),
 		}
 	}
 }
@@ -112,18 +110,12 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
 						"_if_" => match (pop(stack, l)?, pop(stack, l)?) {
-							(b, v) if v == Value::r#true() => {
-								stack.push(Value::Enum(Box::new(b)))
-							}
-							(_, v) if v == Value::r#false() => {
-								stack.push(Value::Enum(Box::new(Value::Data(vec![]))))
-							}
-							_ => Err(Error("invalid _if_ args".to_owned(), l))?,
+							(b, a) if a == Value::r#true() => stack.push(b),
+							(_, _) => stack.push(Value::Data(vec![])),
 						},
 						"_else_" => match (pop(stack, l)?, pop(stack, l)?) {
-							(b, Value::Enum(a)) if *a == Value::Data(vec![]) => stack.push(b),
-							(_, Value::Enum(a)) => stack.push(*a),
-							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
+							(b, Value::Data(v)) if v.is_empty() => stack.push(b),
+							(_, a) => stack.push(a),
 						},
 						"_while_" => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
@@ -206,7 +198,7 @@ fn interpret_test() {
 	assert_eq!(f("1 > 2"), Ok(vec![Value::r#false()]));
 	assert_eq!(f("(2 mul)@3"), Ok(vec![Value::int(6)]));
 	assert_eq!(f("{2 * 3} call"), Ok(vec![Value::int(6)]));
-	assert_eq!(f("if true 1"), Ok(vec![Value::Enum(Box::new(Value::int(1)))]));
+	assert_eq!(f("if true 1"), Ok(vec![Value::int(1)]));
 	assert_eq!(f("if true 1 else 2"), Ok(vec![Value::int(1)]));
 	assert_eq!(f("i = 1 + 2 i"), Ok(vec![Value::int(3)]));
 	assert_eq!(f("{i = 1 + 2} call i"), Err(Error("i not found".to_owned(), Location(17, 1))));
