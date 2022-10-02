@@ -73,48 +73,44 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 				}
 				Parsed::Name(i) => {
 					interpret(&tree.children, stack, context.clone(), types)?;
-					use Type::*;
-					let inputs: Vec<&Type> = tree.io.inputs.iter().map(|i| &types[*i]).collect();
-					let outputs: Vec<&Type> =
-						tree.io.outputs.iter().map(|i| &types[*i]).collect();
-					match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
-						("true", [], [Bool]) => stack.push(Value::Bool(true)),
-						("false", [], [Bool]) => stack.push(Value::Bool(false)),
-						("add", [Int, Int], [Int]) => match (pop(stack, l)?, pop(stack, l)?) {
+					match i.as_str() {
+						"true" => stack.push(Value::Bool(true)),
+						"false" => stack.push(Value::Bool(false)),
+						"add" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a + b)),
 							_ => Err(Error("invalid _add_ args".to_owned(), l))?,
 						},
-						("sub", [Int, Int], [Int]) => match (pop(stack, l)?, pop(stack, l)?) {
+						"sub" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a - b)),
 							_ => Err(Error("invalid _sub_ args".to_owned(), l))?,
 						},
-						("mul", [Int, Int], [Int]) => match (pop(stack, l)?, pop(stack, l)?) {
+						"mul" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Int(a * b)),
 							_ => Err(Error("invalid _mul_ args".to_owned(), l))?,
 						},
-						("eq", [_, _], [Bool]) => {
+						"eq" => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							stack.push(Value::Bool(eq(&a, &b, l)?));
 						}
-						("lt", [Int, Int], [Bool]) => match (pop(stack, l)?, pop(stack, l)?) {
+						"lt" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a < b)),
 							_ => Err(Error("invalid _lt_ args".to_owned(), l))?,
 						},
-						("gt", [Int, Int], [Bool]) => match (pop(stack, l)?, pop(stack, l)?) {
+						"gt" => match (pop(stack, l)?, pop(stack, l)?) {
 							(Value::Int(b), Value::Int(a)) => stack.push(Value::Bool(a > b)),
 							_ => Err(Error("invalid _gt_ args".to_owned(), l))?,
 						},
-						("_if_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
+						"_if_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(b, Value::Bool(true)) => stack.push(Value::Some(Box::new(b))),
 							(_, Value::Bool(false)) => stack.push(Value::None),
 							_ => Err(Error("invalid _if_ args".to_owned(), l))?,
 						},
-						("_else_", _, _) => match (pop(stack, l)?, pop(stack, l)?) {
+						"_else_" => match (pop(stack, l)?, pop(stack, l)?) {
 							(_, Value::Some(a)) => stack.push(*a),
 							(b, Value::None) => stack.push(b),
 							_ => Err(Error("invalid _else_ args".to_owned(), l))?,
 						},
-						("_while_", _, _) => {
+						"_while_" => {
 							let (b, a) = (pop(stack, l)?, pop(stack, l)?);
 							while {
 								stack.push(a.clone());
@@ -128,8 +124,8 @@ pub fn interpret(trees: &[Tree], types: &[Type]) -> Result<Vec<Value>, Error> {
 								call(stack, types, l)?;
 							}
 						}
-						("print", _, []) => print!("{}", pop(stack, l)?),
-						(key, _, _) => {
+						"print" => print!("{}", pop(stack, l)?),
+						key => {
 							stack.push(
 								context
 									.get(key)
