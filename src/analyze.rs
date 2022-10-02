@@ -6,7 +6,7 @@ type Context = crate::Context<String, usize>;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub enum Type {
-	Unit(String),
+	Unit(String, usize),
 	Block(Io),
 	Enum(Vec<usize>),
 	Var,
@@ -15,7 +15,7 @@ pub enum Type {
 impl std::fmt::Debug for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			Type::Unit(s) => write!(f, "{}", s),
+			Type::Unit(s, _) => write!(f, "{}", s),
 			Type::Block(io) => write!(f, "Block({:?}|{:?})", io.inputs, io.outputs),
 			Type::Enum(v) => write!(f, "Enum({:?})", v),
 			Type::Var => write!(f, "Unsolved var!"),
@@ -68,10 +68,10 @@ struct Types(Vec<Type>);
 impl Types {
 	fn new() -> Types {
 		Types(vec![
-			Type::Unit("Int".to_owned()),
-			Type::Unit("Bool".to_owned()),
-			Type::Unit("String".to_owned()),
-			Type::Unit("None".to_owned()),
+			Type::Unit("Int".to_owned(), 8),
+			Type::Unit("Bool".to_owned(), 1),
+			Type::Unit("String".to_owned(), 2),
+			Type::Unit("None".to_owned(), 0),
 		])
 	}
 
@@ -82,7 +82,7 @@ impl Types {
 
 	fn clone_vars(&mut self, i: usize, vars: &mut HashMap<usize, usize>) -> usize {
 		match self.0[i].clone() {
-			Type::Unit(_) => i,
+			Type::Unit(..) => i,
 			Type::Block(io) => {
 				let t = Type::Block(Io::new(
 					io.inputs.into_iter().map(|t| self.clone_vars(t, vars)).collect(),
@@ -107,7 +107,7 @@ impl Types {
 
 	fn eq(&mut self, a: usize, b: usize) -> Result<(), String> {
 		match (self.0[a].clone(), self.0[b].clone()) {
-			(Type::Unit(c), Type::Unit(d)) if c == d => Ok(()),
+			(Type::Unit(c, e), Type::Unit(d, f)) if c == d && e == f => Ok(()),
 			(Type::Block(c), Type::Block(d))
 				if c.inputs.len() == d.inputs.len() && c.outputs.len() == d.outputs.len() =>
 			{
@@ -205,7 +205,8 @@ pub fn analyze(parse_trees: &[ParseTree]) -> Result<(Vec<Tree>, Vec<Type>), Erro
 							],
 							vec![],
 						),
-						"print" => Io::new(vec![types.add(Type::Var)], vec![]),
+						"print_int" => Io::new(vec![0], vec![]),
+						"print_string" => Io::new(vec![2], vec![]),
 						key => {
 							let a = context
 								.get(key)
@@ -291,5 +292,5 @@ fn analyze_test() {
 	let v = f("1 dup").unwrap().0.last().unwrap().io.inputs[0];
 	assert_eq!(f("1 dup").unwrap().0.last().unwrap().io.outputs, vec![v, v]);
 	let (trees, types) = f("b = 1 {not false} b").unwrap();
-	assert_eq!(types[trees.last().unwrap().io.outputs[0]], Type::Unit("Int".to_owned()));
+	assert_eq!(types[trees.last().unwrap().io.outputs[0]], Type::Unit("Int".to_owned(), 8));
 }

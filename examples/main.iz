@@ -1,6 +1,6 @@
 i = 0
 while {i < 5} {
-	print@i
-	print@(if mod@(i 2) == 0 " even\n" else " odd\n")
+	print_int@i
+	print_string@(if mod@(i 2) == 0 " even\n" else " odd\n")
 	i = i + 1
 }
