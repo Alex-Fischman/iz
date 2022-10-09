@@ -42,7 +42,7 @@ fn main() {
 	}
 }
 
-const PRELUDE_PATH: &str = "/home/alex/Programming/iz/examples/prelude.iz";
+const PRELUDE_PATH: &str = "/home/alex/Desktop/iz/examples/prelude.iz";
 
 use std::cell::RefCell;
 use std::collections::HashMap;
