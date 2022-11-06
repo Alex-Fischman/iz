@@ -2,8 +2,8 @@ WIP Programming Language
 
 # Specification
 - Simplicity before complexity
- - Trying to find a "basis" for programming languages
- - Want a minimal set of useful features that don't overlap
+	- Trying to find a "basis" for programming languages
+	- Want a minimal set of useful features that don't overlap
 - 
 
 # Tokens
