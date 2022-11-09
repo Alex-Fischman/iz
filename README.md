@@ -18,6 +18,7 @@ WIP Programming Language
 # Rewrite
 - Operators: move children to follow operators, including parens
 	- only {, }, \[, and \] should have children
+	- operators should be replaced with the names they compile to
 
 # Analysis
 - Scope
