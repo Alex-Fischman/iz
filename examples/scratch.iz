@@ -1,1 +1,3 @@
-1 + 2
+a = "text with  s, \ts, \\ns, \\\"s, and \\\\s"
+# askfl;askdfl;
+b = 1_000_000 (c = {a})

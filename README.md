@@ -6,10 +6,12 @@ WIP Programming Language
 - Syntax: brackets and operators
 
 # Tokens
-- Brackets: (, ), {, }, \[, \]
-- Strings: "text with whitespace and \" escapes"
-- Integers: -1_000_000
-- Identifiers: asdf123_asdf, +, if
++ Comments: # to \n
++ Brackets: (, ), {, }, \[, \]
++ Whitespace: spaces, tabs, newlines
++ Strings: "text with whitespace and \" escapes"
++ Integers: -1_000_000
++ Identifiers: asdf123_asdf, +, if
 
 # Parser
 - Brackets: move tokens between brackets into children
