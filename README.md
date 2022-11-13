@@ -23,3 +23,11 @@ WIP Programming Language
 # Analysis
 - Scope
 - Types
+
+# Bytecode
+- Intrinsics: operations on the stack
+- Labels: surround code blocks
+
+# Backend
+- x86_64
+- RISC-V
