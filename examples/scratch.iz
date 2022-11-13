@@ -1,3 +1,8 @@
-a = "text with  s, \ts, \\ns, \\\"s, and \\\\s"
+a = "text with  s, \ts, \ns, \"s, and \\s"
 # askfl;askdfl;
-b = 1_000_000 (c = {a})
+b = 3 (c = {a})
+ident123
+123ident
+1_234_567
+-1234_56_7
+_1_234_567
