@@ -66,10 +66,34 @@ fn main() {
 		i += 1;
 	}
 
-	for (token, idx, _) in &mut tokens {
+	for (token, idx, len) in &mut tokens {
 		if *token == Token::Identifier {
 			if '0' <= chars[*idx] && chars[*idx] <= '9' {
-				todo!("try to convert to number")
+				if *len == 1 {
+					*token = Token::Number(chars[*idx] as i64 - '0' as i64);
+				} else {
+					let mut value = 0;
+					let (base, offset) = match (chars[*idx], chars[*idx + 1]) {
+						('0', 'x') => (16, 2),
+						('0', 'b') => (2, 2),
+						(_, _) => (10, 0),
+					};
+					for i in *idx + offset..*idx + *len {
+						if chars[i] != '_' {
+							let digit = match chars[i] {
+								'0'..='9' => chars[i] as i64 - '0' as i64,
+								'A'..='F' => chars[i] as i64 - 'A' as i64 + 10,
+								'a'..='f' => chars[i] as i64 - 'a' as i64 + 10,
+								d => panic!("invalid digit {} in base {}", d, base),
+							};
+							if digit >= base {
+								panic!("invalid digit {} in base {}", digit, base);
+							}
+							value = value * base + digit;
+						}
+					}
+					*token = Token::Number(value);
+				}
 			}
 		}
 	}
@@ -81,6 +105,7 @@ fn main() {
 			Token::Identifier => {
 				println!("i: {}", chars[idx..idx + len].iter().collect::<String>())
 			}
+			Token::Number(n) => println!("n: {}", n),
 		}
 	}
 }
@@ -90,6 +115,7 @@ enum Token {
 	Bracket(Bracket, Side),
 	String(String),
 	Identifier,
+	Number(i64),
 }
 
 #[derive(Debug, PartialEq)]

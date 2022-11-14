@@ -2,8 +2,11 @@ a = "text with  s, \ts, \ns, \"s, and \\s"
 # askfl;askdfl;
 b = 3 (c = {a})
 ident123
-123ident
 1_234_567
 -1234_56_7
 _1_234_567
 123+asdf123
+0b10
+0x1A
+0
+1
