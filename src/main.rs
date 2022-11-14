@@ -4,24 +4,35 @@ fn main() {
 	let chars: Vec<char> =
 		std::fs::read_to_string(file).expect("could not read file").chars().collect();
 
-	let mut tokens: Vec<(Token, usize, usize)> = Vec::new();
+	let mut identifiers: Vec<String> = Vec::new();
+	let mut identifier = |start, end| {
+		let s: String = chars[start..end].iter().collect();
+		for (i, identifier) in identifiers.iter().enumerate() {
+			if identifier == &s {
+				return Token::Identifier(i);
+			}
+		}
+		identifiers.push(s);
+		Token::Identifier(identifiers.len() - 1)
+	};
+
+	let mut tokens: Vec<Token> = Vec::new();
 	let mut i = 0;
 	while i < chars.len() {
 		match chars[i] {
 			'#' => {
-				while i < chars.len() && chars[i] == '\n' {
+				while i < chars.len() && chars[i] != '\n' {
 					i += 1;
 				}
 			}
 			' ' | '\t' | '\n' | '\r' => {}
-			'(' => tokens.push((Token::Bracket(Bracket::Round, Side::Open), i, 1)),
-			')' => tokens.push((Token::Bracket(Bracket::Round, Side::Close), i, 1)),
-			'{' => tokens.push((Token::Bracket(Bracket::Curly, Side::Open), i, 1)),
-			'}' => tokens.push((Token::Bracket(Bracket::Curly, Side::Close), i, 1)),
-			'[' => tokens.push((Token::Bracket(Bracket::Square, Side::Open), i, 1)),
-			']' => tokens.push((Token::Bracket(Bracket::Square, Side::Close), i, 1)),
+			'(' => tokens.push(Token::Bracket(Bracket::Round, Side::Open)),
+			')' => tokens.push(Token::Bracket(Bracket::Round, Side::Close)),
+			'{' => tokens.push(Token::Bracket(Bracket::Curly, Side::Open)),
+			'}' => tokens.push(Token::Bracket(Bracket::Curly, Side::Close)),
+			'[' => tokens.push(Token::Bracket(Bracket::Square, Side::Open)),
+			']' => tokens.push(Token::Bracket(Bracket::Square, Side::Close)),
 			'"' => {
-				let start = i;
 				i += 1;
 				let mut string = String::new();
 				loop {
@@ -45,11 +56,10 @@ fn main() {
 					}
 					i += 1;
 				}
-				tokens.push((Token::String(string), start, i - start));
+				tokens.push(Token::String(string));
 			}
 			c => {
 				let start = i;
-
 				let is_alphanumeric =
 					|c: char| matches!(c, '_' | 'a' ..= 'z' | 'A' ..= 'Z' | '0' ..= '9');
 				while i < chars.len()
@@ -58,27 +68,27 @@ fn main() {
 				{
 					i += 1;
 				}
-
-				tokens.push((Token::Identifier, start, i - start));
+				tokens.push(identifier(start, i));
 				i -= 1;
 			}
 		}
 		i += 1;
 	}
 
-	for (token, idx, len) in &mut tokens {
-		if *token == Token::Identifier {
-			if '0' <= chars[*idx] && chars[*idx] <= '9' {
-				if *len == 1 {
-					*token = Token::Number(chars[*idx] as i64 - '0' as i64);
+	for token in &mut tokens {
+		if *token == Token::Identifier(i) {
+			let chars: Vec<char> = identifiers[i].chars().collect();
+			if '0' <= chars[0] && chars[0] <= '9' {
+				if chars.len() == 1 {
+					*token = Token::Number(chars[0] as i64 - '0' as i64);
 				} else {
 					let mut value = 0;
-					let (base, offset) = match (chars[*idx], chars[*idx + 1]) {
+					let (base, offset) = match (chars[0], chars[1]) {
 						('0', 'x') => (16, 2),
 						('0', 'b') => (2, 2),
 						(_, _) => (10, 0),
 					};
-					for i in *idx + offset..*idx + *len {
+					for i in offset..chars.len() {
 						if chars[i] != '_' {
 							let digit = match chars[i] {
 								'0'..='9' => chars[i] as i64 - '0' as i64,
@@ -98,13 +108,21 @@ fn main() {
 		}
 	}
 
-	for (token, idx, len) in tokens {
+	for token in tokens {
 		match token {
-			Token::Bracket(_, _) => println!("b: {}", chars[idx]),
+			Token::Bracket(b, s) => println!(
+				"b: {}",
+				match (b, s) {
+					(Bracket::Round, Side::Open) => '(',
+					(Bracket::Round, Side::Close) => ')',
+					(Bracket::Curly, Side::Open) => '{',
+					(Bracket::Curly, Side::Close) => '}',
+					(Bracket::Square, Side::Open) => '[',
+					(Bracket::Square, Side::Close) => ']',
+				}
+			),
 			Token::String(s) => println!("s: {}", s),
-			Token::Identifier => {
-				println!("i: {}", chars[idx..idx + len].iter().collect::<String>())
-			}
+			Token::Identifier(i) => println!("i: {}", identifiers[i]),
 			Token::Number(n) => println!("n: {}", n),
 		}
 	}
@@ -114,7 +132,7 @@ fn main() {
 enum Token {
 	Bracket(Bracket, Side),
 	String(String),
-	Identifier,
+	Identifier(usize),
 	Number(i64),
 }
 
