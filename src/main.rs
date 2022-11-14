@@ -47,15 +47,13 @@ fn main() {
 				}
 				tokens.push((Token::String(string), start, i - start));
 			}
-			// todo: numbers
 			c => {
 				let start = i;
 
-				let is_splitter = |c: char| "\"#(){}{} \t\n".contains(c);
 				let is_alphanumeric =
 					|c: char| matches!(c, '_' | 'a' ..= 'z' | 'A' ..= 'Z' | '0' ..= '9');
 				while i < chars.len()
-					&& !is_splitter(chars[i])
+					&& !"\"#(){}{} \t\n".contains(chars[i])
 					&& is_alphanumeric(c) == is_alphanumeric(chars[i])
 				{
 					i += 1;
@@ -66,6 +64,14 @@ fn main() {
 			}
 		}
 		i += 1;
+	}
+
+	for (token, idx, _) in &mut tokens {
+		if *token == Token::Identifier {
+			if '0' <= chars[*idx] && chars[*idx] <= '9' {
+				todo!("try to convert to number")
+			}
+		}
 	}
 
 	for (token, idx, len) in tokens {
@@ -79,21 +85,21 @@ fn main() {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Token {
 	Bracket(Bracket, Side),
 	String(String),
 	Identifier,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Bracket {
 	Round,
 	Curly,
 	Square,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Side {
 	Open,
 	Close,
