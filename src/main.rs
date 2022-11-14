@@ -76,8 +76,8 @@ fn main() {
 	}
 
 	for token in &mut tokens {
-		if *token == Token::Identifier(i) {
-			let chars: Vec<char> = identifiers[i].chars().collect();
+		if let Token::Identifier(i) = token {
+			let chars: Vec<char> = identifiers[*i].chars().collect();
 			if '0' <= chars[0] && chars[0] <= '9' {
 				if chars.len() == 1 {
 					*token = Token::Number(chars[0] as i64 - '0' as i64);
