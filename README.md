@@ -7,8 +7,8 @@ WIP Programming Language
 
 # Tokens
 - Comments: # to \n
-- Brackets: (, ), {, }, \[, \]
 - Whitespace: spaces, tabs, newlines
+- Brackets: (, ), {, }, \[, \]
 - Strings: "text with whitespace and \" escapes"
 - Integers: -1_000_000
 - Identifiers: asdf123_asdf, +, if
