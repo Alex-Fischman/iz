@@ -4,6 +4,29 @@ fn main() {
 	let chars: Vec<char> =
 		std::fs::read_to_string(file).expect("could not read file").chars().collect();
 
+	let (tokens, identifiers) = tokenizer(&chars);
+
+	for token in tokens {
+		match token {
+			Token::Bracket(b, s) => println!(
+				"b: {}",
+				match (b, s) {
+					(Bracket::Round, Side::Open) => '(',
+					(Bracket::Round, Side::Close) => ')',
+					(Bracket::Curly, Side::Open) => '{',
+					(Bracket::Curly, Side::Close) => '}',
+					(Bracket::Square, Side::Open) => '[',
+					(Bracket::Square, Side::Close) => ']',
+				}
+			),
+			Token::String(s) => println!("s: {}", s),
+			Token::Identifier(i) => println!("i: {}", identifiers[i]),
+			Token::Number(n) => println!("n: {}", n),
+		}
+	}
+}
+
+fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 	let mut identifiers: Vec<String> = Vec::new();
 	let mut identifier = |start, end| {
 		let s: String = chars[start..end].iter().collect();
@@ -83,18 +106,21 @@ fn main() {
 					*token = Token::Number(chars[0] as i64 - '0' as i64);
 				} else {
 					let mut value = 0;
-					let (base, offset) = match (chars[0], chars[1]) {
+					let (base, start) = match (chars[0], chars[1]) {
 						('0', 'x') => (16, 2),
 						('0', 'b') => (2, 2),
 						(_, _) => (10, 0),
 					};
-					for i in offset..chars.len() {
+					if start >= chars.len() {
+						panic!("no digits after base specifier");
+					}
+					for i in start..chars.len() {
 						if chars[i] != '_' {
 							let digit = match chars[i] {
 								'0'..='9' => chars[i] as i64 - '0' as i64,
 								'A'..='F' => chars[i] as i64 - 'A' as i64 + 10,
 								'a'..='f' => chars[i] as i64 - 'a' as i64 + 10,
-								d => panic!("invalid digit {} in base {}", d, base),
+								d => panic!("invalid digit {}", d),
 							};
 							if digit >= base {
 								panic!("invalid digit {} in base {}", digit, base);
@@ -108,24 +134,7 @@ fn main() {
 		}
 	}
 
-	for token in tokens {
-		match token {
-			Token::Bracket(b, s) => println!(
-				"b: {}",
-				match (b, s) {
-					(Bracket::Round, Side::Open) => '(',
-					(Bracket::Round, Side::Close) => ')',
-					(Bracket::Curly, Side::Open) => '{',
-					(Bracket::Curly, Side::Close) => '}',
-					(Bracket::Square, Side::Open) => '[',
-					(Bracket::Square, Side::Close) => ']',
-				}
-			),
-			Token::String(s) => println!("s: {}", s),
-			Token::Identifier(i) => println!("i: {}", identifiers[i]),
-			Token::Number(n) => println!("n: {}", n),
-		}
-	}
+	return (tokens, identifiers);
 }
 
 #[derive(Debug, PartialEq)]
