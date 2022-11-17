@@ -5,25 +5,27 @@ fn main() {
 		std::fs::read_to_string(file).expect("could not read file").chars().collect();
 
 	let (tokens, identifiers) = tokenizer(&chars);
+	let trees = parser(&tokens, &identifiers);
 
-	for token in tokens {
-		match token {
-			Token::Bracket(b, s) => println!(
-				"b: {}",
-				match (b, s) {
-					(Bracket::Round, Side::Open) => '(',
-					(Bracket::Round, Side::Close) => ')',
-					(Bracket::Curly, Side::Open) => '{',
-					(Bracket::Curly, Side::Close) => '}',
-					(Bracket::Square, Side::Open) => '[',
-					(Bracket::Square, Side::Close) => ']',
+	fn print_trees(trees: &[Tree], identifiers: &[String], depth: usize) {
+		print!("{}", "\t".repeat(depth));
+		for tree in trees {
+			match tree {
+				Tree::Brackets(bracket, children) => {
+					println!("{}", match bracket {
+						Bracket::Round => '(',
+						Bracket::Curly => '{',
+						Bracket::Square => '[',
+					});
+					print_trees(children, identifiers, depth +1)
 				}
-			),
-			Token::String(s) => println!("s: {}", s),
-			Token::Identifier(i) => println!("i: {}", identifiers[i]),
-			Token::Number(n) => println!("n: {}", n),
+				Tree::String(s) => println!("s: {}", s),
+				Tree::Identifier(i) => println!("i: {}", identifiers[*i]),
+				Tree::Number(n) => println!("n: {}", n),
+			}
 		}
 	}
+	print_trees(&trees, &identifiers, 0);
 }
 
 fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
@@ -137,6 +139,10 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 	return (tokens, identifiers);
 }
 
+fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
+	todo!()
+}
+
 #[derive(Debug, PartialEq)]
 enum Token {
 	Bracket(Bracket, Side),
@@ -156,4 +162,12 @@ enum Bracket {
 enum Side {
 	Open,
 	Close,
+}
+
+#[derive(Debug, PartialEq)]
+enum Tree {
+	Brackets(Bracket, Vec<Tree>),
+	String(String),
+	Identifier(usize),
+	Number(i64),
 }
