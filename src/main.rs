@@ -8,16 +8,12 @@ fn main() {
 	let trees = parser(&tokens, &identifiers);
 
 	fn print_trees(trees: &[Tree], identifiers: &[String], depth: usize) {
-		print!("{}", "\t".repeat(depth));
 		for tree in trees {
+			print!("{}", "\t".repeat(depth));
 			match tree {
-				Tree::Brackets(bracket, children) => {
-					println!("{}", match bracket {
-						Bracket::Round => '(',
-						Bracket::Curly => '{',
-						Bracket::Square => '[',
-					});
-					print_trees(children, identifiers, depth +1)
+				Tree::Brackets(b, cs) => {
+					println!("b: {}", b.to_char(Side::Open));
+					print_trees(cs, identifiers, depth + 1)
 				}
 				Tree::String(s) => println!("s: {}", s),
 				Tree::Identifier(i) => println!("i: {}", identifiers[*i]),
@@ -29,19 +25,8 @@ fn main() {
 }
 
 fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
-	let mut identifiers: Vec<String> = Vec::new();
-	let mut identifier = |start, end| {
-		let s: String = chars[start..end].iter().collect();
-		for (i, identifier) in identifiers.iter().enumerate() {
-			if identifier == &s {
-				return Token::Identifier(i);
-			}
-		}
-		identifiers.push(s);
-		Token::Identifier(identifiers.len() - 1)
-	};
-
 	let mut tokens: Vec<Token> = Vec::new();
+	let mut identifiers: Vec<String> = Vec::new();
 	let mut i = 0;
 	while i < chars.len() {
 		match chars[i] {
@@ -93,7 +78,15 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 				{
 					i += 1;
 				}
-				tokens.push(identifier(start, i));
+
+				let s: String = chars[start..i].iter().collect();
+				if let Some(i) = identifiers.iter().position(|i| *i == s) {
+					tokens.push(Token::Identifier(i));
+				} else {
+					identifiers.push(s);
+					tokens.push(Token::Identifier(identifiers.len() - 1));
+				}
+
 				i -= 1;
 			}
 		}
@@ -116,12 +109,12 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 					if start >= chars.len() {
 						panic!("no digits after base specifier");
 					}
-					for i in start..chars.len() {
-						if chars[i] != '_' {
-							let digit = match chars[i] {
-								'0'..='9' => chars[i] as i64 - '0' as i64,
-								'A'..='F' => chars[i] as i64 - 'A' as i64 + 10,
-								'a'..='f' => chars[i] as i64 - 'a' as i64 + 10,
+					for c in chars.iter().skip(start) {
+						if *c != '_' {
+							let digit = match *c {
+								'0'..='9' => *c as i64 - '0' as i64,
+								'A'..='F' => *c as i64 - 'A' as i64 + 10,
+								'a'..='f' => *c as i64 - 'a' as i64 + 10,
 								d => panic!("invalid digit {}", d),
 							};
 							if digit >= base {
@@ -136,11 +129,40 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 		}
 	}
 
-	return (tokens, identifiers);
+	(tokens, identifiers)
 }
 
 fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
-	todo!()
+	fn parse(
+		tokens: &[Token],
+		_identifiers: &[String],
+		i: &mut usize,
+		searching: Option<Bracket>,
+	) -> Vec<Tree> {
+		let mut trees = Vec::new();
+		while *i < tokens.len() {
+			let token = &tokens[*i];
+			*i += 1;
+			trees.push(match token {
+				Token::Bracket(b, Side::Open) => {
+					Tree::Brackets(*b, parse(tokens, _identifiers, i, Some(*b)))
+				}
+				Token::Bracket(b, Side::Close) => match (b, searching) {
+					(b, None) => panic!("extra {}", b.to_char(Side::Close)),
+					(b, Some(c)) if *b == c => return trees,
+					(b, Some(_)) => panic!("extra {}", b.to_char(Side::Close)),
+				},
+				Token::String(s) => Tree::String(s.clone()),
+				Token::Identifier(i) => Tree::Identifier(*i),
+				Token::Number(n) => Tree::Number(*n),
+			});
+		}
+		if let Some(b) = searching {
+			panic!("extra {}", b.to_char(Side::Open));
+		}
+		trees
+	}
+	parse(tokens, identifiers, &mut 0, None)
 }
 
 #[derive(Debug, PartialEq)]
@@ -151,17 +173,30 @@ enum Token {
 	Number(i64),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Bracket {
 	Round,
 	Curly,
 	Square,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Side {
 	Open,
 	Close,
+}
+
+impl Bracket {
+	fn to_char(self, side: Side) -> char {
+		match (self, side) {
+			(Bracket::Round, Side::Open) => '(',
+			(Bracket::Round, Side::Close) => ')',
+			(Bracket::Curly, Side::Open) => '{',
+			(Bracket::Curly, Side::Close) => '}',
+			(Bracket::Square, Side::Open) => '[',
+			(Bracket::Square, Side::Close) => ']',
+		}
+	}
 }
 
 #[derive(Debug, PartialEq)]
