@@ -90,6 +90,7 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 				i -= 1;
 			}
 		}
+
 		i += 1;
 	}
 
@@ -137,7 +138,7 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 		tokens: &[Token],
 		_identifiers: &[String],
 		i: &mut usize,
-		searching: Option<Bracket>,
+		mut searching: Option<Bracket>,
 	) -> Vec<Tree> {
 		let mut trees = Vec::new();
 		while *i < tokens.len() {
@@ -148,9 +149,11 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 					Tree::Brackets(*b, parse(tokens, _identifiers, i, Some(*b)))
 				}
 				Token::Bracket(b, Side::Close) => match (b, searching) {
-					(b, None) => panic!("extra {}", b.to_char(Side::Close)),
-					(b, Some(c)) if *b == c => return trees,
-					(b, Some(_)) => panic!("extra {}", b.to_char(Side::Close)),
+					(b, Some(c)) if *b == c => {
+						searching = None;
+						break;
+					}
+					(b, _) => panic!("extra {}", b.to_char(Side::Close)),
 				},
 				Token::String(s) => Tree::String(s.clone()),
 				Token::Identifier(i) => Tree::Identifier(*i),
@@ -160,8 +163,10 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 		if let Some(b) = searching {
 			panic!("extra {}", b.to_char(Side::Open));
 		}
+
 		trees
 	}
+
 	parse(tokens, identifiers, &mut 0, None)
 }
 
