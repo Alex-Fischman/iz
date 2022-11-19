@@ -13,11 +13,15 @@ fn main() {
 			match tree {
 				Tree::Brackets(b, cs) => {
 					println!("b: {}", b.to_char(Side::Open));
-					print_trees(cs, identifiers, depth + 1)
+					print_trees(cs, identifiers, depth + 1);
 				}
 				Tree::String(s) => println!("s: {}", s),
 				Tree::Identifier(i) => println!("i: {}", identifiers[*i]),
 				Tree::Number(n) => println!("n: {}", n),
+				Tree::Operator(i, cs) => {
+					println!("o: {}", identifiers[*i]);
+					print_trees(cs, identifiers, depth + 1);
+				}
 			}
 		}
 	}
@@ -133,10 +137,33 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 	(tokens, identifiers)
 }
 
+type Operator<'a> = (&'a str, &'a str, usize, usize);
+pub const OPERATORS: &[(&[Operator], bool)] = &[
+	(&[("@", "@", 1, 1)], false),
+	(&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
+	(&[("*", "mul", 1, 1)], false),
+	(&[("+", "add", 1, 1)], false),
+	(
+		&[
+			("==", "eq", 1, 1),
+			("!=", "ne", 1, 1),
+			("<", "lt", 1, 1),
+			(">", "gt", 1, 1),
+			("<=", "le", 1, 1),
+			(">=", "ge", 1, 1),
+		],
+		false,
+	),
+	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
+	(&[("=", "=", 1, 1)], true),
+	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
+	(&[("else", "_else_", 1, 1)], true),
+];
+
 fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 	fn parse(
 		tokens: &[Token],
-		_identifiers: &[String],
+		identifiers: &[String],
 		i: &mut usize,
 		mut searching: Option<Bracket>,
 	) -> Vec<Tree> {
@@ -146,7 +173,7 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 			*i += 1;
 			trees.push(match token {
 				Token::Bracket(b, Side::Open) => {
-					Tree::Brackets(*b, parse(tokens, _identifiers, i, Some(*b)))
+					Tree::Brackets(*b, parse(tokens, identifiers, i, Some(*b)))
 				}
 				Token::Bracket(b, Side::Close) => match (b, searching) {
 					(b, Some(c)) if *b == c => {
@@ -162,6 +189,26 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 		}
 		if let Some(b) = searching {
 			panic!("extra {}", b.to_char(Side::Open));
+		}
+
+		for (operators, right) in OPERATORS {
+			let mut j = if *right { trees.len().wrapping_sub(1) } else { 0 };
+			while let Some(tree) = trees.get(j) {
+				if let Tree::Identifier(i) = tree {
+					let i = *i;
+					if let Some(operator) = operators.iter().find(|op| op.0 == identifiers[i]) {
+						if j < operator.2 || j + operator.3 >= trees.len() {
+							panic!("not enough operator arguments for {}", identifiers[i]);
+						}
+						trees.remove(j);
+						let cs: Vec<Tree> =
+							trees.drain(j - operator.2..j + operator.3).collect();
+						j -= operator.2;
+						trees.insert(j, Tree::Operator(i, cs));
+					}
+				}
+				j = if *right { j.wrapping_sub(1) } else { j + 1 }
+			}
 		}
 
 		trees
@@ -210,4 +257,5 @@ enum Tree {
 	String(String),
 	Identifier(usize),
 	Number(i64),
+	Operator(usize, Vec<Tree>),
 }
