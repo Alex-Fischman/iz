@@ -18,7 +18,7 @@ WIP Programming Language
 - Operators: move tokens around certain identifiers into children
 
 # Rewrite
-- Operators: move children to follow operators, including parens
+- Operators: move children to precede operators, including parens
 	- only {, }, \[, and \] should have children
 	- operators should be replaced with the names they compile to
 

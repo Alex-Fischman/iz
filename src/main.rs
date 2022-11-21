@@ -4,33 +4,33 @@ fn main() {
 	let chars: Vec<char> =
 		std::fs::read_to_string(file).expect("could not read file").chars().collect();
 
-	let (tokens, identifiers) = tokenizer(&chars);
-	let trees = parser(&tokens, &identifiers);
+	let tokens = tokenizer(&chars);
+	let trees = parser(&tokens);
+	let trees = rewriter(&trees);
 
-	fn print_trees(trees: &[Tree], identifiers: &[String], depth: usize) {
+	fn print_trees(trees: &[Tree], depth: usize) {
 		for tree in trees {
 			print!("{}", "\t".repeat(depth));
 			match tree {
 				Tree::Brackets(b, cs) => {
 					println!("b: {}", b.to_char(Side::Open));
-					print_trees(cs, identifiers, depth + 1);
+					print_trees(cs, depth + 1);
 				}
 				Tree::String(s) => println!("s: {}", s),
-				Tree::Identifier(i) => println!("i: {}", identifiers[*i]),
+				Tree::Identifier(i) => println!("i: {}", i),
 				Tree::Number(n) => println!("n: {}", n),
 				Tree::Operator(i, cs) => {
-					println!("o: {}", identifiers[*i]);
-					print_trees(cs, identifiers, depth + 1);
+					println!("o: {}", i);
+					print_trees(cs, depth + 1);
 				}
 			}
 		}
 	}
-	print_trees(&trees, &identifiers, 0);
+	print_trees(&trees, 0);
 }
 
-fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
+fn tokenizer(chars: &[char]) -> Vec<Token> {
 	let mut tokens: Vec<Token> = Vec::new();
-	let mut identifiers: Vec<String> = Vec::new();
 	let mut i = 0;
 	while i < chars.len() {
 		match chars[i] {
@@ -83,13 +83,7 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 					i += 1;
 				}
 
-				let s: String = chars[start..i].iter().collect();
-				if let Some(i) = identifiers.iter().position(|i| *i == s) {
-					tokens.push(Token::Identifier(i));
-				} else {
-					identifiers.push(s);
-					tokens.push(Token::Identifier(identifiers.len() - 1));
-				}
+				tokens.push(Token::Identifier(chars[start..i].iter().collect()));
 
 				i -= 1;
 			}
@@ -100,7 +94,7 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 
 	for token in &mut tokens {
 		if let Token::Identifier(i) = token {
-			let chars: Vec<char> = identifiers[*i].chars().collect();
+			let chars: Vec<char> = i.chars().collect();
 			if '0' <= chars[0] && chars[0] <= '9' {
 				if chars.len() == 1 {
 					*token = Token::Number(chars[0] as i64 - '0' as i64);
@@ -134,7 +128,7 @@ fn tokenizer(chars: &[char]) -> (Vec<Token>, Vec<String>) {
 		}
 	}
 
-	(tokens, identifiers)
+	tokens
 }
 
 type Operator<'a> = (&'a str, &'a str, usize, usize);
@@ -160,21 +154,14 @@ pub const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("else", "_else_", 1, 1)], true),
 ];
 
-fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
-	fn parse(
-		tokens: &[Token],
-		identifiers: &[String],
-		i: &mut usize,
-		mut searching: Option<Bracket>,
-	) -> Vec<Tree> {
+fn parser(tokens: &[Token]) -> Vec<Tree> {
+	fn parse(tokens: &[Token], i: &mut usize, mut searching: Option<Bracket>) -> Vec<Tree> {
 		let mut trees = Vec::new();
 		while *i < tokens.len() {
 			let token = &tokens[*i];
 			*i += 1;
 			trees.push(match token {
-				Token::Bracket(b, Side::Open) => {
-					Tree::Brackets(*b, parse(tokens, identifiers, i, Some(*b)))
-				}
+				Token::Bracket(b, Side::Open) => Tree::Brackets(*b, parse(tokens, i, Some(*b))),
 				Token::Bracket(b, Side::Close) => match (b, searching) {
 					(b, Some(c)) if *b == c => {
 						searching = None;
@@ -183,7 +170,7 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 					(b, _) => panic!("extra {}", b.to_char(Side::Close)),
 				},
 				Token::String(s) => Tree::String(s.clone()),
-				Token::Identifier(i) => Tree::Identifier(*i),
+				Token::Identifier(i) => Tree::Identifier(i.clone()),
 				Token::Number(n) => Tree::Number(*n),
 			});
 		}
@@ -195,10 +182,10 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 			let mut j = if *right { trees.len().wrapping_sub(1) } else { 0 };
 			while let Some(tree) = trees.get(j) {
 				if let Tree::Identifier(i) = tree {
-					let i = *i;
-					if let Some(operator) = operators.iter().find(|op| op.0 == identifiers[i]) {
+					let i = i.clone();
+					if let Some(operator) = operators.iter().find(|op| op.0 == i) {
 						if j < operator.2 || j + operator.3 >= trees.len() {
-							panic!("not enough operator arguments for {}", identifiers[i]);
+							panic!("not enough operator arguments for {}", i);
 						}
 						trees.remove(j);
 						let cs: Vec<Tree> =
@@ -214,14 +201,36 @@ fn parser(tokens: &[Token], identifiers: &[String]) -> Vec<Tree> {
 		trees
 	}
 
-	parse(tokens, identifiers, &mut 0, None)
+	parse(tokens, &mut 0, None)
+}
+
+fn rewriter(trees: &[Tree]) -> Vec<Tree> {
+	fn rewrite_tree(trees: &mut Vec<Tree>) {
+		let mut j = 0;
+		while j < trees.len() {
+			match trees[j].clone() {
+				Tree::Brackets(Bracket::Round, cs) => drop(trees.splice(j..j + 1, cs.clone())),
+				Tree::Operator(i, cs) => {
+					// todo: replace name
+					trees.insert(j + 1, Tree::Identifier(i));
+					trees.splice(j..j + 1, cs.clone());
+				}
+				_ => {}
+			}
+			j += 1;
+		}
+	}
+
+	let mut trees = Vec::from(trees);
+	rewrite_tree(&mut trees);
+	trees
 }
 
 #[derive(Debug, PartialEq)]
 enum Token {
 	Bracket(Bracket, Side),
 	String(String),
-	Identifier(usize),
+	Identifier(String),
 	Number(i64),
 }
 
@@ -251,11 +260,11 @@ impl Bracket {
 	}
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Tree {
 	Brackets(Bracket, Vec<Tree>),
 	String(String),
-	Identifier(usize),
+	Identifier(String),
 	Number(i64),
-	Operator(usize, Vec<Tree>),
+	Operator(String, Vec<Tree>),
 }
