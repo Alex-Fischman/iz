@@ -16,8 +16,7 @@ fn main() {
 					println!("b: {}", b.to_char(Side::Open));
 					print_trees(cs, depth + 1);
 				}
-				Tree::String(s) => println!("s: {}", s),
-				Tree::Identifier(i) => println!("i: {}", i),
+				Tree::String(s) | Tree::Identifier(s) => println!("s: {}", s),
 				Tree::Number(n) => println!("n: {}", n),
 				Tree::Operator(i, cs) => {
 					println!("o: {}", i);
@@ -131,27 +130,29 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 	tokens
 }
 
-type Operator<'a> = (&'a str, &'a str, usize, usize);
+//                   name     func     left   right  flip on rewrite
+type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
+//                        operators  right associativity
 pub const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "@", 1, 1)], false),
-	(&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
-	(&[("*", "mul", 1, 1)], false),
-	(&[("+", "add", 1, 1)], false),
+	(&[("@", "@", 1, 1, true)], false),
+	(&[("-", "neg", 0, 1, false), ("not", "_not_", 0, 1, false)], true),
+	(&[("*", "mul", 1, 1, false)], false),
+	(&[("+", "add", 1, 1, false)], false),
 	(
 		&[
-			("==", "eq", 1, 1),
-			("!=", "ne", 1, 1),
-			("<", "lt", 1, 1),
-			(">", "gt", 1, 1),
-			("<=", "le", 1, 1),
-			(">=", "ge", 1, 1),
+			("==", "eq", 1, 1, false),
+			("!=", "ne", 1, 1, false),
+			("<", "lt", 1, 1, false),
+			(">", "gt", 1, 1, false),
+			("<=", "le", 1, 1, false),
+			(">=", "ge", 1, 1, false),
 		],
 		false,
 	),
-	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
-	(&[("=", "=", 1, 1)], true),
-	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
-	(&[("else", "_else_", 1, 1)], true),
+	(&[("and", "_and_", 1, 1, false), ("or", "_or_", 1, 1, false)], true),
+	(&[("=", "=", 1, 1, true)], true),
+	(&[("if", "_if_", 0, 2, true), ("while", "_while_", 0, 2, false)], true),
+	(&[("else", "_else_", 1, 1, true)], true),
 ];
 
 fn parser(tokens: &[Token]) -> Vec<Tree> {
@@ -205,24 +206,30 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 }
 
 fn rewriter(trees: &[Tree]) -> Vec<Tree> {
-	fn rewrite_tree(trees: &mut Vec<Tree>) {
-		let mut j = 0;
-		while j < trees.len() {
-			match trees[j].clone() {
-				Tree::Brackets(Bracket::Round, cs) => drop(trees.splice(j..j + 1, cs.clone())),
-				Tree::Operator(i, cs) => {
-					// todo: replace name
-					trees.insert(j + 1, Tree::Identifier(i));
-					trees.splice(j..j + 1, cs.clone());
-				}
-				_ => {}
+	let mut trees = Vec::from(trees);
+	let mut j = 0;
+	while j < trees.len() {
+		j += match trees[j].clone() {
+			Tree::Brackets(b, cs) => {
+				trees[j] = Tree::Brackets(b, rewriter(&cs));
+				1
 			}
-			j += 1;
+			Tree::Operator(i, cs) => {
+				let operator = OPERATORS
+					.iter()
+					.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
+					.unwrap();
+				trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
+				let mut cs = cs.clone();
+				if operator.4 {
+					cs.reverse();
+				}
+				trees.splice(j..j + 1, cs);
+				0 // go back over cs
+			}
+			_ => 1,
 		}
 	}
-
-	let mut trees = Vec::from(trees);
-	rewrite_tree(&mut trees);
 	trees
 }
 
