@@ -13,13 +13,14 @@ fn main() {
 			print!("{}", "\t".repeat(depth));
 			match tree {
 				Tree::Brackets(b, cs) => {
-					println!("b: {}", b.to_char(Side::Open));
+					println!("{}", b.to_char(Side::Open));
 					print_trees(cs, depth + 1);
 				}
-				Tree::String(s) | Tree::Identifier(s) => println!("s: {}", s),
-				Tree::Number(n) => println!("n: {}", n),
+				Tree::String(s) => println!("{:?}", s),
+				Tree::Identifier(i) => println!("{}", i),
+				Tree::Number(n) => println!("{}", n),
 				Tree::Operator(i, cs) => {
-					println!("o: {}", i);
+					println!("{}", i);
 					print_trees(cs, depth + 1);
 				}
 			}
@@ -130,29 +131,41 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 	tokens
 }
 
-//                   name     func     left   right  flip on rewrite
-type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
+//                   name     func     left   right  unwrap
+type Operator<'a> = (&'a str, &'a str, usize, usize, Rewrite);
+#[derive(Debug, PartialEq)]
+enum Rewrite {
+	Unwrap,
+	UnwrapReverse,
+	NoUnwrap,
+}
 //                        operators  right associativity
-pub const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "@", 1, 1, true)], false),
-	(&[("-", "neg", 0, 1, false), ("not", "_not_", 0, 1, false)], true),
-	(&[("*", "mul", 1, 1, false)], false),
-	(&[("+", "add", 1, 1, false)], false),
+const OPERATORS: &[(&[Operator], bool)] = &[
+	(&[("@", "nop", 1, 1, Rewrite::UnwrapReverse)], false),
+	(&[("-", "neg", 0, 1, Rewrite::Unwrap), ("not", "_not_", 0, 1, Rewrite::Unwrap)], true),
+	(&[("*", "mul", 1, 1, Rewrite::Unwrap)], false),
+	(&[("+", "add", 1, 1, Rewrite::Unwrap)], false),
 	(
 		&[
-			("==", "eq", 1, 1, false),
-			("!=", "ne", 1, 1, false),
-			("<", "lt", 1, 1, false),
-			(">", "gt", 1, 1, false),
-			("<=", "le", 1, 1, false),
-			(">=", "ge", 1, 1, false),
+			("==", "eq", 1, 1, Rewrite::Unwrap),
+			("!=", "ne", 1, 1, Rewrite::Unwrap),
+			("<", "lt", 1, 1, Rewrite::Unwrap),
+			(">", "gt", 1, 1, Rewrite::Unwrap),
+			("<=", "le", 1, 1, Rewrite::Unwrap),
+			(">=", "ge", 1, 1, Rewrite::Unwrap),
 		],
 		false,
 	),
-	(&[("and", "_and_", 1, 1, false), ("or", "_or_", 1, 1, false)], true),
-	(&[("=", "=", 1, 1, true)], true),
-	(&[("if", "_if_", 0, 2, true), ("while", "_while_", 0, 2, false)], true),
-	(&[("else", "_else_", 1, 1, true)], true),
+	(&[("and", "_and_", 1, 1, Rewrite::Unwrap), ("or", "_or_", 1, 1, Rewrite::Unwrap)], true),
+	(&[("=", "=", 1, 1, Rewrite::NoUnwrap)], true),
+	(
+		&[
+			("if", "_if_", 0, 2, Rewrite::UnwrapReverse),
+			("while", "_while_", 0, 2, Rewrite::Unwrap),
+		],
+		true,
+	),
+	(&[("else", "_else_", 1, 1, Rewrite::Unwrap)], true),
 ];
 
 fn parser(tokens: &[Token]) -> Vec<Tree> {
@@ -219,13 +232,20 @@ fn rewriter(trees: &[Tree]) -> Vec<Tree> {
 					.iter()
 					.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
 					.unwrap();
-				trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
 				let mut cs = cs.clone();
-				if operator.4 {
+				if operator.4 == Rewrite::UnwrapReverse {
 					cs.reverse();
 				}
-				trees.splice(j..j + 1, cs);
-				0 // go back over cs
+				let cs = rewriter(&cs);
+				if operator.4 == Rewrite::NoUnwrap {
+					trees.splice(j..j + 1, [Tree::Operator(operator.1.to_owned(), cs)]);
+					1
+				} else {
+					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
+					let out = cs.len() + 1;
+					trees.splice(j..j + 1, cs);
+					out
+				}
 			}
 			_ => 1,
 		}
