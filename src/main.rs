@@ -139,7 +139,7 @@ enum Rewrite {
 	UnwrapReverse,
 	NoUnwrap,
 }
-//                        operators  right associativity
+//                    operators  right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("@", "nop", 1, 1, Rewrite::UnwrapReverse)], false),
 	(&[("-", "neg", 0, 1, Rewrite::Unwrap), ("not", "_not_", 0, 1, Rewrite::Unwrap)], true),
