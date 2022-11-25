@@ -29,6 +29,86 @@ fn main() {
 	print_trees(&trees, 0);
 }
 
+#[test]
+fn test() {
+	use Tree::*;
+	assert_eq!(
+		tokenizer(&"1+2 0b10_0000 0xff \"a b\tc\nd\\\"\"".chars().collect::<Vec<char>>()),
+		vec![
+			Token::Number(1),
+			Token::Identifier("+".to_string()),
+			Token::Number(2),
+			Token::Number(32),
+			Token::Number(255),
+			Token::String("a b\tc\nd\"".to_string()),
+		]
+	);
+	let parse_test = "if false 1 else if true 2 else 3\n# asdf\na = 1 + (2) * 3";
+	let parse_test = parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()));
+	assert_eq!(
+		parse_test,
+		vec![
+			Operator(
+				"else".to_string(),
+				vec![
+					Operator("if".to_string(), vec![Identifier("false".to_string()), Number(1)]),
+					Operator(
+						"else".to_string(),
+						vec![
+							Operator(
+								"if".to_string(),
+								vec![Identifier("true".to_string()), Number(2)]
+							),
+							Number(3),
+						]
+					),
+				]
+			),
+			Operator(
+				"=".to_string(),
+				vec![
+					Identifier("a".to_string()),
+					Operator(
+						"+".to_string(),
+						vec![
+							Number(1),
+							Operator(
+								"*".to_string(),
+								vec![Brackets(Bracket::Round, vec![Number(2)]), Number(3)]
+							)
+						]
+					)
+				]
+			),
+		]
+	);
+	assert_eq!(
+		rewriter(&parse_test),
+		vec![
+			Number(3),
+			Number(2),
+			Identifier("true".to_string()),
+			Identifier("_if_".to_string()),
+			Identifier("_else_".to_string()),
+			Number(1),
+			Identifier("false".to_string()),
+			Identifier("_if_".to_string()),
+			Identifier("_else_".to_string()),
+			Operator(
+				"=".to_string(),
+				vec![
+					Identifier("a".to_string()),
+					Number(1),
+					Brackets(Bracket::Round, vec![Number(2)]),
+					Number(3),
+					Identifier("mul".to_string()),
+					Identifier("add".to_string()),
+				]
+			),
+		]
+	);
+}
+
 #[derive(Debug, PartialEq)]
 enum Token {
 	Bracket(Bracket, Side),
@@ -199,7 +279,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 		],
 		true,
 	),
-	(&[("else", "_else_", 1, 1, Rewrite::Unwrap)], true),
+	(&[("else", "_else_", 1, 1, Rewrite::UnwrapReverse)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
