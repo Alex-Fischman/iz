@@ -29,6 +29,40 @@ fn main() {
 	print_trees(&trees, 0);
 }
 
+#[derive(Debug, PartialEq)]
+enum Token {
+	Bracket(Bracket, Side),
+	String(String),
+	Identifier(String),
+	Number(i64),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Bracket {
+	Round,
+	Curly,
+	Square,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Side {
+	Open,
+	Close,
+}
+
+impl Bracket {
+	fn to_char(self, side: Side) -> char {
+		match (self, side) {
+			(Bracket::Round, Side::Open) => '(',
+			(Bracket::Round, Side::Close) => ')',
+			(Bracket::Curly, Side::Open) => '{',
+			(Bracket::Curly, Side::Close) => '}',
+			(Bracket::Square, Side::Open) => '[',
+			(Bracket::Square, Side::Close) => ']',
+		}
+	}
+}
+
 fn tokenizer(chars: &[char]) -> Vec<Token> {
 	let mut tokens: Vec<Token> = Vec::new();
 	let mut i = 0;
@@ -168,6 +202,15 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 	(&[("else", "_else_", 1, 1, Rewrite::Unwrap)], true),
 ];
 
+#[derive(Clone, Debug, PartialEq)]
+enum Tree {
+	Brackets(Bracket, Vec<Tree>),
+	String(String),
+	Identifier(String),
+	Number(i64),
+	Operator(String, Vec<Tree>),
+}
+
 fn parser(tokens: &[Token]) -> Vec<Tree> {
 	fn parse(tokens: &[Token], i: &mut usize, mut searching: Option<Bracket>) -> Vec<Tree> {
 		let mut trees = Vec::new();
@@ -251,47 +294,4 @@ fn rewriter(trees: &[Tree]) -> Vec<Tree> {
 		}
 	}
 	trees
-}
-
-#[derive(Debug, PartialEq)]
-enum Token {
-	Bracket(Bracket, Side),
-	String(String),
-	Identifier(String),
-	Number(i64),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Bracket {
-	Round,
-	Curly,
-	Square,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Side {
-	Open,
-	Close,
-}
-
-impl Bracket {
-	fn to_char(self, side: Side) -> char {
-		match (self, side) {
-			(Bracket::Round, Side::Open) => '(',
-			(Bracket::Round, Side::Close) => ')',
-			(Bracket::Curly, Side::Open) => '{',
-			(Bracket::Curly, Side::Close) => '}',
-			(Bracket::Square, Side::Open) => '[',
-			(Bracket::Square, Side::Close) => ']',
-		}
-	}
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum Tree {
-	Brackets(Bracket, Vec<Tree>),
-	String(String),
-	Identifier(String),
-	Number(i64),
-	Operator(String, Vec<Tree>),
 }

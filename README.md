@@ -21,8 +21,8 @@ WIP Programming Language
 - Operators: move children to precede operators, replace names with funcs
 
 # Analysis
-- Scope
 - Types
+- Scope
 
 # Bytecode
 - Intrinsics: operations on the stack
