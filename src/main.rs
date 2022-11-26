@@ -7,20 +7,21 @@ fn main() {
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
 	let trees = rewriter(&trees);
+	let trees = typer(&trees);
 
-	fn print_trees(trees: &[Tree<()>], depth: usize) {
+	fn print_trees(trees: &[Tree<Effect>], depth: usize) {
 		for tree in trees {
 			print!("{}", "\t".repeat(depth));
 			match tree {
-				Tree::Brackets(b, cs, ()) => {
-					println!("{}", b.to_char(Side::Open));
+				Tree::Brackets(b, cs, e) => {
+					println!("{}\t{:?}\t{:?}", b.to_char(Side::Open), e.inputs, e.outputs);
 					print_trees(cs, depth + 1);
 				}
-				Tree::String(s, ()) => println!("{:?}", s),
-				Tree::Identifier(i, ()) => println!("{}", i),
-				Tree::Number(n, ()) => println!("{}", n),
-				Tree::Operator(i, cs, ()) => {
-					println!("{}", i);
+				Tree::String(s, e) => println!("{:?}\t{:?}\t{:?}", s, e.inputs, e.outputs),
+				Tree::Identifier(i, e) => println!("{}\t{:?}\t{:?}", i, e.inputs, e.outputs),
+				Tree::Number(n, e) => println!("{}\t{:?}\t{:?}", n, e.inputs, e.outputs),
+				Tree::Operator(i, cs, e) => {
+					println!("{}\t{:?}\t{:?}", i, e.inputs, e.outputs);
 					print_trees(cs, depth + 1);
 				}
 			}
@@ -107,18 +108,13 @@ fn test() {
 			Identifier("false".to_string(), ()),
 			Identifier("_if_".to_string(), ()),
 			Identifier("_else_".to_string(), ()),
-			Operator(
-				"=".to_string(),
-				vec![
-					Identifier("a".to_string(), ()),
-					Number(1, ()),
-					Brackets(Bracket::Round, vec![Number(2, ())], ()),
-					Number(3, ()),
-					Identifier("mul".to_string(), ()),
-					Identifier("add".to_string(), ()),
-				],
-				()
-			),
+			Number(1, ()),
+			Brackets(Bracket::Round, vec![Number(2, ())], ()),
+			Number(3, ()),
+			Identifier("mul".to_string(), ()),
+			Identifier("add".to_string(), ()),
+			Identifier("a".to_string(), ()),
+			Identifier("=".to_string(), ()),
 		]
 	);
 }
@@ -259,41 +255,32 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 	tokens
 }
 
-//                   name     func     left   right  unwrap
-type Operator<'a> = (&'a str, &'a str, usize, usize, Rewrite);
-#[derive(Debug, PartialEq)]
-enum Rewrite {
-	Unwrap,
-	UnwrapReverse,
-	NoUnwrap,
-}
+//                   name     func     left   right  reverse
+type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                    operators  right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "nop", 1, 1, Rewrite::UnwrapReverse)], false),
-	(&[("-", "neg", 0, 1, Rewrite::Unwrap), ("not", "_not_", 0, 1, Rewrite::Unwrap)], true),
-	(&[("*", "mul", 1, 1, Rewrite::Unwrap)], false),
-	(&[("+", "add", 1, 1, Rewrite::Unwrap)], false),
+	(&[("@", "nop", 1, 1, true)], false),
+	(&[("-", "neg", 0, 1, false), ("not", "_not_", 0, 1, false)], true),
+	(&[("*", "mul", 1, 1, false)], false),
+	(&[("+", "add", 1, 1, false)], false),
 	(
 		&[
-			("==", "eq", 1, 1, Rewrite::Unwrap),
-			("!=", "ne", 1, 1, Rewrite::Unwrap),
-			("<", "lt", 1, 1, Rewrite::Unwrap),
-			(">", "gt", 1, 1, Rewrite::Unwrap),
-			("<=", "le", 1, 1, Rewrite::Unwrap),
-			(">=", "ge", 1, 1, Rewrite::Unwrap),
+			("==", "eq", 1, 1, false),
+			("!=", "ne", 1, 1, false),
+			("<", "lt", 1, 1, false),
+			(">", "gt", 1, 1, false),
+			("<=", "le", 1, 1, false),
+			(">=", "ge", 1, 1, false),
 		],
 		false,
 	),
-	(&[("and", "_and_", 1, 1, Rewrite::Unwrap), ("or", "_or_", 1, 1, Rewrite::Unwrap)], true),
-	(&[("=", "=", 1, 1, Rewrite::NoUnwrap)], true),
+	(&[("and", "_and_", 1, 1, false), ("or", "_or_", 1, 1, false)], true),
+	(&[("=", "=", 1, 1, true)], true),
 	(
-		&[
-			("if", "_if_", 0, 2, Rewrite::UnwrapReverse),
-			("while", "_while_", 0, 2, Rewrite::Unwrap),
-		],
+		&[("if", "_if_", 0, 2, true), ("while", "_while_", 0, 2, false)],
 		true,
 	),
-	(&[("else", "_else_", 1, 1, Rewrite::UnwrapReverse)], true),
+	(&[("else", "_else_", 1, 1, true)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -372,22 +359,68 @@ fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 					.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
 					.unwrap();
 				let mut cs = cs.clone();
-				if operator.4 == Rewrite::UnwrapReverse {
+				if operator.4 {
 					cs.reverse();
 				}
 				let cs = rewriter(&cs);
-				if operator.4 == Rewrite::NoUnwrap {
-					trees.splice(j..j + 1, [Tree::Operator(operator.1.to_owned(), cs, ())]);
-					1
-				} else {
-					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
-					let out = cs.len() + 1;
-					trees.splice(j..j + 1, cs);
-					out
-				}
+				trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
+				let out = cs.len() + 1;
+				trees.splice(j..j + 1, cs);
+				out
 			}
 			_ => 1,
 		}
 	}
 	trees
+}
+
+#[derive(Debug)]
+enum Type {
+	Int,
+	Bool,
+	String,
+	Struct(Vec<Type>),
+	Enum(Vec<Type>),
+	Array(Box<Type>),
+}
+
+struct Effect {
+	inputs: Vec<Type>,
+	outputs: Vec<Type>,
+}
+
+impl Effect {
+	fn literal(t: Type) -> Effect {
+		Effect { inputs: vec![], outputs: vec![t] }
+	}
+
+	fn compose(&mut self, _other: &Effect) {
+		todo!()
+	}
+}
+
+fn typer(trees: &[Tree<()>]) -> Vec<Tree<Effect>> {
+	trees
+		.iter()
+		.map(|tree| match tree {
+			Tree::Brackets(b, cs, ()) => {
+				let cs = typer(cs);
+				Tree::Brackets(*b, cs, match b {
+					Bracket::Round => todo!(),
+					Bracket::Curly => todo!(),
+					Bracket::Square => todo!(),
+				})
+			},
+			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Type::String)),
+			Tree::Identifier(i, ()) => Tree::Identifier(
+				i.clone(),
+				match i.as_str() {
+					"false" | "true" => Effect::literal(Type::Bool),
+					_ => todo!(),
+				},
+			),
+			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
+			Tree::Operator(..) => unreachable!(),
+		})
+		.collect()
 }
