@@ -290,7 +290,7 @@ enum Tree<Tag> {
 }
 
 impl<Tag> Tree<Tag> {
-	fn get_tag(&self) -> &Tag {
+	fn get_tag(&mut self) -> &mut Tag {
 		match self {
 			Tree::Brackets(.., tag) => tag,
 			Tree::String(.., tag) => tag,
@@ -386,9 +386,9 @@ fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 #[derive(Clone, Debug)]
 enum Type {
 	Data(String),
-	Block(Effect),
 	Unknown,
-	SameAs(usize), // index into inputs
+	Block(Effect),
+	Array(Box<Type>),
 }
 
 impl Type {
@@ -403,6 +403,28 @@ impl Type {
 	fn string() -> Type {
 		Type::Data("string".to_string())
 	}
+
+	fn equalize(a: &mut Type, b: &mut Type) -> bool {
+		match (a, b) {
+			(Type::Data(a), Type::Data(b)) => a == b,
+			(Type::Block(a), Type::Block(b)) => {
+				a.inputs.iter_mut().zip(&mut b.inputs).all(|(a, b)| Type::equalize(a, b))
+					&& a.outputs
+						.iter_mut()
+						.zip(&mut b.outputs)
+						.all(|(a, b)| Type::equalize(a, b))
+			}
+			(a @ Type::Unknown, b) => {
+				*a = b.clone();
+				true
+			}
+			(a, b @ Type::Unknown) => {
+				*b = a.clone();
+				true
+			}
+			_ => false,
+		}
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -416,20 +438,13 @@ impl Effect {
 		Effect { inputs: vec![], outputs: vec![t] }
 	}
 
-	fn equalize(a: &mut Type, b: &Type) -> bool {
-		match (a, b) {
-			(Type::Data(a), Type::Data(b)) => a == b,
-			_ => todo!(),
-		}
-	}
-
-	fn compose(&mut self, other: &Effect) {
+	fn compose(&mut self, other: &mut Effect) {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
 		self.outputs
 			.drain(i..)
-			.zip(&other.inputs[j..])
-			.all(|(mut a, b)| Effect::equalize(&mut a, b));
+			.zip(&mut other.inputs[j..])
+			.all(|(mut a, b)| Type::equalize(&mut a, b));
 		self.inputs.extend(other.inputs[..j].iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 	}
@@ -440,13 +455,17 @@ fn typer(trees: &[Tree<()>]) -> Vec<Tree<Effect>> {
 		.iter()
 		.map(|tree| match tree {
 			Tree::Brackets(b, cs, ()) => {
-				let cs = typer(cs);
+				let mut cs = typer(cs);
 				let mut t = Effect { inputs: vec![], outputs: vec![] };
-				cs.iter().for_each(|c| t.compose(c.get_tag()));
+				cs.iter_mut().for_each(|c| t.compose(c.get_tag()));
 				let t = match b {
 					Bracket::Round => t,
 					Bracket::Curly => Effect::literal(Type::Block(t)),
-					Bracket::Square => todo!("arrays (type variables)"),
+					Bracket::Square => {
+						let mut x = t.inputs.get(0).cloned().unwrap_or(Type::Unknown);
+						assert!(t.inputs.iter_mut().all(|s| Type::equalize(&mut x, s)));
+						Effect::literal(Type::Array(Box::new(x)))
+					}
 				};
 				Tree::Brackets(*b, cs, t)
 			}
@@ -464,10 +483,7 @@ fn typer(trees: &[Tree<()>]) -> Vec<Tree<Effect>> {
 						inputs: vec![Type::int(), Type::int()],
 						outputs: vec![Type::int()],
 					},
-					"eq" | "ne" => Effect {
-						inputs: vec![Type::Unknown, Type::SameAs(0)],
-						outputs: vec![Type::bool()],
-					},
+					"eq" | "ne" => todo!("type constraints"),
 					"lt" | "gt" | "le" | "ge" => Effect {
 						inputs: vec![Type::int(), Type::int()],
 						outputs: vec![Type::bool()],
