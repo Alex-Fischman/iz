@@ -108,10 +108,10 @@ fn test() {
 			Identifier("false".to_string(), ()),
 			Identifier("_if_".to_string(), ()),
 			Identifier("_else_".to_string(), ()),
-			Number(1, ()),
-			Brackets(Bracket::Round, vec![Number(2, ())], ()),
 			Number(3, ()),
+			Brackets(Bracket::Round, vec![Number(2, ())], ()),
 			Identifier("mul".to_string(), ()),
+			Number(1, ()),
 			Identifier("add".to_string(), ()),
 			Identifier("a".to_string(), ()),
 			Identifier("=".to_string(), ()),
@@ -255,29 +255,29 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 	tokens
 }
 
-//                   name     func     left   right  reverse
-type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
+//                   name     func     left   right
+type Operator<'a> = (&'a str, &'a str, usize, usize);
 //                    operators  right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "nop", 1, 1, true)], false),
-	(&[("-", "neg", 0, 1, false), ("not", "_not_", 0, 1, false)], true),
-	(&[("*", "mul", 1, 1, false)], false),
-	(&[("+", "add", 1, 1, false)], false),
+	(&[("@", "nop", 1, 1)], false),
+	(&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
+	(&[("*", "mul", 1, 1)], false),
+	(&[("+", "add", 1, 1)], false),
 	(
 		&[
-			("==", "eq", 1, 1, false),
-			("!=", "ne", 1, 1, false),
-			("<", "lt", 1, 1, false),
-			(">", "gt", 1, 1, false),
-			("<=", "le", 1, 1, false),
-			(">=", "ge", 1, 1, false),
+			("==", "eq", 1, 1),
+			("!=", "ne", 1, 1),
+			("<", "lt", 1, 1),
+			(">", "gt", 1, 1),
+			("<=", "le", 1, 1),
+			(">=", "ge", 1, 1),
 		],
 		false,
 	),
-	(&[("and", "_and_", 1, 1, false), ("or", "_or_", 1, 1, false)], true),
-	(&[("=", "=", 1, 1, true)], true),
-	(&[("if", "_if_", 0, 2, true), ("while", "_while_", 0, 2, false)], true),
-	(&[("else", "_else_", 1, 1, true)], true),
+	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
+	(&[("=", "=", 1, 1)], true),
+	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
+	(&[("else", "_else_", 1, 1)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -368,9 +368,7 @@ fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 					.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
 					.unwrap();
 				let mut cs = cs.clone();
-				if operator.4 {
-					cs.reverse();
-				}
+				cs.reverse();
 				let cs = rewriter(&cs);
 				trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
 				let out = cs.len() + 1;
