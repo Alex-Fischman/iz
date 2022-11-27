@@ -416,13 +416,20 @@ impl Effect {
 		Effect { inputs: vec![], outputs: vec![t] }
 	}
 
+	fn equalize(a: &mut Type, b: &Type) -> bool {
+		match (a, b) {
+			(Type::Data(a), Type::Data(b)) => a == b,
+			_ => todo!(),
+		}
+	}
+
 	fn compose(&mut self, other: &Effect) {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
-		self.outputs.drain(i..).zip(&other.inputs[j..]).all(|(a, b)| match (a, b) {
-			(Type::Data(a), Type::Data(b)) => a == *b,
-			_ => todo!(),
-		});
+		self.outputs
+			.drain(i..)
+			.zip(&other.inputs[j..])
+			.all(|(mut a, b)| Effect::equalize(&mut a, b));
 		self.inputs.extend(other.inputs[..j].iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 	}
