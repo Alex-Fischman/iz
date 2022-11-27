@@ -383,15 +383,29 @@ fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 	trees
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 enum Type {
-	Int,
-	Bool,
-	String,
+	Data(String),
 	Block(Effect),
+	Unknown,
+	SameAs(usize), // index into inputs
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl Type {
+	fn int() -> Type {
+		Type::Data("int".to_string())
+	}
+
+	fn bool() -> Type {
+		Type::Data("bool".to_string())
+	}
+
+	fn string() -> Type {
+		Type::Data("string".to_string())
+	}
+}
+
+#[derive(Clone, Debug)]
 struct Effect {
 	inputs: Vec<Type>,
 	outputs: Vec<Type>,
@@ -405,14 +419,16 @@ impl Effect {
 	fn compose(&mut self, other: &Effect) {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
-		self.outputs.drain(i..).zip(&other.inputs[j..]).for_each(|(a, b)| assert_eq!(a, *b));
+		self.outputs.drain(i..).zip(&other.inputs[j..]).all(|(a, b)| match (a, b) {
+			(Type::Data(a), Type::Data(b)) => a == *b,
+			_ => todo!(),
+		});
 		self.inputs.extend(other.inputs[..j].iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 	}
 }
 
 fn typer(trees: &[Tree<()>]) -> Vec<Tree<Effect>> {
-	use Type::*;
 	trees
 		.iter()
 		.map(|tree| match tree {
@@ -422,38 +438,50 @@ fn typer(trees: &[Tree<()>]) -> Vec<Tree<Effect>> {
 				cs.iter().for_each(|c| t.compose(c.get_tag()));
 				let t = match b {
 					Bracket::Round => t,
-					Bracket::Curly => Effect::literal(Block(t)),
+					Bracket::Curly => Effect::literal(Type::Block(t)),
 					Bracket::Square => todo!("arrays (type variables)"),
 				};
 				Tree::Brackets(*b, cs, t)
 			}
-			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(String)),
+			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Type::string())),
 			Tree::Identifier(i, ()) => Tree::Identifier(
 				i.clone(),
 				match i.as_str() {
-					"false" | "true" => Effect::literal(Bool),
+					"false" | "true" => Effect::literal(Type::bool()),
 					"nop" => Effect { inputs: vec![], outputs: vec![] },
-					"neg" => Effect { inputs: vec![Int], outputs: vec![Int] },
-					"_not_" => Effect { inputs: vec![Bool], outputs: vec![Bool] },
-					"mul" | "add" => Effect { inputs: vec![Int, Int], outputs: vec![Int] },
-					"eq" | "ne" => todo!("type variables"),
-					"lt" | "gt" | "le" | "ge" => {
-						Effect { inputs: vec![Int, Int], outputs: vec![Bool] }
+					"neg" => Effect { inputs: vec![Type::int()], outputs: vec![Type::int()] },
+					"_not_" => {
+						Effect { inputs: vec![Type::bool()], outputs: vec![Type::bool()] }
 					}
-					"_and_" | "_or_" => Effect { inputs: vec![Bool, Bool], outputs: vec![Bool] },
+					"mul" | "add" => Effect {
+						inputs: vec![Type::int(), Type::int()],
+						outputs: vec![Type::int()],
+					},
+					"eq" | "ne" => Effect {
+						inputs: vec![Type::Unknown, Type::SameAs(0)],
+						outputs: vec![Type::bool()],
+					},
+					"lt" | "gt" | "le" | "ge" => Effect {
+						inputs: vec![Type::int(), Type::int()],
+						outputs: vec![Type::bool()],
+					},
+					"_and_" | "_or_" => Effect {
+						inputs: vec![Type::bool(), Type::bool()],
+						outputs: vec![Type::bool()],
+					},
 					"=" => todo!("value variables"),
 					"_if_" | "_else_" => todo!("optionals"),
 					"_while_" => Effect {
 						inputs: vec![
-							Block(Effect::literal(Bool)),
-							Block(Effect { inputs: vec![], outputs: vec![] }),
+							Type::Block(Effect::literal(Type::bool())),
+							Type::Block(Effect { inputs: vec![], outputs: vec![] }),
 						],
 						outputs: vec![],
 					},
 					i => todo!("{}", i),
 				},
 			),
-			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
+			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::int())),
 			Tree::Operator(..) => unreachable!(),
 		})
 		.collect()
