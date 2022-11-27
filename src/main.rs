@@ -462,8 +462,8 @@ fn typer(trees: &[Tree<()>]) -> Vec<Tree<Effect>> {
 					Bracket::Round => t,
 					Bracket::Curly => Effect::literal(Type::Block(t)),
 					Bracket::Square => {
-						let mut x = t.inputs.get(0).cloned().unwrap_or(Type::Unknown);
-						assert!(t.inputs.iter_mut().all(|s| Type::equalize(&mut x, s)));
+						let mut x = t.outputs.get(0).cloned().unwrap_or(Type::Unknown);
+						assert!(t.outputs.iter_mut().all(|s| Type::equalize(&mut x, s)));
 						Effect::literal(Type::Array(Box::new(x)))
 					}
 				};
