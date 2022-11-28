@@ -10,8 +10,8 @@ fn main() {
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
 	let code = compile(&tree);
-
-	println!("{:?}", code);
+	let stack = run(&code);
+	println!("{:?}", stack);
 }
 
 #[test]
@@ -528,4 +528,52 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 		Tree::Number(n, _) => vec![IntLit(*n)],
 		Tree::Operator(..) => unreachable!(),
 	}
+}
+
+fn run(code: &[Operation]) -> Vec<i64> {
+	let mut stack = vec![];
+	let mut i = 0;
+	while i < code.len() {
+		match code[i] {
+			Operation::IntLit(i) => stack.push(i),
+			Operation::IntMul => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push(a * b);
+			}
+			Operation::IntAdd => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push(a + b);
+			}
+			Operation::IntNeg => {
+				let a = stack.pop().unwrap();
+				stack.push(-a);
+			}
+			Operation::IntEq => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push((a == b) as i64);
+			}
+			Operation::IntLt => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push((a < b) as i64);
+			}
+			Operation::IntGt => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push((a > b) as i64);
+			}
+			Operation::BitNot => {
+				let a = stack.pop().unwrap();
+				stack.push(!a);
+			}
+			Operation::BitAnd => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push((a & b) as i64);
+			}
+			Operation::BitOr => {
+				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+				stack.push((a | b) as i64);
+			}
+		}
+		i += 1;
+	}
+	stack
 }
