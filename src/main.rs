@@ -415,7 +415,7 @@ impl Type {
 						.zip(&mut b.outputs)
 						.all(|(a, b)| Type::equalize(a, b))
 			}
-			_ => false,
+			(Type::Data(_), Type::Block(_)) | (Type::Block(_), Type::Data(_)) => false,
 		}
 	}
 }
@@ -444,10 +444,11 @@ impl Effect {
 	fn compose(&mut self, other: &mut Effect) {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
-		self.outputs
+		assert!(self
+			.outputs
 			.drain(i..)
 			.zip(&mut other.inputs[j..])
-			.all(|(mut a, b)| Type::equalize(&mut a, b));
+			.all(|(mut a, b)| Type::equalize(&mut a, b)));
 		self.inputs.extend(other.inputs[..j].iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 	}
