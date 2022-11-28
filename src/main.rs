@@ -9,7 +9,9 @@ fn main() {
 	let trees = rewriter(&trees);
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
-	let code = compile(&tree);
+	let mut code = compile(&tree);
+	code.extend([Push(code.len() as i64 + 3), Pull(1), JumpAbs]); // since there's no main yet
+	println!("{:?}", code);
 	let stack = run(&code);
 	println!("{:?}", stack);
 }
@@ -482,9 +484,10 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 	}
 }
 
+use Operation::*;
 #[derive(Debug)]
 enum Operation {
-	IntLit(i64),
+	Push(i64),
 	IntNeg,
 	IntMul,
 	IntAdd,
@@ -494,20 +497,28 @@ enum Operation {
 	BitNot,
 	BitAnd,
 	BitOr,
+	JumpRel,
+	JumpAbs,
+	Pull(usize), // index from top of stack
+	Label,
 }
 
 fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
-	use Operation::*;
 	match tree {
 		Tree::Brackets(Bracket::Round, cs, _) => cs.iter().flat_map(compile).collect(),
-		// todo: labels
-		Tree::Brackets(Bracket::Curly, cs, _) => cs.iter().flat_map(compile).collect(),
+		Tree::Brackets(Bracket::Curly, cs, Effect { inputs: _, outputs }) => {
+			let mut code: Vec<Operation> = cs.iter().flat_map(compile).collect();
+			// todo: pop local vars here
+			code.extend([Pull(outputs.len()), JumpAbs]);
+			code.splice(0..0, [Label, Push(5), IntAdd, Push(code.len() as i64), JumpRel]);
+			code
+		}
 		Tree::Brackets(Bracket::Square, ..) => todo!(),
 		Tree::String(..) => todo!(),
 		Tree::Identifier(i, Effect { inputs, outputs }) => {
 			match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
-				("false", [], [Type::Bool]) => vec![IntLit(0)],
-				("true", [], [Type::Bool]) => vec![IntLit(1)],
+				("false", [], [Type::Bool]) => vec![Push(0)],
+				("true", [], [Type::Bool]) => vec![Push(1)],
 				("neg", [Type::Int], [Type::Int]) => vec![IntNeg],
 				("not", [Type::Bool], [Type::Bool]) => vec![BitNot],
 				("mul", [Type::Int, Type::Int], [Type::Int]) => vec![IntMul],
@@ -525,7 +536,7 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 				_ => todo!(),
 			}
 		}
-		Tree::Number(n, _) => vec![IntLit(*n)],
+		Tree::Number(n, _) => vec![Push(*n)],
 		Tree::Operator(..) => unreachable!(),
 	}
 }
@@ -534,44 +545,55 @@ fn run(code: &[Operation]) -> Vec<i64> {
 	let mut stack = vec![];
 	let mut i = 0;
 	while i < code.len() {
+		println!("{:?}", stack);
 		match code[i] {
-			Operation::IntLit(i) => stack.push(i),
-			Operation::IntMul => {
+			Push(i) => stack.push(i),
+			IntMul => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push(a * b);
 			}
-			Operation::IntAdd => {
+			IntAdd => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push(a + b);
 			}
-			Operation::IntNeg => {
+			IntNeg => {
 				let a = stack.pop().unwrap();
 				stack.push(-a);
 			}
-			Operation::IntEq => {
+			IntEq => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a == b) as i64);
 			}
-			Operation::IntLt => {
+			IntLt => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a < b) as i64);
 			}
-			Operation::IntGt => {
+			IntGt => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a > b) as i64);
 			}
-			Operation::BitNot => {
+			BitNot => {
 				let a = stack.pop().unwrap();
 				stack.push(!a);
 			}
-			Operation::BitAnd => {
+			BitAnd => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a & b) as i64);
 			}
-			Operation::BitOr => {
+			BitOr => {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a | b) as i64);
 			}
+			JumpRel => i += stack.pop().unwrap() as usize,
+			JumpAbs => {
+				i = stack.pop().unwrap() as usize;
+				continue;
+			}
+			Pull(i) => {
+				let a = stack.remove(stack.len() - 1 - i);
+				stack.push(a);
+			}
+			Label => stack.push(i as i64),
 		}
 		i += 1;
 	}
