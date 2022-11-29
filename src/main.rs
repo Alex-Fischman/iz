@@ -10,7 +10,7 @@ fn main() {
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
-	code.extend([Push(code.len() as i64 + 3), Pull(1), JumpAbs]); // since there's no main yet
+	code.extend([Push(-1), Pull(1), Goto, Label(-1)]); // since there's no main yet
 	println!("{:?}", code);
 	let stack = run(&code);
 	println!("{:?}", stack);
@@ -571,20 +571,26 @@ enum Operation {
 	BitNot,
 	BitAnd,
 	BitOr,
-	JumpRel,
-	JumpAbs,
 	Pull(usize), // index from top of stack
-	Label,
+	Label(i64),
+	Goto,
 }
 
 fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
+	let mut labels = 0;
+	let mut new_label = || {
+		labels += 1;
+		labels - 1
+	};
 	match tree {
 		Tree::Brackets(Bracket::Round, cs, _) => cs.iter().flat_map(compile).collect(),
 		Tree::Brackets(Bracket::Curly, cs, Effect { inputs: _, outputs }) => {
+			let start = new_label();
+			let end = new_label();
 			let mut code: Vec<Operation> = cs.iter().flat_map(compile).collect();
 			// todo: pop local vars here
-			code.extend([Pull(outputs.len()), JumpAbs]);
-			code.splice(0..0, [Label, Push(5), IntAdd, Push(code.len() as i64), JumpRel]);
+			code.extend([Pull(outputs.len()), Goto, Label(end)]);
+			code.splice(0..0, [Push(start), Push(end), Goto, Label(start)]);
 			code
 		}
 		Tree::Brackets(Bracket::Square, ..) => todo!(),
@@ -658,16 +664,18 @@ fn run(code: &[Operation]) -> Vec<i64> {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a | b) as i64);
 			}
-			JumpRel => i += stack.pop().unwrap() as usize,
-			JumpAbs => {
-				i = stack.pop().unwrap() as usize;
-				continue;
-			}
 			Pull(i) => {
 				let a = stack.remove(stack.len() - 1 - i);
 				stack.push(a);
 			}
-			Label => stack.push(i as i64),
+			Label(_) => {}
+			Goto => {
+				let a = stack.pop().unwrap();
+				i = code
+					.iter()
+					.position(|o| matches!(o, Label(b) if a == *b))
+					.expect("could not find label")
+			}
 		}
 		i += 1;
 	}
