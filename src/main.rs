@@ -373,6 +373,7 @@ enum Type {
 	Bool,
 	String,
 	Block(Effect),
+	Variable(usize),
 }
 
 impl std::fmt::Debug for Type {
@@ -382,23 +383,22 @@ impl std::fmt::Debug for Type {
 			Type::Bool => write!(f, "bool"),
 			Type::String => write!(f, "string"),
 			Type::Block(e) => write!(f, "{:?}", e),
+			Type::Variable(_) => unreachable!("uneliminated var"),
 		}
 	}
 }
 
 impl Type {
-	fn equalize(a: &mut Type, b: &mut Type) -> bool {
+	fn equalize(a: &Type, b: &Type, vars: &mut TypeVars) -> bool {
 		match (a, b) {
 			(Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::String, Type::String) => {
 				true
 			}
 			(Type::Block(a), Type::Block(b)) => {
-				a.inputs.iter_mut().zip(&mut b.inputs).all(|(a, b)| Type::equalize(a, b))
-					&& a.outputs
-						.iter_mut()
-						.zip(&mut b.outputs)
-						.all(|(a, b)| Type::equalize(a, b))
+				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
+					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
 			}
+			(Type::Variable(i), b) | (b, Type::Variable(i)) => vars.set_var(*i, b),
 			_ => false,
 		}
 	}
@@ -425,63 +425,137 @@ impl Effect {
 		Effect { inputs, outputs }
 	}
 
-	fn compose(&mut self, other: &mut Effect) {
+	fn compose(&mut self, other: &mut Effect, vars: &mut TypeVars) {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
 		assert!(self
 			.outputs
 			.drain(i..)
-			.zip(&mut other.inputs[j..])
-			.all(|(mut a, b)| Type::equalize(&mut a, b)));
+			.zip(&other.inputs[j..])
+			.all(|(a, b)| Type::equalize(&a, b, vars)));
 		self.inputs.extend(other.inputs[..j].iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 	}
 }
 
-fn typer(tree: &Tree<()>) -> Tree<Effect> {
-	match tree {
-		Tree::Brackets(b, cs, ()) => {
-			let mut cs: Vec<Tree<Effect>> = cs.iter().map(typer).collect();
-			let mut t = Effect::function(vec![], vec![]);
-			cs.iter_mut().for_each(|c| t.compose(c.get_tag()));
-			let t = match b {
-				Bracket::Round => t,
-				Bracket::Curly => Effect::literal(Type::Block(t)),
-				Bracket::Square => todo!(),
-			};
-			Tree::Brackets(*b, cs, t)
-		}
-		Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Type::String)),
-		Tree::Identifier(i, ()) => Tree::Identifier(
-			i.clone(),
-			match i.as_str() {
-				"false" | "true" => Effect::literal(Type::Bool),
-				"nop" => Effect::function(vec![], vec![]),
-				"neg" => Effect::function(vec![Type::Int], vec![Type::Int]),
-				"_not_" => Effect::function(vec![Type::Bool], vec![Type::Bool]),
-				"mul" | "add" => Effect::function(vec![Type::Int, Type::Int], vec![Type::Int]),
-				"eq" | "ne" => todo!("type constraints"),
-				"lt" | "gt" | "le" | "ge" => {
-					Effect::function(vec![Type::Int, Type::Int], vec![Type::Bool])
-				}
-				"_and_" | "_or_" => {
-					Effect::function(vec![Type::Bool, Type::Bool], vec![Type::Bool])
-				}
-				"=" => todo!("value variables"),
-				"_if_" | "_else_" => todo!("optionals"),
-				"_while_" => Effect::function(
-					vec![
-						Type::Block(Effect::literal(Type::Bool)),
-						Type::Block(Effect::function(vec![], vec![])),
-					],
-					vec![],
-				),
-				i => todo!("{}", i),
-			},
-		),
-		Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
-		Tree::Operator(..) => unreachable!(),
+struct TypeVars(Vec<Option<Type>>);
+
+impl TypeVars {
+	fn new_var(self: &mut TypeVars) -> Type {
+		self.0.push(None);
+		Type::Variable(self.0.len() - 1)
 	}
+
+	fn old_var(self: &TypeVars) -> Type {
+		Type::Variable(self.0.len() - 1)
+	}
+
+	fn set_var(self: &mut TypeVars, i: usize, a: &Type) -> bool {
+		match &self.0[i] {
+			None => {
+				self.0[i] = Some(a.clone());
+				true
+			}
+			Some(b) => Type::equalize(a, &b.clone(), self),
+		}
+	}
+
+	fn get_var(self: &TypeVars, i: usize) -> &Type {
+		match &self.0[i] {
+			None => panic!("unsolved type var {} in {:?}", i, self.0),
+			Some(Type::Variable(j)) => self.get_var(*j),
+			Some(t) => t,
+		}
+	}
+}
+
+fn typer(tree: &Tree<()>) -> Tree<Effect> {
+	fn typer(tree: &Tree<()>, vars: &mut TypeVars) -> Tree<Effect> {
+		match tree {
+			Tree::Brackets(b, cs, ()) => {
+				let mut cs: Vec<Tree<Effect>> = cs.iter().map(|c| typer(c, vars)).collect();
+				let mut t = Effect::function(vec![], vec![]);
+				cs.iter_mut().for_each(|c| t.compose(c.get_tag(), vars));
+				let t = match b {
+					Bracket::Round => t,
+					Bracket::Curly => Effect::literal(Type::Block(t)),
+					Bracket::Square => todo!(),
+				};
+				Tree::Brackets(*b, cs, t)
+			}
+			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Type::String)),
+			Tree::Identifier(i, ()) => Tree::Identifier(
+				i.clone(),
+				match i.as_str() {
+					"false" | "true" => Effect::literal(Type::Bool),
+					"nop" => Effect::function(vec![], vec![]),
+					"neg" => Effect::function(vec![Type::Int], vec![Type::Int]),
+					"_not_" => Effect::function(vec![Type::Bool], vec![Type::Bool]),
+					"mul" | "add" => {
+						Effect::function(vec![Type::Int, Type::Int], vec![Type::Int])
+					}
+					"eq" | "ne" => {
+						Effect::function(vec![vars.new_var(), vars.old_var()], vec![Type::Bool])
+					}
+					"lt" | "gt" | "le" | "ge" => {
+						Effect::function(vec![Type::Int, Type::Int], vec![Type::Bool])
+					}
+					"_and_" | "_or_" => {
+						Effect::function(vec![Type::Bool, Type::Bool], vec![Type::Bool])
+					}
+					"=" => todo!("value variables"),
+					"_if_" | "_else_" => todo!("optionals"),
+					"_while_" => Effect::function(
+						vec![
+							Type::Block(Effect::literal(Type::Bool)),
+							Type::Block(Effect::function(vec![], vec![])),
+						],
+						vec![],
+					),
+					i => todo!("{}", i),
+				},
+			),
+			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
+			Tree::Operator(..) => unreachable!(),
+		}
+	}
+	fn replace_vars_in_effect(effect: &Effect, vars: &TypeVars) -> Effect {
+		Effect {
+			inputs: effect
+				.inputs
+				.iter()
+				.map(|t| match t {
+					Type::Variable(i) => vars.get_var(*i).clone(),
+					t => t.clone(),
+				})
+				.collect(),
+			outputs: effect
+				.outputs
+				.iter()
+				.map(|t| match t {
+					Type::Variable(i) => vars.get_var(*i).clone(),
+					t => t.clone(),
+				})
+				.collect(),
+		}
+	}
+	fn replace_vars_in_tree(tree: &Tree<Effect>, vars: &TypeVars) -> Tree<Effect> {
+		match tree {
+			Tree::Brackets(b, cs, e) => Tree::Brackets(
+				*b,
+				cs.iter().map(|c| replace_vars_in_tree(c, vars)).collect(),
+				replace_vars_in_effect(e, vars),
+			),
+			Tree::String(s, e) => Tree::String(s.clone(), replace_vars_in_effect(e, vars)),
+			Tree::Identifier(i, e) => {
+				Tree::Identifier(i.clone(), replace_vars_in_effect(e, vars))
+			}
+			Tree::Number(n, e) => Tree::Number(*n, replace_vars_in_effect(e, vars)),
+			Tree::Operator(..) => unreachable!(),
+		}
+	}
+	let mut vars = TypeVars(vec![]);
+	replace_vars_in_tree(&typer(tree, &mut vars), &vars)
 }
 
 use Operation::*;
@@ -533,7 +607,7 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 				("ge", [Type::Int, Type::Int], [Type::Bool]) => vec![IntLt, BitNot],
 				("_and_", [Type::Bool, Type::Bool], [Type::Bool]) => vec![BitAnd],
 				("_or_", [Type::Bool, Type::Bool], [Type::Bool]) => vec![BitOr],
-				_ => todo!(),
+				(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
 			}
 		}
 		Tree::Number(n, _) => vec![Push(*n)],
