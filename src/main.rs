@@ -470,15 +470,15 @@ impl TypeVars {
 }
 
 fn typer(tree: &Tree<()>) -> Tree<Effect> {
-	fn typer(tree: &Tree<()>, vars: &mut TypeVars) -> Tree<Effect> {
-		match tree {
+	fn typer(tree: &Tree<()>, vars: &mut TypeVars, scope: &mut Effect) -> Tree<Effect> {
+		let mut out = match tree {
 			Tree::Brackets(b, cs, ()) => {
-				let mut cs: Vec<Tree<Effect>> = cs.iter().map(|c| typer(c, vars)).collect();
-				let mut t = Effect::function(vec![], vec![]);
-				cs.iter_mut().for_each(|c| t.compose(c.get_tag(), vars));
+				let mut child = Effect::function(vec![], vec![]);
+				let cs: Vec<Tree<Effect>> =
+					cs.iter().map(|c| typer(c, vars, &mut child)).collect();
 				let t = match b {
-					Bracket::Round => t,
-					Bracket::Curly => Effect::literal(Type::Block(t)),
+					Bracket::Round => child,
+					Bracket::Curly => Effect::literal(Type::Block(child)),
 					Bracket::Square => todo!(),
 				};
 				Tree::Brackets(*b, cs, t)
@@ -517,7 +517,9 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 			),
 			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
 			Tree::Operator(..) => unreachable!(),
-		}
+		};
+		scope.compose(out.get_tag(), vars);
+		out
 	}
 	fn replace_vars_in_effect(effect: &Effect, vars: &TypeVars) -> Effect {
 		Effect {
@@ -555,7 +557,12 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 		}
 	}
 	let mut vars = TypeVars(vec![]);
-	replace_vars_in_tree(&typer(tree, &mut vars), &vars)
+	let mut scope = Effect::function(vec![], vec![]);
+	let tree = typer(tree, &mut vars, &mut scope);
+	if !scope.inputs.is_empty() {
+		panic!("program expected {:?}", scope.inputs);
+	}
+	replace_vars_in_tree(&tree, &vars)
 }
 
 use Operation::*;
