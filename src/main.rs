@@ -487,6 +487,17 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 			Tree::Identifier(i, ()) => Tree::Identifier(
 				i.clone(),
 				match i.as_str() {
+					"call" => match scope.outputs.last() {
+						Some(Type::Block(Effect { inputs, outputs })) => {
+							let mut call_i = inputs.clone();
+							call_i.push(Type::Block(Effect::function(
+								inputs.clone(),
+								outputs.clone(),
+							)));
+							Effect::function(call_i, outputs.clone())
+						}
+						t => panic!("call expected block, found {:?}", t),
+					},
 					"false" | "true" => Effect::literal(Type::Bool),
 					"nop" => Effect::function(vec![], vec![]),
 					"neg" => Effect::function(vec![Type::Int], vec![Type::Int]),
@@ -604,6 +615,7 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 		Tree::String(..) => todo!(),
 		Tree::Identifier(i, Effect { inputs, outputs }) => {
 			match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
+				("call", _, _) => todo!(),
 				("false", [], [Type::Bool]) => vec![Push(0)],
 				("true", [], [Type::Bool]) => vec![Push(1)],
 				("neg", [Type::Int], [Type::Int]) => vec![IntNeg],
