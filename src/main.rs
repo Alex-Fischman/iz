@@ -103,6 +103,55 @@ fn test() {
 			Identifier("=".to_string(), ()),
 		]
 	);
+	let typer_test = tokenizer(&"{{1 2} call add} call".chars().collect::<Vec<char>>());
+	let typer_test = Tree::Brackets(Bracket::Curly, rewriter(&parser(&typer_test)), ());
+	assert_eq!(
+		typer(&typer_test),
+		Tree::Brackets(
+			Bracket::Curly,
+			vec![
+				Tree::Brackets(
+					Bracket::Curly,
+					vec![
+						Tree::Brackets(
+							Bracket::Curly,
+							vec![
+								Tree::Number(1, Effect::literal(Type::Int)),
+								Tree::Number(2, Effect::literal(Type::Int)),
+							],
+							Effect::literal(Type::Block(Effect::function(
+								vec![],
+								vec![Type::Int, Type::Int]
+							)))
+						),
+						Tree::Identifier(
+							"call".to_string(),
+							Effect::function(
+								vec![Type::Block(Effect::function(
+									vec![],
+									vec![Type::Int, Type::Int]
+								))],
+								vec![Type::Int, Type::Int]
+							)
+						),
+						Tree::Identifier(
+							"add".to_string(),
+							Effect::function(vec![Type::Int, Type::Int], vec![Type::Int])
+						),
+					],
+					Effect::literal(Type::Block(Effect::function(vec![], vec![Type::Int])))
+				),
+				Tree::Identifier(
+					"call".to_string(),
+					Effect::function(
+						vec![Type::Block(Effect::literal(Type::Int))],
+						vec![Type::Int]
+					)
+				),
+			],
+			Effect::literal(Type::Block(Effect::literal(Type::Int)))
+		)
+	);
 }
 
 #[derive(Debug, PartialEq)]
@@ -367,7 +416,7 @@ fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 	trees
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum Type {
 	Int,
 	Bool,
@@ -404,7 +453,7 @@ impl Type {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Effect {
 	inputs: Vec<Type>,
 	outputs: Vec<Type>,
