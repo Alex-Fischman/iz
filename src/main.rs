@@ -10,7 +10,12 @@ fn main() {
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
-	code.extend([Push(-1), Pull(1), Goto, Label(-1)]); // since there's no main yet
+	// since there's no main yet, call the returned block
+	let args = match tree.get_tag().outputs.as_slice() {
+		[Type::Block(Effect { inputs, .. })] => inputs.len(),
+		_ => unreachable!(),
+	};
+	code.extend([Push(-1), Grab(args + 1), Goto, Label(-1)]);
 	println!("{:?}", code);
 	let stack = run(&code);
 	println!("{:?}", stack);
@@ -276,7 +281,17 @@ enum Tree<Tag> {
 }
 
 impl<Tag> Tree<Tag> {
-	fn get_tag(&mut self) -> &mut Tag {
+	fn get_tag(&self) -> &Tag {
+		match self {
+			Tree::Brackets(.., tag) => tag,
+			Tree::String(.., tag) => tag,
+			Tree::Identifier(.., tag) => tag,
+			Tree::Number(.., tag) => tag,
+			Tree::Operator(.., tag) => tag,
+		}
+	}
+
+	fn get_tag_mut(&mut self) -> &mut Tag {
 		match self {
 			Tree::Brackets(.., tag) => tag,
 			Tree::String(.., tag) => tag,
@@ -529,7 +544,7 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
 			Tree::Operator(..) => unreachable!(),
 		};
-		scope.compose(out.get_tag(), vars);
+		scope.compose(out.get_tag_mut(), vars);
 		out
 	}
 	fn replace_vars_in_effect(effect: &Effect, vars: &TypeVars) -> Effect {
@@ -589,55 +604,68 @@ enum Operation {
 	BitNot,
 	BitAnd,
 	BitOr,
-	Pull(usize), // index from top of stack
+	Grab(usize),  // index from top of the stack
+	Shove(usize), // index from top of the stack
 	Label(i64),
 	Goto,
 }
 
 fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
-	let mut labels = 0;
-	let mut new_label = || {
-		labels += 1;
-		labels - 1
-	};
-	match tree {
-		Tree::Brackets(Bracket::Round, cs, _) => cs.iter().flat_map(compile).collect(),
-		Tree::Brackets(Bracket::Curly, cs, Effect { inputs: _, outputs }) => {
-			let start = new_label();
-			let end = new_label();
-			let mut code: Vec<Operation> = cs.iter().flat_map(compile).collect();
-			// todo: pop local vars here
-			code.extend([Pull(outputs.len()), Goto, Label(end)]);
-			code.splice(0..0, [Push(start), Push(end), Goto, Label(start)]);
-			code
-		}
-		Tree::Brackets(Bracket::Square, ..) => todo!(),
-		Tree::String(..) => todo!(),
-		Tree::Identifier(i, Effect { inputs, outputs }) => {
-			match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
-				("call", _, _) => todo!(),
-				("false", [], [Type::Bool]) => vec![Push(0)],
-				("true", [], [Type::Bool]) => vec![Push(1)],
-				("neg", [Type::Int], [Type::Int]) => vec![IntNeg],
-				("not", [Type::Bool], [Type::Bool]) => vec![BitNot],
-				("mul", [Type::Int, Type::Int], [Type::Int]) => vec![IntMul],
-				("add", [Type::Int, Type::Int], [Type::Int]) => vec![IntAdd],
-				("eq", [Type::Int, Type::Int], [Type::Bool])
-				| ("eq", [Type::Bool, Type::Bool], [Type::Bool]) => vec![IntEq],
-				("ne", [Type::Int, Type::Int], [Type::Bool])
-				| ("ne", [Type::Bool, Type::Bool], [Type::Bool]) => vec![IntEq, BitNot],
-				("lt", [Type::Int, Type::Int], [Type::Bool]) => vec![IntLt],
-				("gt", [Type::Int, Type::Int], [Type::Bool]) => vec![IntGt],
-				("le", [Type::Int, Type::Int], [Type::Bool]) => vec![IntGt, BitNot],
-				("ge", [Type::Int, Type::Int], [Type::Bool]) => vec![IntLt, BitNot],
-				("_and_", [Type::Bool, Type::Bool], [Type::Bool]) => vec![BitAnd],
-				("_or_", [Type::Bool, Type::Bool], [Type::Bool]) => vec![BitOr],
-				(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
+	fn compile(tree: &Tree<Effect>, labels: &mut i64) -> Vec<Operation> {
+		let mut new_label = || {
+			*labels += 1;
+			*labels - 1
+		};
+		match tree {
+			Tree::Brackets(Bracket::Round, cs, _) => {
+				cs.iter().flat_map(|c| compile(c, labels)).collect()
 			}
+			Tree::Brackets(Bracket::Curly, cs, Effect { outputs, .. }) => {
+				let start = new_label();
+				let end = new_label();
+				let mut code: Vec<Operation> =
+					cs.iter().flat_map(|c| compile(c, labels)).collect();
+				// todo: pop local vars here
+				let rets = match outputs.as_slice() {
+					[Type::Block(Effect { outputs, .. })] => outputs.len(),
+					_ => unreachable!(),
+				};
+				code.extend([Grab(rets), Goto, Label(end)]);
+				code.splice(0..0, [Push(start), Push(end), Goto, Label(start)]);
+				code
+			}
+			Tree::Brackets(Bracket::Square, ..) => todo!(),
+			Tree::String(..) => todo!(),
+			Tree::Identifier(i, Effect { inputs, outputs }) => {
+				match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
+					("call", _, _) => {
+						let ret = new_label();
+						vec![Push(ret), Shove(inputs.len()), Goto, Label(ret)]
+					}
+					("false", [], [Type::Bool]) => vec![Push(0)],
+					("true", [], [Type::Bool]) => vec![Push(1)],
+					("neg", [Type::Int], [Type::Int]) => vec![IntNeg],
+					("not", [Type::Bool], [Type::Bool]) => vec![BitNot],
+					("mul", [Type::Int, Type::Int], [Type::Int]) => vec![IntMul],
+					("add", [Type::Int, Type::Int], [Type::Int]) => vec![IntAdd],
+					("eq", [Type::Int, Type::Int], [Type::Bool])
+					| ("eq", [Type::Bool, Type::Bool], [Type::Bool]) => vec![IntEq],
+					("ne", [Type::Int, Type::Int], [Type::Bool])
+					| ("ne", [Type::Bool, Type::Bool], [Type::Bool]) => vec![IntEq, BitNot],
+					("lt", [Type::Int, Type::Int], [Type::Bool]) => vec![IntLt],
+					("gt", [Type::Int, Type::Int], [Type::Bool]) => vec![IntGt],
+					("le", [Type::Int, Type::Int], [Type::Bool]) => vec![IntGt, BitNot],
+					("ge", [Type::Int, Type::Int], [Type::Bool]) => vec![IntLt, BitNot],
+					("_and_", [Type::Bool, Type::Bool], [Type::Bool]) => vec![BitAnd],
+					("_or_", [Type::Bool, Type::Bool], [Type::Bool]) => vec![BitOr],
+					(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
+				}
+			}
+			Tree::Number(n, _) => vec![Push(*n)],
+			Tree::Operator(..) => unreachable!(),
 		}
-		Tree::Number(n, _) => vec![Push(*n)],
-		Tree::Operator(..) => unreachable!(),
 	}
+	compile(tree, &mut 0)
 }
 
 fn run(code: &[Operation]) -> Vec<i64> {
@@ -683,9 +711,13 @@ fn run(code: &[Operation]) -> Vec<i64> {
 				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
 				stack.push((a | b) as i64);
 			}
-			Pull(i) => {
+			Grab(i) => {
 				let a = stack.remove(stack.len() - 1 - i);
 				stack.push(a);
+			}
+			Shove(i) => {
+				let a = stack.pop().unwrap();
+				stack.insert(stack.len() - i, a);
 			}
 			Label(_) => {}
 			Goto => {
