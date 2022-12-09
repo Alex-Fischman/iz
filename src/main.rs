@@ -152,6 +152,11 @@ fn test() {
 			Effect::literal(Type::Block(Effect::literal(Type::Int)))
 		)
 	);
+	let run_test = tokenizer(&"{1 2} call {add} call".chars().collect::<Vec<char>>());
+	let run_test = Tree::Brackets(Bracket::Curly, rewriter(&parser(&run_test)), ());
+	let mut run_test = compile(&typer(&run_test));
+	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
+	assert_eq!(run(&run_test), [3]);
 }
 
 #[derive(Debug, PartialEq)]
