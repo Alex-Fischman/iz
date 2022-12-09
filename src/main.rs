@@ -10,12 +10,7 @@ fn main() {
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
-	// since there's no main yet, call the returned block
-	let args = match tree.get_tag().outputs.as_slice() {
-		[Type::Block(Effect { inputs, .. })] => inputs.len(),
-		_ => unreachable!(),
-	};
-	code.extend([Push(-1), Grab(args + 1), Goto, Label(-1)]);
+	code.extend([Push(-1), Shove(1), Goto, Label(-1)]); // since there's no main yet, call the returned block
 	println!("{:?}", code);
 	let stack = run(&code);
 	println!("{:?}", stack);
@@ -281,16 +276,6 @@ enum Tree<Tag> {
 }
 
 impl<Tag> Tree<Tag> {
-	fn get_tag(&self) -> &Tag {
-		match self {
-			Tree::Brackets(.., tag) => tag,
-			Tree::String(.., tag) => tag,
-			Tree::Identifier(.., tag) => tag,
-			Tree::Number(.., tag) => tag,
-			Tree::Operator(.., tag) => tag,
-		}
-	}
-
 	fn get_tag_mut(&mut self) -> &mut Tag {
 		match self {
 			Tree::Brackets(.., tag) => tag,
