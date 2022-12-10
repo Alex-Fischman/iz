@@ -70,32 +70,26 @@ fn test() {
 						Tree::Number(1, Effect::literal(Type::Int)),
 						Tree::Number(2, Effect::literal(Type::Int)),
 					],
-					Effect::literal(Type::Block(Effect::function(
-						vec![],
-						vec![Type::Int, Type::Int]
-					)))
+					Effect::function(vec![], vec![Type::Int, Type::Int])
 				),
 				Tree::Identifier(
 					"call".to_string(),
-					Effect::function(
-						vec![Type::Block(Effect::function(vec![], vec![Type::Int, Type::Int]))],
+					Effect::new(
+						vec![Type::Block(Effect::new(vec![], vec![Type::Int, Type::Int]))],
 						vec![Type::Int, Type::Int]
 					)
 				),
 				Tree::Identifier(
 					"add".to_string(),
-					Effect::literal(Type::Block(Effect::function(
-						vec![Type::Int, Type::Int],
-						vec![Type::Int]
-					)))
+					Effect::function(vec![Type::Int, Type::Int], vec![Type::Int])
 				),
 				Tree::Identifier(
 					"call".to_string(),
-					Effect::function(
+					Effect::new(
 						vec![
 							Type::Int,
 							Type::Int,
-							Type::Block(Effect::function(
+							Type::Block(Effect::new(
 								vec![Type::Int, Type::Int],
 								vec![Type::Int]
 							))
@@ -104,7 +98,7 @@ fn test() {
 					),
 				)
 			],
-			Effect::literal(Type::Block(Effect::literal(Type::Int)))
+			Effect::function(vec![], vec![Type::Int])
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
@@ -428,12 +422,16 @@ impl std::fmt::Debug for Effect {
 }
 
 impl Effect {
+	fn new(inputs: Vec<Type>, outputs: Vec<Type>) -> Effect {
+		Effect { inputs, outputs }
+	}
+
 	fn literal(t: Type) -> Effect {
 		Effect { inputs: vec![], outputs: vec![t] }
 	}
 
 	fn function(inputs: Vec<Type>, outputs: Vec<Type>) -> Effect {
-		Effect { inputs, outputs }
+		Effect::literal(Type::Block(Effect { inputs, outputs }))
 	}
 
 	fn compose(&mut self, other: &mut Effect, vars: &mut TypeVars) {
@@ -484,12 +482,12 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 	fn typer(tree: &Tree<()>, vars: &mut TypeVars, scope: &mut Effect) -> Tree<Effect> {
 		let mut out = match tree {
 			Tree::Brackets(b, cs, ()) => {
-				let mut child = Effect::function(vec![], vec![]);
+				let mut child = Effect::new(vec![], vec![]);
 				let cs: Vec<Tree<Effect>> =
 					cs.iter().map(|c| typer(c, vars, &mut child)).collect();
 				let t = match b {
 					Bracket::Round => child,
-					Bracket::Curly => Effect::literal(Type::Block(child)),
+					Bracket::Curly => Effect::function(child.inputs, child.outputs),
 					Bracket::Square => todo!(),
 				};
 				Tree::Brackets(*b, cs, t)
@@ -500,50 +498,37 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 				match i.as_str() {
 					"call" => match scope.outputs.last() {
 						Some(Type::Block(Effect { inputs, outputs })) => {
-							let mut call_i = inputs.clone();
-							call_i.push(Type::Block(Effect::function(
-								inputs.clone(),
-								outputs.clone(),
-							)));
-							Effect::function(call_i, outputs.clone())
+							let mut i = inputs.clone();
+							i.push(Type::Block(Effect::new(inputs.clone(), outputs.clone())));
+							Effect::new(i, outputs.clone())
 						}
 						t => panic!("call expected block, found {:?}", t),
 					},
 					"false" | "true" => Effect::literal(Type::Bool),
-					"nop" => Effect::literal(Type::Block(Effect::function(vec![], vec![]))),
-					"neg" => Effect::literal(Type::Block(Effect::function(
-						vec![Type::Int],
-						vec![Type::Int],
-					))),
-					"_not_" => Effect::literal(Type::Block(Effect::function(
-						vec![Type::Bool],
-						vec![Type::Bool],
-					))),
-					"mul" | "add" => Effect::literal(Type::Block(Effect::function(
-						vec![Type::Int, Type::Int],
-						vec![Type::Int],
-					))),
-					"eq" | "ne" => Effect::literal(Type::Block(Effect::function(
-						vec![vars.new_var(), vars.old_var()],
-						vec![Type::Bool],
-					))),
-					"lt" | "gt" | "le" | "ge" => Effect::literal(Type::Block(Effect::function(
-						vec![Type::Int, Type::Int],
-						vec![Type::Bool],
-					))),
-					"_and_" | "_or_" => Effect::literal(Type::Block(Effect::function(
-						vec![Type::Bool, Type::Bool],
-						vec![Type::Bool],
-					))),
+					"nop" => Effect::function(vec![], vec![]),
+					"neg" => Effect::function(vec![Type::Int], vec![Type::Int]),
+					"_not_" => Effect::function(vec![Type::Bool], vec![Type::Bool]),
+					"mul" | "add" => {
+						Effect::function(vec![Type::Int, Type::Int], vec![Type::Int])
+					}
+					"eq" | "ne" => {
+						Effect::function(vec![vars.new_var(), vars.old_var()], vec![Type::Bool])
+					}
+					"lt" | "gt" | "le" | "ge" => {
+						Effect::function(vec![Type::Int, Type::Int], vec![Type::Bool])
+					}
+					"_and_" | "_or_" => {
+						Effect::function(vec![Type::Bool, Type::Bool], vec![Type::Bool])
+					}
 					"=" => todo!("value variables"),
 					"_if_" | "_else_" => todo!("optionals"),
-					"_while_" => Effect::literal(Type::Block(Effect::function(
+					"_while_" => Effect::function(
 						vec![
 							Type::Block(Effect::literal(Type::Bool)),
-							Type::Block(Effect::function(vec![], vec![])),
+							Type::Block(Effect::new(vec![], vec![])),
 						],
 						vec![],
-					))),
+					),
 					i => todo!("{}", i),
 				},
 			),
@@ -589,7 +574,7 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 		}
 	}
 	let mut vars = TypeVars(vec![]);
-	let mut scope = Effect::function(vec![], vec![]);
+	let mut scope = Effect::new(vec![], vec![]);
 	let tree = typer(tree, &mut vars, &mut scope);
 	if !scope.inputs.is_empty() {
 		panic!("program expected {:?}", scope.inputs);
