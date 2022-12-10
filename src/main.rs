@@ -6,13 +6,10 @@ fn main() {
 
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
-	let trees = rewriter(&trees);
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
-	// since there's no main yet, call the returned block
 	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
-	println!("{:?}", code);
 	let stack = run(&code);
 	println!("{:?}", stack);
 }
@@ -35,56 +32,6 @@ fn test() {
 	let parse_test = parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()));
 	assert_eq!(
 		parse_test,
-		vec![
-			Operator(
-				"else".to_string(),
-				vec![
-					Operator(
-						"if".to_string(),
-						vec![Identifier("false".to_string(), ()), Number(1, ())],
-						()
-					),
-					Operator(
-						"else".to_string(),
-						vec![
-							Operator(
-								"if".to_string(),
-								vec![Identifier("true".to_string(), ()), Number(2, ())],
-								()
-							),
-							Number(3, ()),
-						],
-						()
-					),
-				],
-				()
-			),
-			Operator(
-				"=".to_string(),
-				vec![
-					Identifier("a".to_string(), ()),
-					Operator(
-						"+".to_string(),
-						vec![
-							Number(1, ()),
-							Operator(
-								"*".to_string(),
-								vec![
-									Brackets(Bracket::Round, vec![Number(2, ())], ()),
-									Number(3, ())
-								],
-								()
-							)
-						],
-						()
-					)
-				],
-				()
-			),
-		]
-	);
-	assert_eq!(
-		rewriter(&parse_test),
 		vec![
 			Number(3, ()),
 			Number(2, ()),
@@ -111,9 +58,9 @@ fn test() {
 		]
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
-	let typer_test = Tree::Brackets(Bracket::Curly, rewriter(&parser(&typer_test)), ());
+	let typer_test = typer(&Tree::Brackets(Bracket::Curly, parser(&typer_test), ()));
 	assert_eq!(
-		typer(&typer_test),
+		typer_test,
 		Tree::Brackets(
 			Bracket::Curly,
 			vec![
@@ -160,11 +107,10 @@ fn test() {
 			Effect::literal(Type::Block(Effect::literal(Type::Int)))
 		)
 	);
-	let run_test = tokenizer(&"add@(1 2)".chars().collect::<Vec<char>>());
-	let run_test = Tree::Brackets(Bracket::Curly, rewriter(&parser(&run_test)), ());
-	let mut run_test = compile(&typer(&run_test));
+	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
+	let mut run_test = compile(&typer(&Tree::Brackets(Bracket::Curly, parser(&run_test), ())));
 	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
-	assert_eq!(run(&run_test), [3]);
+	assert_eq!(run(&run_test), [3, 3, 3]);
 }
 
 #[derive(Debug, PartialEq)]
@@ -398,38 +344,38 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 		trees
 	}
 
-	parse(tokens, &mut 0, None)
-}
-
-fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
-	let mut trees = Vec::from(trees);
-	let mut j = 0;
-	while j < trees.len() {
-		j += match trees[j].clone() {
-			Tree::Brackets(b, cs, ()) => {
-				trees[j] = Tree::Brackets(b, rewriter(&cs), ());
-				1
-			}
-			Tree::Operator(i, cs, ()) => {
-				let operator = OPERATORS
-					.iter()
-					.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
-					.unwrap();
-				let mut cs = cs.clone();
-				cs.reverse();
-				let cs = rewriter(&cs);
-				trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
-				if operator.0 != "@" && operator.0 != "=" {
-					trees.insert(j + 2, Tree::Identifier("call".to_string(), ()));
+	fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
+		let mut trees = Vec::from(trees);
+		let mut j = 0;
+		while j < trees.len() {
+			j += match trees[j].clone() {
+				Tree::Brackets(b, cs, ()) => {
+					trees[j] = Tree::Brackets(b, rewriter(&cs), ());
+					1
 				}
-				let out = cs.len() + 1;
-				trees.splice(j..j + 1, cs);
-				out
+				Tree::Operator(i, cs, ()) => {
+					let operator = OPERATORS
+						.iter()
+						.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
+						.unwrap();
+					let mut cs = cs.clone();
+					cs.reverse();
+					let cs = rewriter(&cs);
+					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
+					if operator.0 != "@" && operator.0 != "=" {
+						trees.insert(j + 2, Tree::Identifier("call".to_string(), ()));
+					}
+					let out = cs.len() + 1;
+					trees.splice(j..j + 1, cs);
+					out
+				}
+				_ => 1,
 			}
-			_ => 1,
 		}
+		trees
 	}
-	trees
+
+	rewriter(&parse(tokens, &mut 0, None))
 }
 
 #[derive(Clone, PartialEq)]
@@ -745,7 +691,6 @@ fn run(code: &[Operation]) -> Vec<i64> {
 	let mut stack = vec![];
 	let mut i = 0;
 	while i < code.len() {
-		println!("{:?}", stack);
 		match code[i] {
 			Push(i) => stack.push(i),
 			IntMul => {
