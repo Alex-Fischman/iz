@@ -67,38 +67,28 @@ fn test() {
 				Tree::Brackets(
 					Bracket::Curly,
 					vec![
-						Tree::Number(1, Effect::literal(Type::Int)),
-						Tree::Number(2, Effect::literal(Type::Int)),
+						Tree::Number(1, Effect::literal(Int)),
+						Tree::Number(2, Effect::literal(Int)),
 					],
-					Effect::function(vec![], vec![Type::Int, Type::Int])
+					Effect::function(vec![], vec![Int, Int])
 				),
 				Tree::Identifier(
 					"call".to_string(),
 					Effect::new(
-						vec![Type::Block(Effect::new(vec![], vec![Type::Int, Type::Int]))],
-						vec![Type::Int, Type::Int]
+						vec![Block(Effect::new(vec![], vec![Int, Int]))],
+						vec![Int, Int]
 					)
 				),
-				Tree::Identifier(
-					"add".to_string(),
-					Effect::function(vec![Type::Int, Type::Int], vec![Type::Int])
-				),
+				Tree::Identifier("add".to_string(), Effect::function(vec![Int, Int], vec![Int])),
 				Tree::Identifier(
 					"call".to_string(),
 					Effect::new(
-						vec![
-							Type::Int,
-							Type::Int,
-							Type::Block(Effect::new(
-								vec![Type::Int, Type::Int],
-								vec![Type::Int]
-							))
-						],
-						vec![Type::Int],
+						vec![Int, Int, Block(Effect::new(vec![Int, Int], vec![Int]))],
+						vec![Int],
 					),
 				)
 			],
-			Effect::function(vec![], vec![Type::Int])
+			Effect::function(vec![], vec![Int])
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
@@ -218,7 +208,7 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 						(_, _) => (10, 0),
 					};
 					if start >= chars.len() {
-						panic!("no digits after base specifier");
+						panic!("no digits after base specifier")
 					}
 					for c in chars.iter().skip(start) {
 						if *c != '_' {
@@ -229,7 +219,7 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 								d => panic!("invalid digit {}", d),
 							};
 							if digit >= base {
-								panic!("invalid digit {} in base {}", digit, base);
+								panic!("invalid digit {} in base {}", digit, base)
 							}
 							value = value * base + digit;
 						}
@@ -239,7 +229,6 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 			}
 		}
 	}
-
 	tokens
 }
 
@@ -287,6 +276,22 @@ impl<Tag> Tree<Tag> {
 			Tree::Operator(.., tag) => tag,
 		}
 	}
+
+	fn map_tag<F: Fn(&Tag) -> G + Clone, G>(&self, f: F) -> Tree<G> {
+		match self {
+			Tree::Brackets(b, cs, t) => {
+				Tree::Brackets(*b, cs.iter().map(|c| c.map_tag(f.clone())).collect(), f(t))
+			}
+			Tree::String(s, t) => Tree::String(s.clone(), f(t)),
+			Tree::Identifier(i, t) => Tree::Identifier(i.clone(), f(t)),
+			Tree::Number(n, t) => Tree::Number(*n, f(t)),
+			Tree::Operator(o, cs, t) => Tree::Operator(
+				o.clone(),
+				cs.iter().map(|c| c.map_tag(f.clone())).collect(),
+				f(t),
+			),
+		}
+	}
 }
 
 fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
@@ -312,9 +317,8 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 			});
 		}
 		if let Some(b) = searching {
-			panic!("extra {}", b.to_char(Side::Open));
+			panic!("extra {}", b.to_char(Side::Open))
 		}
-
 		for (operators, right) in OPERATORS {
 			let mut j = if *right { trees.len().wrapping_sub(1) } else { 0 };
 			while let Some(tree) = trees.get(j) {
@@ -322,7 +326,7 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 					let i = i.clone();
 					if let Some(operator) = operators.iter().find(|op| op.0 == i) {
 						if j < operator.2 || j + operator.3 >= trees.len() {
-							panic!("not enough operator arguments for {}", i);
+							panic!("not enough operator arguments for {}", i)
 						}
 						trees.remove(j);
 						let cs: Vec<Tree<()>> =
@@ -334,10 +338,8 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 				j = if *right { j.wrapping_sub(1) } else { j + 1 }
 			}
 		}
-
 		trees
 	}
-
 	fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 		let mut trees = Vec::from(trees);
 		let mut j = 0;
@@ -357,7 +359,7 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 					let cs = rewriter(&cs);
 					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
 					if operator.0 != "@" && operator.0 != "=" {
-						trees.insert(j + 2, Tree::Identifier("call".to_string(), ()));
+						trees.insert(j + 2, Tree::Identifier("call".to_string(), ()))
 					}
 					let out = cs.len() + 1;
 					trees.splice(j..j + 1, cs);
@@ -368,15 +370,15 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 		}
 		trees
 	}
-
 	rewriter(&parse(tokens, &mut 0, None))
 }
 
+use Type::*;
 #[derive(Clone, PartialEq)]
 enum Type {
 	Int,
 	Bool,
-	String,
+	Str,
 	Block(Effect),
 	Variable(usize),
 }
@@ -384,11 +386,11 @@ enum Type {
 impl std::fmt::Debug for Type {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			Type::Int => write!(f, "int"),
-			Type::Bool => write!(f, "bool"),
-			Type::String => write!(f, "string"),
-			Type::Block(e) => write!(f, "{:?}", e),
-			Type::Variable(_) => unreachable!("uneliminated var"),
+			Int => write!(f, "int"),
+			Bool => write!(f, "bool"),
+			Str => write!(f, "string"),
+			Block(e) => write!(f, "{:?}", e),
+			Variable(_) => unreachable!("uneliminated var"),
 		}
 	}
 }
@@ -396,14 +398,12 @@ impl std::fmt::Debug for Type {
 impl Type {
 	fn equalize(a: &Type, b: &Type, vars: &mut TypeVars) -> bool {
 		match (a, b) {
-			(Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::String, Type::String) => {
-				true
-			}
-			(Type::Block(a), Type::Block(b)) => {
+			(Int, Int) | (Bool, Bool) | (Str, Str) => true,
+			(Block(a), Block(b)) => {
 				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
 					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
 			}
-			(Type::Variable(i), b) | (b, Type::Variable(i)) => vars.set_var(*i, b),
+			(Variable(i), b) | (b, Variable(i)) => vars.set_var(*i, b),
 			_ => false,
 		}
 	}
@@ -431,7 +431,7 @@ impl Effect {
 	}
 
 	fn function(inputs: Vec<Type>, outputs: Vec<Type>) -> Effect {
-		Effect::literal(Type::Block(Effect { inputs, outputs }))
+		Effect::literal(Block(Effect { inputs, outputs }))
 	}
 
 	fn compose(&mut self, other: &mut Effect, vars: &mut TypeVars) {
@@ -452,11 +452,11 @@ struct TypeVars(Vec<Option<Type>>);
 impl TypeVars {
 	fn new_var(self: &mut TypeVars) -> Type {
 		self.0.push(None);
-		Type::Variable(self.0.len() - 1)
+		Variable(self.0.len() - 1)
 	}
 
 	fn old_var(self: &TypeVars) -> Type {
-		Type::Variable(self.0.len() - 1)
+		Variable(self.0.len() - 1)
 	}
 
 	fn set_var(self: &mut TypeVars, i: usize, a: &Type) -> bool {
@@ -472,7 +472,7 @@ impl TypeVars {
 	fn get_var(self: &TypeVars, i: usize) -> &Type {
 		match &self.0[i] {
 			None => panic!("unsolved type var {} in {:?}", i, self.0),
-			Some(Type::Variable(j)) => self.get_var(*j),
+			Some(Variable(j)) => self.get_var(*j),
 			Some(t) => t,
 		}
 	}
@@ -492,86 +492,42 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 				};
 				Tree::Brackets(*b, cs, t)
 			}
-			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Type::String)),
+			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Str)),
 			Tree::Identifier(i, ()) => Tree::Identifier(
 				i.clone(),
 				match i.as_str() {
 					"call" => match scope.outputs.last() {
-						Some(Type::Block(Effect { inputs, outputs })) => {
+						Some(Block(Effect { inputs, outputs })) => {
 							let mut i = inputs.clone();
-							i.push(Type::Block(Effect::new(inputs.clone(), outputs.clone())));
+							i.push(Block(Effect::new(inputs.clone(), outputs.clone())));
 							Effect::new(i, outputs.clone())
 						}
 						t => panic!("call expected block, found {:?}", t),
 					},
-					"false" | "true" => Effect::literal(Type::Bool),
+					"false" | "true" => Effect::literal(Bool),
 					"nop" => Effect::function(vec![], vec![]),
-					"neg" => Effect::function(vec![Type::Int], vec![Type::Int]),
-					"_not_" => Effect::function(vec![Type::Bool], vec![Type::Bool]),
-					"mul" | "add" => {
-						Effect::function(vec![Type::Int, Type::Int], vec![Type::Int])
-					}
+					"neg" => Effect::function(vec![Int], vec![Int]),
+					"_not_" => Effect::function(vec![Bool], vec![Bool]),
+					"mul" | "add" => Effect::function(vec![Int, Int], vec![Int]),
 					"eq" | "ne" => {
-						Effect::function(vec![vars.new_var(), vars.old_var()], vec![Type::Bool])
+						Effect::function(vec![vars.new_var(), vars.old_var()], vec![Bool])
 					}
-					"lt" | "gt" | "le" | "ge" => {
-						Effect::function(vec![Type::Int, Type::Int], vec![Type::Bool])
-					}
-					"_and_" | "_or_" => {
-						Effect::function(vec![Type::Bool, Type::Bool], vec![Type::Bool])
-					}
+					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
+					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
 					"=" => todo!("value variables"),
 					"_if_" | "_else_" => todo!("optionals"),
 					"_while_" => Effect::function(
-						vec![
-							Type::Block(Effect::literal(Type::Bool)),
-							Type::Block(Effect::new(vec![], vec![])),
-						],
+						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
 					i => todo!("{}", i),
 				},
 			),
-			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Type::Int)),
+			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Int)),
 			Tree::Operator(..) => unreachable!(),
 		};
 		scope.compose(out.get_tag_mut(), vars);
 		out
-	}
-	fn replace_vars_in_effect(effect: &Effect, vars: &TypeVars) -> Effect {
-		Effect {
-			inputs: effect
-				.inputs
-				.iter()
-				.map(|t| match t {
-					Type::Variable(i) => vars.get_var(*i).clone(),
-					t => t.clone(),
-				})
-				.collect(),
-			outputs: effect
-				.outputs
-				.iter()
-				.map(|t| match t {
-					Type::Variable(i) => vars.get_var(*i).clone(),
-					t => t.clone(),
-				})
-				.collect(),
-		}
-	}
-	fn replace_vars_in_tree(tree: &Tree<Effect>, vars: &TypeVars) -> Tree<Effect> {
-		match tree {
-			Tree::Brackets(b, cs, e) => Tree::Brackets(
-				*b,
-				cs.iter().map(|c| replace_vars_in_tree(c, vars)).collect(),
-				replace_vars_in_effect(e, vars),
-			),
-			Tree::String(s, e) => Tree::String(s.clone(), replace_vars_in_effect(e, vars)),
-			Tree::Identifier(i, e) => {
-				Tree::Identifier(i.clone(), replace_vars_in_effect(e, vars))
-			}
-			Tree::Number(n, e) => Tree::Number(*n, replace_vars_in_effect(e, vars)),
-			Tree::Operator(..) => unreachable!(),
-		}
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut scope = Effect::new(vec![], vec![]);
@@ -579,7 +535,24 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 	if !scope.inputs.is_empty() {
 		panic!("program expected {:?}", scope.inputs);
 	}
-	replace_vars_in_tree(&tree, &vars)
+	tree.map_tag(|e| Effect {
+		inputs: e
+			.inputs
+			.iter()
+			.map(|t| match t {
+				Variable(i) => vars.get_var(*i).clone(),
+				t => t.clone(),
+			})
+			.collect(),
+		outputs: e
+			.outputs
+			.iter()
+			.map(|t| match t {
+				Variable(i) => vars.get_var(*i).clone(),
+				t => t.clone(),
+			})
+			.collect(),
+	})
 }
 
 use Operation::*;
@@ -606,12 +579,11 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 		let start = *labels;
 		let end = *labels + 1;
 		*labels += 2;
-		code.extend([Grab(rets), Goto, Label(end)]);
 		code.splice(0..0, [Push(start), Push(end), Goto, Label(start)]);
+		code.extend([Grab(rets), Goto, Label(end)]);
 		code
 	}
 	fn compile(tree: &Tree<Effect>, labels: &mut i64) -> Vec<Operation> {
-		use Type::*;
 		match tree {
 			Tree::Brackets(Bracket::Round, cs, _) => {
 				cs.iter().flat_map(|c| compile(c, labels)).collect()
@@ -621,6 +593,7 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 					[Block(Effect { outputs, .. })] => outputs.len(),
 					_ => unreachable!(),
 				};
+				// pop local vars here?
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
 			Tree::Brackets(Bracket::Square, ..) => todo!(),
@@ -658,8 +631,8 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 							*labels += 1;
 							vec![Push(ret), Shove(inputs.len()), Goto, Label(ret)]
 						}
-						("false", [], [Type::Bool]) => vec![Push(0)],
-						("true", [], [Type::Bool]) => vec![Push(1)],
+						("false", [], [Bool]) => vec![Push(0)],
+						("true", [], [Bool]) => vec![Push(1)],
 						("nop", [], []) => block(vec![], 0, labels),
 						(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
 					},
@@ -674,46 +647,27 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 
 fn run(code: &[Operation]) -> Vec<i64> {
 	let mut stack = vec![];
+	let binary = |stack: &mut Vec<i64>, f: &dyn Fn(i64, i64) -> i64| {
+		let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+		stack.push(f(a, b));
+	};
+	let unary = |stack: &mut Vec<i64>, f: &dyn Fn(i64) -> i64| {
+		let a = stack.pop().unwrap();
+		stack.push(f(a));
+	};
 	let mut i = 0;
 	while i < code.len() {
 		match code[i] {
 			Push(i) => stack.push(i),
-			IntMul => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push(a * b);
-			}
-			IntAdd => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push(a + b);
-			}
-			IntNeg => {
-				let a = stack.pop().unwrap();
-				stack.push(-a);
-			}
-			IntEq => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push((a == b) as i64);
-			}
-			IntLt => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push((a < b) as i64);
-			}
-			IntGt => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push((a > b) as i64);
-			}
-			BitNot => {
-				let a = stack.pop().unwrap();
-				stack.push(!a);
-			}
-			BitAnd => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push((a & b) as i64);
-			}
-			BitOr => {
-				let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-				stack.push((a | b) as i64);
-			}
+			IntMul => binary(&mut stack, &|a, b| a * b),
+			IntAdd => binary(&mut stack, &|a, b| a + b),
+			IntNeg => unary(&mut stack, &|a| -a),
+			IntEq => binary(&mut stack, &|a, b| (a == b) as i64),
+			IntLt => binary(&mut stack, &|a, b| (a < b) as i64),
+			IntGt => binary(&mut stack, &|a, b| (a > b) as i64),
+			BitNot => unary(&mut stack, &|a| !a),
+			BitAnd => binary(&mut stack, &|a, b| a & b),
+			BitOr => binary(&mut stack, &|a, b| a | b),
 			Grab(i) => {
 				let a = stack.remove(stack.len() - 1 - i);
 				stack.push(a);
