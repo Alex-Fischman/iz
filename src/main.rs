@@ -711,7 +711,6 @@ fn run(code: &[Operation]) -> Vec<i64> {
 	let mut stack = vec![];
 	let mut i = 0;
 	while i < code.len() {
-		println!("{:?}", stack);
 		match code[i] {
 			Push(i) => stack.push(i),
 			IntMul => {
