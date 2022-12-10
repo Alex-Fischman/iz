@@ -10,7 +10,8 @@ fn main() {
 	let tree = Tree::Brackets(Bracket::Curly, trees, ());
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
-	code.extend([Push(-1), Shove(1), Goto, Label(-1)]); // since there's no main yet, call the returned block
+	// since there's no main yet, call the returned block
+	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
 	println!("{:?}", code);
 	let stack = run(&code);
 	println!("{:?}", stack);
@@ -89,21 +90,27 @@ fn test() {
 			Number(2, ()),
 			Identifier("true".to_string(), ()),
 			Identifier("_if_".to_string(), ()),
+			Identifier("call".to_string(), ()),
 			Identifier("_else_".to_string(), ()),
+			Identifier("call".to_string(), ()),
 			Number(1, ()),
 			Identifier("false".to_string(), ()),
 			Identifier("_if_".to_string(), ()),
+			Identifier("call".to_string(), ()),
 			Identifier("_else_".to_string(), ()),
+			Identifier("call".to_string(), ()),
 			Number(3, ()),
 			Brackets(Bracket::Round, vec![Number(2, ())], ()),
 			Identifier("mul".to_string(), ()),
+			Identifier("call".to_string(), ()),
 			Number(1, ()),
 			Identifier("add".to_string(), ()),
+			Identifier("call".to_string(), ()),
 			Identifier("a".to_string(), ()),
 			Identifier("=".to_string(), ()),
 		]
 	);
-	let typer_test = tokenizer(&"{{1 2} call add call} call".chars().collect::<Vec<char>>());
+	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
 	let typer_test = Tree::Brackets(Bracket::Curly, rewriter(&parser(&typer_test)), ());
 	assert_eq!(
 		typer(&typer_test),
@@ -113,63 +120,47 @@ fn test() {
 				Tree::Brackets(
 					Bracket::Curly,
 					vec![
-						Tree::Brackets(
-							Bracket::Curly,
-							vec![
-								Tree::Number(1, Effect::literal(Type::Int)),
-								Tree::Number(2, Effect::literal(Type::Int)),
-							],
-							Effect::literal(Type::Block(Effect::function(
-								vec![],
-								vec![Type::Int, Type::Int]
-							)))
-						),
-						Tree::Identifier(
-							"call".to_string(),
-							Effect::function(
-								vec![Type::Block(Effect::function(
-									vec![],
-									vec![Type::Int, Type::Int]
-								))],
-								vec![Type::Int, Type::Int]
-							)
-						),
-						Tree::Identifier(
-							"add".to_string(),
-							Effect::literal(Type::Block(Effect::function(
-								vec![Type::Int, Type::Int],
-								vec![Type::Int]
-							)))
-						),
-						Tree::Identifier(
-							"call".to_string(),
-							Effect::function(
-								vec![
-									Type::Int,
-									Type::Int,
-									Type::Block(Effect::function(
-										vec![Type::Int, Type::Int],
-										vec![Type::Int]
-									))
-								],
-								vec![Type::Int],
-							),
-						)
+						Tree::Number(1, Effect::literal(Type::Int)),
+						Tree::Number(2, Effect::literal(Type::Int)),
 					],
-					Effect::literal(Type::Block(Effect::function(vec![], vec![Type::Int])))
+					Effect::literal(Type::Block(Effect::function(
+						vec![],
+						vec![Type::Int, Type::Int]
+					)))
 				),
 				Tree::Identifier(
 					"call".to_string(),
 					Effect::function(
-						vec![Type::Block(Effect::literal(Type::Int))],
-						vec![Type::Int]
+						vec![Type::Block(Effect::function(vec![], vec![Type::Int, Type::Int]))],
+						vec![Type::Int, Type::Int]
 					)
 				),
+				Tree::Identifier(
+					"add".to_string(),
+					Effect::literal(Type::Block(Effect::function(
+						vec![Type::Int, Type::Int],
+						vec![Type::Int]
+					)))
+				),
+				Tree::Identifier(
+					"call".to_string(),
+					Effect::function(
+						vec![
+							Type::Int,
+							Type::Int,
+							Type::Block(Effect::function(
+								vec![Type::Int, Type::Int],
+								vec![Type::Int]
+							))
+						],
+						vec![Type::Int],
+					),
+				)
 			],
 			Effect::literal(Type::Block(Effect::literal(Type::Int)))
 		)
 	);
-	let run_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
+	let run_test = tokenizer(&"add@(1 2)".chars().collect::<Vec<char>>());
 	let run_test = Tree::Brackets(Bracket::Curly, rewriter(&parser(&run_test)), ());
 	let mut run_test = compile(&typer(&run_test));
 	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
@@ -316,7 +307,7 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 type Operator<'a> = (&'a str, &'a str, usize, usize);
 //                    operators  right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "nop", 1, 1)], false),
+	(&[("@", "call", 1, 1)], false),
 	(&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1)], false),
@@ -428,6 +419,9 @@ fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
 				cs.reverse();
 				let cs = rewriter(&cs);
 				trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
+				if operator.0 != "@" && operator.0 != "=" {
+					trees.insert(j + 2, Tree::Identifier("call".to_string(), ()));
+				}
 				let out = cs.len() + 1;
 				trees.splice(j..j + 1, cs);
 				out
@@ -686,13 +680,14 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 		code
 	}
 	fn compile(tree: &Tree<Effect>, labels: &mut i64) -> Vec<Operation> {
+		use Type::*;
 		match tree {
 			Tree::Brackets(Bracket::Round, cs, _) => {
 				cs.iter().flat_map(|c| compile(c, labels)).collect()
 			}
 			Tree::Brackets(Bracket::Curly, cs, Effect { outputs, .. }) => {
 				let rets = match outputs.as_slice() {
-					[Type::Block(Effect { outputs, .. })] => outputs.len(),
+					[Block(Effect { outputs, .. })] => outputs.len(),
 					_ => unreachable!(),
 				};
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
@@ -701,46 +696,31 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 			Tree::String(..) => todo!(),
 			Tree::Identifier(i, Effect { inputs, outputs }) => {
 				match (inputs.as_slice(), outputs.as_slice()) {
-					([], [Type::Block(Effect { inputs, outputs })]) => {
+					([], [Block(Effect { inputs, outputs })]) => block(
 						match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
-							("nop", [], []) => block(vec![], 0, labels),
-							("neg", [Type::Int], [Type::Int]) => block(vec![IntNeg], 1, labels),
-							("not", [Type::Bool], [Type::Bool]) => {
-								block(vec![BitNot], 1, labels)
+							("neg", [Int], [Int]) => vec![IntNeg],
+							("_not_", [Bool], [Bool]) => vec![BitNot],
+							("mul", [Int, Int], [Int]) => vec![IntMul],
+							("add", [Int, Int], [Int]) => vec![IntAdd],
+							("eq", [Int, Int], [Bool]) | ("eq", [Bool, Bool], [Bool]) => {
+								vec![IntEq]
 							}
-							("mul", [Type::Int, Type::Int], [Type::Int]) => {
-								block(vec![IntMul], 1, labels)
+							("ne", [Int, Int], [Bool]) | ("ne", [Bool, Bool], [Bool]) => {
+								vec![IntEq, BitNot]
 							}
-							("add", [Type::Int, Type::Int], [Type::Int]) => {
-								block(vec![IntAdd], 1, labels)
-							}
-							("eq", [Type::Int, Type::Int], [Type::Bool])
-							| ("eq", [Type::Bool, Type::Bool], [Type::Bool]) => block(vec![IntEq], 1, labels),
-							("ne", [Type::Int, Type::Int], [Type::Bool])
-							| ("ne", [Type::Bool, Type::Bool], [Type::Bool]) => block(vec![IntEq, BitNot], 1, labels),
-							("lt", [Type::Int, Type::Int], [Type::Bool]) => {
-								block(vec![IntLt], 1, labels)
-							}
-							("gt", [Type::Int, Type::Int], [Type::Bool]) => {
-								block(vec![IntGt], 1, labels)
-							}
-							("le", [Type::Int, Type::Int], [Type::Bool]) => {
-								block(vec![IntGt, BitNot], 1, labels)
-							}
-							("ge", [Type::Int, Type::Int], [Type::Bool]) => {
-								block(vec![IntLt, BitNot], 1, labels)
-							}
-							("_and_", [Type::Bool, Type::Bool], [Type::Bool]) => {
-								block(vec![BitAnd], 1, labels)
-							}
-							("_or_", [Type::Bool, Type::Bool], [Type::Bool]) => {
-								block(vec![BitOr], 1, labels)
-							}
+							("lt", [Int, Int], [Bool]) => vec![IntLt],
+							("gt", [Int, Int], [Bool]) => vec![IntGt],
+							("le", [Int, Int], [Bool]) => vec![IntGt, BitNot],
+							("ge", [Int, Int], [Bool]) => vec![IntLt, BitNot],
+							("_and_", [Bool, Bool], [Bool]) => vec![BitAnd],
+							("_or_", [Bool, Bool], [Bool]) => vec![BitOr],
 							(s, i, o) => {
 								todo!("could not compile {:?} with {:?} and {:?}", s, i, o)
 							}
-						}
-					}
+						},
+						1,
+						labels,
+					),
 					(inputs, outputs) => match (i.as_str(), inputs, outputs) {
 						("call", _, _) => {
 							let ret = *labels;
@@ -749,6 +729,7 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 						}
 						("false", [], [Type::Bool]) => vec![Push(0)],
 						("true", [], [Type::Bool]) => vec![Push(1)],
+						("nop", [], []) => block(vec![], 0, labels),
 						(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
 					},
 				}
@@ -764,6 +745,7 @@ fn run(code: &[Operation]) -> Vec<i64> {
 	let mut stack = vec![];
 	let mut i = 0;
 	while i < code.len() {
+		println!("{:?}", stack);
 		match code[i] {
 			Push(i) => stack.push(i),
 			IntMul => {
