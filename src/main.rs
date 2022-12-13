@@ -606,7 +606,9 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 				// pop local vars here?
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
-			Tree::Brackets(Bracket::Square, ..) => todo!(),
+			Tree::Brackets(Bracket::Square, ..) => {
+				todo!("arrays: push values reversed with length")
+			}
 			Tree::String(..) => todo!(),
 			Tree::Identifier(i, Effect { inputs, outputs }) => {
 				match (inputs.as_slice(), outputs.as_slice()) {
