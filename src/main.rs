@@ -380,6 +380,7 @@ enum Type {
 	Bool,
 	Str,
 	Block(Effect),
+	Array(Box<Type>),
 	Variable(usize),
 }
 
@@ -390,6 +391,7 @@ impl std::fmt::Debug for Type {
 			Bool => write!(f, "bool"),
 			Str => write!(f, "string"),
 			Block(e) => write!(f, "{:?}", e),
+			Array(t) => write!(f, "[{:?}]", *t),
 			Variable(_) => unreachable!("uneliminated var"),
 		}
 	}
@@ -403,6 +405,7 @@ impl Type {
 				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
 					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
 			}
+			(Array(a), Array(b)) => Type::equalize(a, b, vars),
 			(Variable(i), b) | (b, Variable(i)) => vars.set_var(*i, b),
 			_ => false,
 		}
@@ -488,7 +491,14 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 				let t = match b {
 					Bracket::Round => child,
 					Bracket::Curly => Effect::function(child.inputs, child.outputs),
-					Bracket::Square => todo!(),
+					Bracket::Square => {
+						let x = match child.outputs.get(0) {
+							Some(t) => t.clone(),
+							None => vars.new_var(),
+						};
+						assert!(child.outputs[1..].iter().all(|y| Type::equalize(&x, y, vars)));
+						Effect::literal(Type::Array(Box::new(x)))
+					}
 				};
 				Tree::Brackets(*b, cs, t)
 			}
