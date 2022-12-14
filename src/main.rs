@@ -61,11 +61,9 @@ fn test() {
 	let typer_test = typer(&Tree::Brackets(Bracket::Curly, parser(&typer_test)));
 	assert_eq!(
 		typer_test,
-		Typed::Brackets(
-			Bracket::Curly,
+		Typed::Block(
 			vec![
-				Typed::Brackets(
-					Bracket::Curly,
+				Typed::Block(
 					vec![
 						Typed::Number(1, Effect::literal(Int)),
 						Typed::Number(2, Effect::literal(Int)),
@@ -348,7 +346,9 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Typed {
-	Brackets(Bracket, Vec<Typed>, Effect),
+	Group(Vec<Typed>, Effect),
+	Block(Vec<Typed>, Effect),
+	Array(Vec<Typed>, Effect),
 	String(String, Effect),
 	Identifier(String, Effect),
 	Number(i64, Effect),
@@ -357,10 +357,12 @@ enum Typed {
 impl Typed {
 	fn get_tag_mut(&mut self) -> &mut Effect {
 		match self {
-			Typed::Brackets(.., effect) => effect,
-			Typed::String(.., effect) => effect,
-			Typed::Identifier(.., effect) => effect,
-			Typed::Number(.., effect) => effect,
+			Typed::Group(.., effect)
+			| Typed::Block(.., effect)
+			| Typed::Array(.., effect)
+			| Typed::String(.., effect)
+			| Typed::Identifier(.., effect)
+			| Typed::Number(.., effect) => effect,
 		}
 	}
 }
@@ -479,19 +481,20 @@ fn typer(tree: &Tree) -> Typed {
 			Tree::Brackets(b, cs) => {
 				let mut child = Effect::new(vec![], vec![]);
 				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut child)).collect();
-				let t = match b {
-					Bracket::Round => child,
-					Bracket::Curly => Effect::function(child.inputs, child.outputs),
+				match b {
+					Bracket::Round => Typed::Group(cs, child),
+					Bracket::Curly => {
+						Typed::Block(cs, Effect::function(child.inputs, child.outputs))
+					}
 					Bracket::Square => {
 						let x = match child.outputs.get(0) {
 							Some(t) => t.clone(),
 							None => vars.new_var(),
 						};
 						assert!(child.outputs[1..].iter().all(|y| Type::equalize(&x, y, vars)));
-						Effect::literal(Type::Array(Box::new(x)))
+						Typed::Array(cs, Effect::literal(Type::Array(Box::new(x))))
 					}
-				};
-				Typed::Brackets(*b, cs, t)
+				}
 			}
 			Tree::String(s) => Typed::String(s.clone(), Effect::literal(Str)),
 			Tree::Identifier(i) => Typed::Identifier(
@@ -559,7 +562,7 @@ fn typer(tree: &Tree) -> Typed {
 		}
 		replace_vars_in_effect(
 			match tree {
-				Typed::Brackets(_, cs, e) => {
+				Typed::Group(cs, e) | Typed::Block(cs, e) | Typed::Array(cs, e) => {
 					cs.iter_mut().for_each(|c| replace_vars(c, vars));
 					e
 				}
@@ -602,10 +605,8 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	}
 	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
 		match tree {
-			Typed::Brackets(Bracket::Round, cs, _) => {
-				cs.iter().flat_map(|c| compile(c, labels)).collect()
-			}
-			Typed::Brackets(Bracket::Curly, cs, Effect { outputs, .. }) => {
+			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
+			Typed::Block(cs, Effect { outputs, .. }) => {
 				let rets = match outputs.as_slice() {
 					[Block(Effect { outputs, .. })] => outputs.len(),
 					_ => unreachable!(),
@@ -613,7 +614,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				// pop local vars here?
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
-			Typed::Brackets(Bracket::Square, ..) => {
+			Typed::Array(..) => {
 				todo!("arrays: push values reversed with length")
 			}
 			Typed::String(..) => todo!(),
