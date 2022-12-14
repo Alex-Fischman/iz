@@ -530,12 +530,6 @@ fn typer(tree: &Tree) -> Typed {
 		);
 		out
 	}
-	let mut vars = TypeVars(vec![]);
-	let mut scope = Effect::new(vec![], vec![]);
-	let mut tree = typer(tree, &mut vars, &mut scope);
-	if !scope.inputs.is_empty() {
-		panic!("program expected {:?}", scope.inputs);
-	}
 	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
 		fn replace_vars_in_effect(effect: &mut Effect, vars: &TypeVars) {
 			*effect = Effect {
@@ -567,6 +561,12 @@ fn typer(tree: &Tree) -> Typed {
 			},
 			vars,
 		)
+	}
+	let mut vars = TypeVars(vec![]);
+	let mut scope = Effect::new(vec![], vec![]);
+	let mut tree = typer(tree, &mut vars, &mut scope);
+	if !scope.inputs.is_empty() {
+		panic!("program expected {:?}", scope.inputs);
 	}
 	replace_vars(&mut tree, &vars);
 	tree
@@ -611,9 +611,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				// pop local vars here?
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
-			Typed::Array(..) => {
-				todo!("arrays: push values reversed with length")
-			}
+			Typed::Array(..) => todo!("arrays: push values reversed with length"),
 			Typed::String(..) => todo!(),
 			Typed::Identifier(i, Effect { inputs, outputs }) => {
 				match (inputs.as_slice(), outputs.as_slice()) {
