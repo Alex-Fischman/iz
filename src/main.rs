@@ -354,19 +354,6 @@ enum Typed {
 	Number(i64, Effect),
 }
 
-impl Typed {
-	fn get_tag_mut(&mut self) -> &mut Effect {
-		match self {
-			Typed::Group(.., effect)
-			| Typed::Block(.., effect)
-			| Typed::Array(.., effect)
-			| Typed::String(.., effect)
-			| Typed::Identifier(.., effect)
-			| Typed::Number(.., effect) => effect,
-		}
-	}
-}
-
 use Type::*;
 #[derive(Clone, PartialEq)]
 enum Type {
@@ -530,7 +517,17 @@ fn typer(tree: &Tree) -> Typed {
 			Tree::Number(n) => Typed::Number(*n, Effect::literal(Int)),
 			Tree::Operator(..) => unreachable!(),
 		};
-		scope.compose(out.get_tag_mut(), vars);
+		scope.compose(
+			match &mut out {
+				Typed::Group(.., effect)
+				| Typed::Block(.., effect)
+				| Typed::Array(.., effect)
+				| Typed::String(.., effect)
+				| Typed::Identifier(.., effect)
+				| Typed::Number(.., effect) => effect,
+			},
+			vars,
+		);
 		out
 	}
 	let mut vars = TypeVars(vec![]);
