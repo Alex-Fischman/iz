@@ -6,7 +6,7 @@ fn main() {
 
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
-	let tree = Tree::Brackets(Bracket::Curly, trees, ());
+	let tree = Tree::Brackets(Bracket::Curly, trees);
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
 	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
@@ -33,54 +33,57 @@ fn test() {
 	assert_eq!(
 		parse_test,
 		vec![
-			Number(3, ()),
-			Number(2, ()),
-			Identifier("true".to_string(), ()),
-			Identifier("_if_".to_string(), ()),
-			Identifier("call".to_string(), ()),
-			Identifier("_else_".to_string(), ()),
-			Identifier("call".to_string(), ()),
-			Number(1, ()),
-			Identifier("false".to_string(), ()),
-			Identifier("_if_".to_string(), ()),
-			Identifier("call".to_string(), ()),
-			Identifier("_else_".to_string(), ()),
-			Identifier("call".to_string(), ()),
-			Number(3, ()),
-			Brackets(Bracket::Round, vec![Number(2, ())], ()),
-			Identifier("mul".to_string(), ()),
-			Identifier("call".to_string(), ()),
-			Number(1, ()),
-			Identifier("add".to_string(), ()),
-			Identifier("call".to_string(), ()),
-			Identifier("a".to_string(), ()),
-			Identifier("=".to_string(), ()),
+			Number(3),
+			Number(2),
+			Identifier("true".to_string()),
+			Identifier("_if_".to_string()),
+			Identifier("call".to_string()),
+			Identifier("_else_".to_string()),
+			Identifier("call".to_string()),
+			Number(1),
+			Identifier("false".to_string()),
+			Identifier("_if_".to_string()),
+			Identifier("call".to_string()),
+			Identifier("_else_".to_string()),
+			Identifier("call".to_string()),
+			Number(3),
+			Brackets(Bracket::Round, vec![Number(2)]),
+			Identifier("mul".to_string()),
+			Identifier("call".to_string()),
+			Number(1),
+			Identifier("add".to_string()),
+			Identifier("call".to_string()),
+			Identifier("a".to_string()),
+			Identifier("=".to_string()),
 		]
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
-	let typer_test = typer(&Tree::Brackets(Bracket::Curly, parser(&typer_test), ()));
+	let typer_test = typer(&Tree::Brackets(Bracket::Curly, parser(&typer_test)));
 	assert_eq!(
 		typer_test,
-		Tree::Brackets(
+		Typed::Brackets(
 			Bracket::Curly,
 			vec![
-				Tree::Brackets(
+				Typed::Brackets(
 					Bracket::Curly,
 					vec![
-						Tree::Number(1, Effect::literal(Int)),
-						Tree::Number(2, Effect::literal(Int)),
+						Typed::Number(1, Effect::literal(Int)),
+						Typed::Number(2, Effect::literal(Int)),
 					],
 					Effect::function(vec![], vec![Int, Int])
 				),
-				Tree::Identifier(
+				Typed::Identifier(
 					"call".to_string(),
 					Effect::new(
 						vec![Block(Effect::new(vec![], vec![Int, Int]))],
 						vec![Int, Int]
 					)
 				),
-				Tree::Identifier("add".to_string(), Effect::function(vec![Int, Int], vec![Int])),
-				Tree::Identifier(
+				Typed::Identifier(
+					"add".to_string(),
+					Effect::function(vec![Int, Int], vec![Int])
+				),
+				Typed::Identifier(
 					"call".to_string(),
 					Effect::new(
 						vec![Int, Int, Block(Effect::new(vec![Int, Int], vec![Int]))],
@@ -92,7 +95,7 @@ fn test() {
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
-	let mut run_test = compile(&typer(&Tree::Brackets(Bracket::Curly, parser(&run_test), ())));
+	let mut run_test = compile(&typer(&Tree::Brackets(Bracket::Curly, parser(&run_test))));
 	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
 	assert_eq!(run(&run_test), [3, 3, 3]);
 }
@@ -258,52 +261,22 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq)]
-enum Tree<Tag> {
-	Brackets(Bracket, Vec<Tree<Tag>>, Tag),
-	String(String, Tag),
-	Identifier(String, Tag),
-	Number(i64, Tag),
-	Operator(String, Vec<Tree<Tag>>, Tag),
+enum Tree {
+	Brackets(Bracket, Vec<Tree>),
+	String(String),
+	Identifier(String),
+	Number(i64),
+	Operator(String, Vec<Tree>),
 }
 
-impl<Tag> Tree<Tag> {
-	fn get_tag_mut(&mut self) -> &mut Tag {
-		match self {
-			Tree::Brackets(.., tag) => tag,
-			Tree::String(.., tag) => tag,
-			Tree::Identifier(.., tag) => tag,
-			Tree::Number(.., tag) => tag,
-			Tree::Operator(.., tag) => tag,
-		}
-	}
-
-	fn map_tag<F: Fn(&Tag) -> G + Clone, G>(&self, f: F) -> Tree<G> {
-		match self {
-			Tree::Brackets(b, cs, t) => {
-				Tree::Brackets(*b, cs.iter().map(|c| c.map_tag(f.clone())).collect(), f(t))
-			}
-			Tree::String(s, t) => Tree::String(s.clone(), f(t)),
-			Tree::Identifier(i, t) => Tree::Identifier(i.clone(), f(t)),
-			Tree::Number(n, t) => Tree::Number(*n, f(t)),
-			Tree::Operator(o, cs, t) => Tree::Operator(
-				o.clone(),
-				cs.iter().map(|c| c.map_tag(f.clone())).collect(),
-				f(t),
-			),
-		}
-	}
-}
-
-fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
-	fn parse(tokens: &[Token], i: &mut usize, mut searching: Option<Bracket>) -> Vec<Tree<()>> {
+fn parser(tokens: &[Token]) -> Vec<Tree> {
+	fn parse(tokens: &[Token], i: &mut usize, mut searching: Option<Bracket>) -> Vec<Tree> {
 		let mut trees = Vec::new();
 		while *i < tokens.len() {
 			let token = &tokens[*i];
 			*i += 1;
 			trees.push(match token {
-				Token::Bracket(b, Side::Open) => {
-					Tree::Brackets(*b, parse(tokens, i, Some(*b)), ())
-				}
+				Token::Bracket(b, Side::Open) => Tree::Brackets(*b, parse(tokens, i, Some(*b))),
 				Token::Bracket(b, Side::Close) => match (b, searching) {
 					(b, Some(c)) if *b == c => {
 						searching = None;
@@ -311,9 +284,9 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 					}
 					(b, _) => panic!("extra {}", b.to_char(Side::Close)),
 				},
-				Token::String(s) => Tree::String(s.clone(), ()),
-				Token::Identifier(i) => Tree::Identifier(i.clone(), ()),
-				Token::Number(n) => Tree::Number(*n, ()),
+				Token::String(s) => Tree::String(s.clone()),
+				Token::Identifier(i) => Tree::Identifier(i.clone()),
+				Token::Number(n) => Tree::Number(*n),
 			});
 		}
 		if let Some(b) = searching {
@@ -322,17 +295,17 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 		for (operators, right) in OPERATORS {
 			let mut j = if *right { trees.len().wrapping_sub(1) } else { 0 };
 			while let Some(tree) = trees.get(j) {
-				if let Tree::Identifier(i, ()) = tree {
+				if let Tree::Identifier(i) = tree {
 					let i = i.clone();
 					if let Some(operator) = operators.iter().find(|op| op.0 == i) {
 						if j < operator.2 || j + operator.3 >= trees.len() {
 							panic!("not enough operator arguments for {}", i)
 						}
 						trees.remove(j);
-						let cs: Vec<Tree<()>> =
+						let cs: Vec<Tree> =
 							trees.drain(j - operator.2..j + operator.3).collect();
 						j -= operator.2;
-						trees.insert(j, Tree::Operator(i, cs, ()));
+						trees.insert(j, Tree::Operator(i, cs));
 					}
 				}
 				j = if *right { j.wrapping_sub(1) } else { j + 1 }
@@ -340,16 +313,16 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 		}
 		trees
 	}
-	fn rewriter(trees: &[Tree<()>]) -> Vec<Tree<()>> {
+	fn rewriter(trees: &[Tree]) -> Vec<Tree> {
 		let mut trees = Vec::from(trees);
 		let mut j = 0;
 		while j < trees.len() {
 			j += match trees[j].clone() {
-				Tree::Brackets(b, cs, ()) => {
-					trees[j] = Tree::Brackets(b, rewriter(&cs), ());
+				Tree::Brackets(b, cs) => {
+					trees[j] = Tree::Brackets(b, rewriter(&cs));
 					1
 				}
-				Tree::Operator(i, cs, ()) => {
+				Tree::Operator(i, cs) => {
 					let operator = OPERATORS
 						.iter()
 						.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
@@ -357,9 +330,9 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 					let mut cs = cs.clone();
 					cs.reverse();
 					let cs = rewriter(&cs);
-					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned(), ()));
+					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
 					if operator.0 != "@" && operator.0 != "=" {
-						trees.insert(j + 2, Tree::Identifier("call".to_string(), ()))
+						trees.insert(j + 2, Tree::Identifier("call".to_string()))
 					}
 					let out = cs.len() + 1;
 					trees.splice(j..j + 1, cs);
@@ -371,6 +344,25 @@ fn parser(tokens: &[Token]) -> Vec<Tree<()>> {
 		trees
 	}
 	rewriter(&parse(tokens, &mut 0, None))
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Typed {
+	Brackets(Bracket, Vec<Typed>, Effect),
+	String(String, Effect),
+	Identifier(String, Effect),
+	Number(i64, Effect),
+}
+
+impl Typed {
+	fn get_tag_mut(&mut self) -> &mut Effect {
+		match self {
+			Typed::Brackets(.., effect) => effect,
+			Typed::String(.., effect) => effect,
+			Typed::Identifier(.., effect) => effect,
+			Typed::Number(.., effect) => effect,
+		}
+	}
 }
 
 use Type::*;
@@ -481,13 +473,12 @@ impl TypeVars {
 	}
 }
 
-fn typer(tree: &Tree<()>) -> Tree<Effect> {
-	fn typer(tree: &Tree<()>, vars: &mut TypeVars, scope: &mut Effect) -> Tree<Effect> {
+fn typer(tree: &Tree) -> Typed {
+	fn typer(tree: &Tree, vars: &mut TypeVars, scope: &mut Effect) -> Typed {
 		let mut out = match tree {
-			Tree::Brackets(b, cs, ()) => {
+			Tree::Brackets(b, cs) => {
 				let mut child = Effect::new(vec![], vec![]);
-				let cs: Vec<Tree<Effect>> =
-					cs.iter().map(|c| typer(c, vars, &mut child)).collect();
+				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut child)).collect();
 				let t = match b {
 					Bracket::Round => child,
 					Bracket::Curly => Effect::function(child.inputs, child.outputs),
@@ -500,10 +491,10 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 						Effect::literal(Type::Array(Box::new(x)))
 					}
 				};
-				Tree::Brackets(*b, cs, t)
+				Typed::Brackets(*b, cs, t)
 			}
-			Tree::String(s, ()) => Tree::String(s.clone(), Effect::literal(Str)),
-			Tree::Identifier(i, ()) => Tree::Identifier(
+			Tree::String(s) => Typed::String(s.clone(), Effect::literal(Str)),
+			Tree::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
 					"call" => match scope.outputs.last() {
@@ -533,7 +524,7 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 					i => todo!("{}", i),
 				},
 			),
-			Tree::Number(n, ()) => Tree::Number(*n, Effect::literal(Int)),
+			Tree::Number(n) => Typed::Number(*n, Effect::literal(Int)),
 			Tree::Operator(..) => unreachable!(),
 		};
 		scope.compose(out.get_tag_mut(), vars);
@@ -541,28 +532,44 @@ fn typer(tree: &Tree<()>) -> Tree<Effect> {
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut scope = Effect::new(vec![], vec![]);
-	let tree = typer(tree, &mut vars, &mut scope);
+	let mut tree = typer(tree, &mut vars, &mut scope);
 	if !scope.inputs.is_empty() {
 		panic!("program expected {:?}", scope.inputs);
 	}
-	tree.map_tag(|e| Effect {
-		inputs: e
-			.inputs
-			.iter()
-			.map(|t| match t {
-				Variable(i) => vars.get_var(*i).clone(),
-				t => t.clone(),
-			})
-			.collect(),
-		outputs: e
-			.outputs
-			.iter()
-			.map(|t| match t {
-				Variable(i) => vars.get_var(*i).clone(),
-				t => t.clone(),
-			})
-			.collect(),
-	})
+	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
+		fn replace_vars_in_effect(effect: &mut Effect, vars: &TypeVars) {
+			*effect = Effect {
+				inputs: effect
+					.inputs
+					.iter()
+					.map(|t| match t {
+						Variable(i) => vars.get_var(*i).clone(),
+						t => t.clone(),
+					})
+					.collect(),
+				outputs: effect
+					.outputs
+					.iter()
+					.map(|t| match t {
+						Variable(i) => vars.get_var(*i).clone(),
+						t => t.clone(),
+					})
+					.collect(),
+			}
+		}
+		replace_vars_in_effect(
+			match tree {
+				Typed::Brackets(_, cs, e) => {
+					cs.iter_mut().for_each(|c| replace_vars(c, vars));
+					e
+				}
+				Typed::Number(_, e) | Typed::Identifier(_, e) | Typed::String(_, e) => e,
+			},
+			vars,
+		)
+	}
+	replace_vars(&mut tree, &vars);
+	tree
 }
 
 use Operation::*;
@@ -584,7 +591,7 @@ enum Operation {
 	Goto,
 }
 
-fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
+fn compile(tree: &Typed) -> Vec<Operation> {
 	fn block(mut code: Vec<Operation>, rets: usize, labels: &mut i64) -> Vec<Operation> {
 		let start = *labels;
 		let end = *labels + 1;
@@ -593,12 +600,12 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 		code.extend([Grab(rets), Goto, Label(end)]);
 		code
 	}
-	fn compile(tree: &Tree<Effect>, labels: &mut i64) -> Vec<Operation> {
+	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
 		match tree {
-			Tree::Brackets(Bracket::Round, cs, _) => {
+			Typed::Brackets(Bracket::Round, cs, _) => {
 				cs.iter().flat_map(|c| compile(c, labels)).collect()
 			}
-			Tree::Brackets(Bracket::Curly, cs, Effect { outputs, .. }) => {
+			Typed::Brackets(Bracket::Curly, cs, Effect { outputs, .. }) => {
 				let rets = match outputs.as_slice() {
 					[Block(Effect { outputs, .. })] => outputs.len(),
 					_ => unreachable!(),
@@ -606,11 +613,11 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 				// pop local vars here?
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
-			Tree::Brackets(Bracket::Square, ..) => {
+			Typed::Brackets(Bracket::Square, ..) => {
 				todo!("arrays: push values reversed with length")
 			}
-			Tree::String(..) => todo!(),
-			Tree::Identifier(i, Effect { inputs, outputs }) => {
+			Typed::String(..) => todo!(),
+			Typed::Identifier(i, Effect { inputs, outputs }) => {
 				match (inputs.as_slice(), outputs.as_slice()) {
 					([], [Block(Effect { inputs, outputs })]) => block(
 						match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
@@ -650,8 +657,7 @@ fn compile(tree: &Tree<Effect>) -> Vec<Operation> {
 					},
 				}
 			}
-			Tree::Number(n, _) => vec![Push(*n)],
-			Tree::Operator(..) => unreachable!(),
+			Typed::Number(n, _) => vec![Push(*n)],
 		}
 	}
 	compile(tree, &mut 0)
