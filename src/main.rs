@@ -64,10 +64,7 @@ fn test() {
 		Typed::Block(
 			vec![
 				Typed::Block(
-					vec![
-						Typed::Number(1, Effect::literal(Int)),
-						Typed::Number(2, Effect::literal(Int)),
-					],
+					vec![Typed::Number(1), Typed::Number(2),],
 					Effect::function(vec![], vec![Int, Int])
 				),
 				Typed::Identifier(
@@ -349,9 +346,9 @@ enum Typed {
 	Group(Vec<Typed>, Effect),
 	Block(Vec<Typed>, Effect),
 	Array(Vec<Typed>, Effect),
-	String(String, Effect),
+	String(String),
 	Identifier(String, Effect),
-	Number(i64, Effect),
+	Number(i64),
 }
 
 use Type::*;
@@ -483,7 +480,7 @@ fn typer(tree: &Tree) -> Typed {
 					}
 				}
 			}
-			Tree::String(s) => Typed::String(s.clone(), Effect::literal(Str)),
+			Tree::String(s) => Typed::String(s.clone()),
 			Tree::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
@@ -514,26 +511,28 @@ fn typer(tree: &Tree) -> Typed {
 					i => todo!("{}", i),
 				},
 			),
-			Tree::Number(n) => Typed::Number(*n, Effect::literal(Int)),
+			Tree::Number(n) => Typed::Number(*n),
 			Tree::Operator(..) => unreachable!(),
 		};
-		scope.compose(
-			match &mut out {
-				Typed::Group(.., effect)
-				| Typed::Block(.., effect)
-				| Typed::Array(.., effect)
-				| Typed::String(.., effect)
-				| Typed::Identifier(.., effect)
-				| Typed::Number(.., effect) => effect,
-			},
-			vars,
-		);
+		match &mut out {
+			Typed::Group(_, effect)
+			| Typed::Block(_, effect)
+			| Typed::Array(_, effect)
+			| Typed::Identifier(_, effect) => scope.compose(effect, vars),
+			Typed::String(_) => scope.compose(&mut Effect::literal(Str), vars),
+
+			Typed::Number(_) => scope.compose(&mut Effect::literal(Int), vars),
+		};
 		out
 	}
 	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
-		fn replace_vars_in_effect(effect: &mut Effect, vars: &TypeVars) {
-			*effect = Effect {
-				inputs: effect
+		if let Typed::Group(_, e)
+		| Typed::Block(_, e)
+		| Typed::Array(_, e)
+		| Typed::Identifier(_, e) = tree
+		{
+			*e = Effect {
+				inputs: e
 					.inputs
 					.iter()
 					.map(|t| match t {
@@ -541,7 +540,7 @@ fn typer(tree: &Tree) -> Typed {
 						t => t.clone(),
 					})
 					.collect(),
-				outputs: effect
+				outputs: e
 					.outputs
 					.iter()
 					.map(|t| match t {
@@ -549,18 +548,11 @@ fn typer(tree: &Tree) -> Typed {
 						t => t.clone(),
 					})
 					.collect(),
-			}
+			};
 		}
-		replace_vars_in_effect(
-			match tree {
-				Typed::Group(cs, e) | Typed::Block(cs, e) | Typed::Array(cs, e) => {
-					cs.iter_mut().for_each(|c| replace_vars(c, vars));
-					e
-				}
-				Typed::Number(_, e) | Typed::Identifier(_, e) | Typed::String(_, e) => e,
-			},
-			vars,
-		)
+		if let Typed::Group(cs, _) | Typed::Block(cs, _) | Typed::Array(cs, _) = tree {
+			cs.iter_mut().for_each(|c| replace_vars(c, vars));
+		}
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut scope = Effect::new(vec![], vec![]);
@@ -612,7 +604,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
 			Typed::Array(..) => todo!("arrays: push values reversed with length"),
-			Typed::String(..) => todo!(),
+			Typed::String(_) => todo!(),
 			Typed::Identifier(i, Effect { inputs, outputs }) => {
 				match (inputs.as_slice(), outputs.as_slice()) {
 					([], [Block(Effect { inputs, outputs })]) => block(
@@ -653,7 +645,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 					},
 				}
 			}
-			Typed::Number(n, _) => vec![Push(*n)],
+			Typed::Number(n) => vec![Push(*n)],
 		}
 	}
 	compile(tree, &mut 0)
