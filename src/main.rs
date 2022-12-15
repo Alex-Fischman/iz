@@ -345,7 +345,6 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 enum Typed {
 	Group(Vec<Typed>, Effect),
 	Block(Vec<Typed>, Effect),
-	Array(Vec<Typed>, Effect),
 	String(String),
 	Identifier(String, Effect),
 	Number(i64),
@@ -358,7 +357,6 @@ enum Type {
 	Bool,
 	Str,
 	Block(Effect),
-	Array(Box<Type>),
 	Variable(usize),
 }
 
@@ -369,7 +367,6 @@ impl std::fmt::Debug for Type {
 			Bool => write!(f, "bool"),
 			Str => write!(f, "string"),
 			Block(e) => write!(f, "{:?}", e),
-			Array(t) => write!(f, "[{:?}]", *t),
 			Variable(_) => unreachable!("uneliminated var"),
 		}
 	}
@@ -383,7 +380,6 @@ impl Type {
 				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
 					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
 			}
-			(Array(a), Array(b)) => Type::equalize(a, b, vars),
 			(Variable(i), b) | (b, Variable(i)) => vars.set_var(*i, b),
 			_ => false,
 		}
@@ -463,21 +459,12 @@ fn typer(tree: &Tree) -> Typed {
 	fn typer(tree: &Tree, vars: &mut TypeVars, scope: &mut Effect) -> Typed {
 		let mut out = match tree {
 			Tree::Brackets(b, cs) => {
-				let mut child = Effect::new(vec![], vec![]);
-				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut child)).collect();
+				let mut e = Effect::new(vec![], vec![]);
+				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e)).collect();
 				match b {
-					Bracket::Round => Typed::Group(cs, child),
-					Bracket::Curly => {
-						Typed::Block(cs, Effect::function(child.inputs, child.outputs))
-					}
-					Bracket::Square => {
-						let x = match child.outputs.get(0) {
-							Some(t) => t.clone(),
-							None => vars.new_var(),
-						};
-						assert!(child.outputs[1..].iter().all(|y| Type::equalize(&x, y, vars)));
-						Typed::Array(cs, Effect::literal(Type::Array(Box::new(x))))
-					}
+					Bracket::Round => Typed::Group(cs, e),
+					Bracket::Curly => Typed::Block(cs, Effect::function(e.inputs, e.outputs)),
+					Bracket::Square => todo!(),
 				}
 			}
 			Tree::String(s) => Typed::String(s.clone()),
@@ -515,22 +502,16 @@ fn typer(tree: &Tree) -> Typed {
 			Tree::Operator(..) => unreachable!(),
 		};
 		match &mut out {
-			Typed::Group(_, effect)
-			| Typed::Block(_, effect)
-			| Typed::Array(_, effect)
-			| Typed::Identifier(_, effect) => scope.compose(effect, vars),
+			Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) => {
+				scope.compose(e, vars)
+			}
 			Typed::String(_) => scope.compose(&mut Effect::literal(Str), vars),
-
 			Typed::Number(_) => scope.compose(&mut Effect::literal(Int), vars),
 		};
 		out
 	}
 	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
-		if let Typed::Group(_, e)
-		| Typed::Block(_, e)
-		| Typed::Array(_, e)
-		| Typed::Identifier(_, e) = tree
-		{
+		if let Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) = tree {
 			*e = Effect {
 				inputs: e
 					.inputs
@@ -550,7 +531,7 @@ fn typer(tree: &Tree) -> Typed {
 					.collect(),
 			};
 		}
-		if let Typed::Group(cs, _) | Typed::Block(cs, _) | Typed::Array(cs, _) = tree {
+		if let Typed::Group(cs, _) | Typed::Block(cs, _) = tree {
 			cs.iter_mut().for_each(|c| replace_vars(c, vars));
 		}
 	}
@@ -603,7 +584,6 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				// pop local vars here?
 				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
 			}
-			Typed::Array(..) => todo!("arrays: push values reversed with length"),
 			Typed::String(_) => todo!(),
 			Typed::Identifier(i, Effect { inputs, outputs }) => {
 				match (inputs.as_slice(), outputs.as_slice()) {
