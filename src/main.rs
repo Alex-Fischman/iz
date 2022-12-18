@@ -456,7 +456,7 @@ impl TypeVars {
 }
 
 fn typer(tree: &Tree) -> Typed {
-	fn typer(tree: &Tree, vars: &mut TypeVars, scope: &mut Effect) -> Typed {
+	fn typer(tree: &Tree, vars: &mut TypeVars, effect: &mut Effect) -> Typed {
 		let mut out = match tree {
 			Tree::Brackets(b, cs) => {
 				let mut e = Effect::new(vec![], vec![]);
@@ -471,7 +471,7 @@ fn typer(tree: &Tree) -> Typed {
 			Tree::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
-					"call" => match scope.outputs.last() {
+					"call" => match effect.outputs.last() {
 						Some(Block(Effect { inputs, outputs })) => {
 							let mut i = inputs.clone();
 							i.push(Block(Effect::new(inputs.clone(), outputs.clone())));
@@ -503,10 +503,10 @@ fn typer(tree: &Tree) -> Typed {
 		};
 		match &mut out {
 			Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) => {
-				scope.compose(e, vars)
+				effect.compose(e, vars)
 			}
-			Typed::String(_) => scope.compose(&mut Effect::literal(Str), vars),
-			Typed::Number(_) => scope.compose(&mut Effect::literal(Int), vars),
+			Typed::String(_) => effect.compose(&mut Effect::literal(Str), vars),
+			Typed::Number(_) => effect.compose(&mut Effect::literal(Int), vars),
 		};
 		out
 	}
@@ -536,10 +536,10 @@ fn typer(tree: &Tree) -> Typed {
 		}
 	}
 	let mut vars = TypeVars(vec![]);
-	let mut scope = Effect::new(vec![], vec![]);
-	let mut tree = typer(tree, &mut vars, &mut scope);
-	if !scope.inputs.is_empty() {
-		panic!("program expected {:?}", scope.inputs);
+	let mut effect = Effect::new(vec![], vec![]);
+	let mut tree = typer(tree, &mut vars, &mut effect);
+	if !effect.inputs.is_empty() {
+		panic!("program expected {:?}", effect.inputs);
 	}
 	replace_vars(&mut tree, &vars);
 	tree
