@@ -46,19 +46,16 @@ fn test() {
 			Identifier("call".to_string()),
 			Identifier("_else_".to_string()),
 			Identifier("call".to_string()),
-			Operator(
-				"=".to_string(),
-				vec![
-					Identifier("a".to_string()),
-					Number(3),
-					Brackets(Bracket::Round, vec![Number(2)]),
-					Identifier("mul".to_string()),
-					Identifier("call".to_string()),
-					Number(1),
-					Identifier("add".to_string()),
-					Identifier("call".to_string()),
-				]
-			)
+			Number(3),
+			Brackets(Bracket::Round, vec![Number(2)]),
+			Identifier("mul".to_string()),
+			Identifier("call".to_string()),
+			Number(1),
+			Identifier("add".to_string()),
+			Identifier("call".to_string()),
+			Identifier("a".to_string()),
+			Identifier("=".to_string()),
+			Identifier("call".to_string()),
 		]
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
@@ -234,30 +231,30 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 	tokens
 }
 
-//                   name     func     left   right  rewrite
-type Operator<'a> = (&'a str, &'a str, usize, usize, Option<bool>);
+//                   name     func     left   right
+type Operator<'a> = (&'a str, &'a str, usize, usize);
 //                    operators  right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "call", 1, 1, Some(false))], false),
-	(&[("-", "neg", 0, 1, Some(true)), ("not", "_not_", 0, 1, Some(true))], true),
-	(&[("*", "mul", 1, 1, Some(true))], false),
-	(&[("+", "add", 1, 1, Some(true))], false),
+	(&[("@", "call", 1, 1)], false),
+	(&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
+	(&[("*", "mul", 1, 1)], false),
+	(&[("+", "add", 1, 1)], false),
 	(
 		&[
-			("==", "eq", 1, 1, Some(true)),
-			("!=", "ne", 1, 1, Some(true)),
-			("<", "lt", 1, 1, Some(true)),
-			(">", "gt", 1, 1, Some(true)),
-			("<=", "le", 1, 1, Some(true)),
-			(">=", "ge", 1, 1, Some(true)),
+			("==", "eq", 1, 1),
+			("!=", "ne", 1, 1),
+			("<", "lt", 1, 1),
+			(">", "gt", 1, 1),
+			("<=", "le", 1, 1),
+			(">=", "ge", 1, 1),
 		],
 		false,
 	),
-	(&[("and", "_and_", 1, 1, Some(true)), ("or", "_or_", 1, 1, Some(true))], true),
-	(&[("var", "var", 0, 1, None), ("val", "val", 0, 1, None)], true),
-	(&[("=", "=", 1, 1, None)], true),
-	(&[("if", "_if_", 0, 2, Some(true)), ("while", "_while_", 0, 2, Some(true))], true),
-	(&[("else", "_else_", 1, 1, Some(true))], true),
+	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
+	(&[("var", "var", 0, 1), ("val", "val", 0, 1)], true),
+	(&[("=", "=", 1, 1)], true),
+	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
+	(&[("else", "_else_", 1, 1)], true),
 ];
 
 #[derive(Clone, Debug, PartialEq)]
@@ -327,21 +324,16 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 						.iter()
 						.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
 						.unwrap();
-					if let Some(to_call) = operator.4 {
-						let mut cs = cs.clone();
-						cs.reverse();
-						let cs = rewriter(&cs);
-						trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
-						if to_call {
-							trees.insert(j + 2, Tree::Identifier("call".to_string()))
-						}
-						let out = cs.len() + 1;
-						trees.splice(j..j + 1, cs);
-						out
-					} else {
-						trees[j] = Tree::Operator(i.clone(), rewriter(&cs));
-						1
+					let mut cs = cs.clone();
+					cs.reverse();
+					let cs = rewriter(&cs);
+					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
+					if operator.0 != "@" {
+						trees.insert(j + 2, Tree::Identifier("call".to_string()))
 					}
+					let out = cs.len() + 1;
+					trees.splice(j..j + 1, cs);
+					out
 				}
 				_ => 1,
 			}
@@ -505,11 +497,11 @@ fn typer(tree: &Tree) -> Typed {
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					i => todo!("{}", i),
+					_ => todo!("return type var for non-builtins"),
 				},
 			),
 			Tree::Number(n) => Typed::Number(*n),
-			Tree::Operator(..) => todo!("type local variable stuff"),
+			Tree::Operator(..) => unreachable!(),
 		};
 		match &mut out {
 			Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) => {
