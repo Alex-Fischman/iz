@@ -369,7 +369,7 @@ impl std::fmt::Debug for Type {
 			Bool => write!(f, "bool"),
 			Str => write!(f, "string"),
 			Block(e) => write!(f, "{:?}", e),
-			Variable(_) => unreachable!("uneliminated var"),
+			Variable(_) => panic!("uneliminated var"),
 		}
 	}
 }
@@ -450,7 +450,7 @@ impl TypeVars {
 
 	fn get_var(self: &TypeVars, i: usize) -> &Type {
 		match &self.0[i] {
-			None => panic!("unsolved type var {} in {:?}", i, self.0),
+			None => panic!("unsolved type var: likely due to unbound identifier"),
 			Some(Variable(j)) => self.get_var(*j),
 			Some(t) => t,
 		}
@@ -491,13 +491,13 @@ fn typer(tree: &Tree) -> Typed {
 					}
 					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
 					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
-					"=" => todo!("value variables"),
+					"val" | "var" | "=" => todo!("(value) variables"),
 					"_if_" | "_else_" => todo!("optionals"),
 					"_while_" => Effect::function(
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					_ => todo!("return type var for non-builtins"),
+					_ => Effect::literal(vars.new_var()),
 				},
 			),
 			Tree::Number(n) => Typed::Number(*n),
