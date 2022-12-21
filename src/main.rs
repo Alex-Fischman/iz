@@ -6,8 +6,7 @@ fn main() {
 
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
-	let tree = Tree::Brackets(Bracket::Curly, trees);
-	let tree = scoper(&tree);
+	let tree = scoper(&trees);
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
 	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
@@ -17,7 +16,6 @@ fn main() {
 
 #[test]
 fn test() {
-	use Tree::*;
 	assert_eq!(
 		tokenizer(&"1+2 0b10_0000 0xff \"a b\tc\nd\\\"\"".chars().collect::<Vec<char>>()),
 		vec![
@@ -29,40 +27,41 @@ fn test() {
 			Token::String("a b\tc\nd\"".to_string()),
 		]
 	);
-	let parse_test = "if false 1 else if true 2 else 3\n# asdf\na = 1 + (2) * 3";
-	let parse_test = parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()));
+	let parse_test = "if false 1 else if true 2 else 3\n# asdf\nvar a = 1 + (2) * 3";
 	assert_eq!(
-		parse_test,
-		vec![
-			Number(3),
-			Number(2),
-			Identifier("true".to_string()),
-			Identifier("_if_".to_string()),
-			Identifier("call".to_string()),
-			Identifier("_else_".to_string()),
-			Identifier("call".to_string()),
-			Number(1),
-			Identifier("false".to_string()),
-			Identifier("_if_".to_string()),
-			Identifier("call".to_string()),
-			Identifier("_else_".to_string()),
-			Identifier("call".to_string()),
-			Number(3),
-			Brackets(Bracket::Round, vec![Number(2)]),
-			Identifier("mul".to_string()),
-			Identifier("call".to_string()),
-			Number(1),
-			Identifier("add".to_string()),
-			Identifier("call".to_string()),
-			Identifier("a".to_string()),
-			Identifier("=".to_string()),
-			Identifier("call".to_string()),
-		]
+		scoper(&parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()))),
+		Scoped::Block(
+			vec![
+				Scoped::Number(3),
+				Scoped::Number(2),
+				Scoped::Identifier("true".to_string()),
+				Scoped::Identifier("_if_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Identifier("_else_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Number(1),
+				Scoped::Identifier("false".to_string()),
+				Scoped::Identifier("_if_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Identifier("_else_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Number(3),
+				Scoped::Group(vec![Scoped::Number(2)]),
+				Scoped::Identifier("mul".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Number(1),
+				Scoped::Identifier("add".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Identifier("a".to_string()),
+				Scoped::Identifier("=".to_string()),
+				Scoped::Identifier("call".to_string()),
+			],
+			Rc::new(RefCell::new(S { vars: vec!["a".to_string()], parent: None }))
+		)
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
-	let typer_test = typer(&scoper(&Tree::Brackets(Bracket::Curly, parser(&typer_test))));
 	assert_eq!(
-		typer_test,
+		typer(&scoper(&parser(&typer_test))),
 		Typed::Block(
 			vec![
 				Typed::Block(
@@ -92,8 +91,7 @@ fn test() {
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
-	let mut run_test =
-		compile(&typer(&scoper(&Tree::Brackets(Bracket::Curly, parser(&run_test)))));
+	let mut run_test = compile(&typer(&scoper(&parser(&run_test))));
 	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
 	assert_eq!(run(&run_test), [3, 3, 3]);
 }
@@ -312,35 +310,7 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 		}
 		trees
 	}
-	fn rewriter(trees: &[Tree]) -> Vec<Tree> {
-		let mut trees = Vec::from(trees);
-		let mut j = 0;
-		while j < trees.len() {
-			j += match trees[j].clone() {
-				Tree::Brackets(b, cs) => {
-					trees[j] = Tree::Brackets(b, rewriter(&cs));
-					1
-				}
-				Tree::Operator(i, cs) => {
-					let operator = OPERATORS
-						.iter()
-						.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
-						.unwrap();
-					let mut cs = cs.clone();
-					cs.reverse();
-					let cs = rewriter(&cs);
-					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
-					trees.insert(j + 2, Tree::Identifier("call".to_string()));
-					let out = cs.len() + 1;
-					trees.splice(j..j + 1, cs);
-					out
-				}
-				_ => 1,
-			}
-		}
-		trees
-	}
-	rewriter(&parse(tokens, &mut 0, None))
+	parse(tokens, &mut 0, None)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -365,26 +335,54 @@ impl S {
 	fn new(parent: Option<Scope>) -> S {
 		S { vars: vec![], parent }
 	}
+
+	fn add_var(&mut self, name: &str) {
+		self.vars.push(name.to_string());
+	}
 }
 
-fn scoper(tree: &Tree) -> Scoped {
-	fn scoper(tree: &Tree, scope: Option<Scope>) -> Scoped {
-		match tree {
-			Tree::Brackets(Bracket::Round, cs) => {
-				Scoped::Group(cs.iter().map(|c| scoper(c, scope.clone())).collect())
+fn scoper(trees: &[Tree]) -> Scoped {
+	fn scoper(trees: &[Tree], scope: Scope) -> Vec<Scoped> {
+		let mut out = vec![];
+		for tree in trees {
+			match tree {
+				Tree::Brackets(Bracket::Round, cs) => {
+					out.push(Scoped::Group(scoper(cs, scope.clone())))
+				}
+				Tree::Brackets(Bracket::Curly, cs) => {
+					let s = Rc::new(RefCell::new(S::new(Some(scope.clone()))));
+					out.push(Scoped::Block(scoper(cs, s.clone()), s));
+				}
+				Tree::Brackets(Bracket::Square, _cs) => todo!(),
+				Tree::String(s) => out.push(Scoped::String(s.clone())),
+				Tree::Identifier(i) => out.push(Scoped::Identifier(i.clone())),
+				Tree::Number(n) => out.push(Scoped::Number(*n)),
+				Tree::Operator(i, cs) => match i.as_str() {
+					"var" => match cs.as_slice() {
+						[Tree::Identifier(v)] => {
+							scope.borrow_mut().add_var(v);
+							out.push(Scoped::Identifier(v.clone()))
+						}
+						cs => panic!("expected one var name, found {:?}", cs),
+					},
+					_ => {
+						let operator = OPERATORS
+							.iter()
+							.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
+							.unwrap();
+						let mut cs = cs.clone();
+						cs.reverse();
+						out.append(&mut scoper(&cs, scope.clone()));
+						out.push(Scoped::Identifier(operator.1.to_string()));
+						out.push(Scoped::Identifier("call".to_string()));
+					}
+				},
 			}
-			Tree::Brackets(Bracket::Curly, cs) => {
-				let s = Rc::new(RefCell::new(S::new(scope)));
-				Scoped::Block(cs.iter().map(|c| scoper(c, Some(s.clone()))).collect(), s)
-			}
-			Tree::Brackets(Bracket::Square, _cs) => todo!(),
-			Tree::String(s) => Scoped::String(s.clone()),
-			Tree::Identifier(_i) => todo!(),
-			Tree::Number(n) => Scoped::Number(*n),
-			Tree::Operator(..) => unreachable!(),
 		}
+		out
 	}
-	scoper(tree, None)
+	let scope = Rc::new(RefCell::new(S::new(None)));
+	Scoped::Block(scoper(trees, scope.clone()), scope)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -512,8 +510,8 @@ fn typer(tree: &Scoped) -> Typed {
 			Scoped::Block(cs, _vs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e)).collect();
-				Typed::Block(cs, Effect::function(e.inputs, e.outputs));
-				todo!("local variables in typer");
+				Typed::Block(cs, Effect::function(e.inputs, e.outputs))
+				// todo: local variables in typer
 			}
 			Scoped::String(s) => Typed::String(s.clone()),
 			Scoped::Identifier(i) => Typed::Identifier(
@@ -527,8 +525,8 @@ fn typer(tree: &Scoped) -> Typed {
 						}
 						t => panic!("call expected block, found {:?}", t),
 					},
+					"nop" => Effect::new(vec![], vec![]),
 					"false" | "true" => Effect::literal(Bool),
-					"nop" => Effect::function(vec![], vec![]),
 					"neg" => Effect::function(vec![Int], vec![Int]),
 					"_not_" => Effect::function(vec![Bool], vec![Bool]),
 					"mul" | "add" => Effect::function(vec![Int, Int], vec![Int]),
@@ -544,7 +542,7 @@ fn typer(tree: &Scoped) -> Typed {
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					_ => Effect::literal(vars.new_var()),
+					i => todo!("could not type {:?}", i),
 				},
 			),
 			Scoped::Number(n) => Typed::Number(*n),
@@ -668,7 +666,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 						}
 						("false", [], [Bool]) => vec![Push(0)],
 						("true", [], [Bool]) => vec![Push(1)],
-						("nop", [], []) => block(vec![], 0, labels),
+						("nop", [], []) => vec![],
 						(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
 					},
 				}
