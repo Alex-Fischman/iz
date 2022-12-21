@@ -251,7 +251,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 		false,
 	),
 	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
-	(&[("var", "var", 0, 1), ("val", "val", 0, 1)], true),
+	(&[("var", "var", 0, 1)], true),
 	(&[("=", "=", 1, 1)], true),
 	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
 	(&[("else", "_else_", 1, 1)], true),
@@ -359,6 +359,7 @@ enum Type {
 	Bool,
 	Str,
 	Block(Effect),
+	Ref(Box<Type>),
 	Variable(usize),
 }
 
@@ -369,6 +370,7 @@ impl std::fmt::Debug for Type {
 			Bool => write!(f, "bool"),
 			Str => write!(f, "string"),
 			Block(e) => write!(f, "{:?}", e),
+			Ref(t) => write!(f, "ref {:?}", *t),
 			Variable(_) => panic!("uneliminated var"),
 		}
 	}
@@ -382,6 +384,7 @@ impl Type {
 				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
 					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
 			}
+			(Ref(a), Ref(b)) => Type::equalize(a, b, vars),
 			(Variable(i), b) | (b, Variable(i)) => vars.set_var(*i, b),
 			_ => false,
 		}
@@ -491,7 +494,11 @@ fn typer(tree: &Tree) -> Typed {
 					}
 					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
 					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
-					"val" | "var" | "=" => todo!("(value) variables"),
+					"var" => Effect::function(
+						vec![vars.new_var()],
+						vec![Ref(Box::new(vars.old_var()))],
+					),
+					"=" => todo!("="),
 					"_if_" | "_else_" => todo!("optionals"),
 					"_while_" => Effect::function(
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
