@@ -499,19 +499,30 @@ impl TypeVars {
 	}
 }
 
+// map from var names to type var nums
+type TypedScope = std::collections::HashMap<String, Type>;
+
 fn typer(tree: &Scoped) -> Typed {
-	fn typer(tree: &Scoped, vars: &mut TypeVars, effect: &mut Effect) -> Typed {
+	fn typer(
+		tree: &Scoped,
+		vars: &mut TypeVars,
+		effect: &mut Effect,
+		scope: &TypedScope,
+	) -> Typed {
 		let mut out = match tree {
 			Scoped::Group(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
-				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e)).collect();
+				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e, scope)).collect();
 				Typed::Group(cs, e)
 			}
-			Scoped::Block(cs, _vs) => {
+			Scoped::Block(cs, vs) => {
 				let mut e = Effect::new(vec![], vec![]);
-				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e)).collect();
+				let mut s = scope.clone();
+				for v in &vs.borrow().vars {
+					s.insert(v.to_string(), vars.new_var());
+				}
+				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e, &s)).collect();
 				Typed::Block(cs, Effect::function(e.inputs, e.outputs))
-				// todo: local variables in typer
 			}
 			Scoped::String(s) => Typed::String(s.clone()),
 			Scoped::Identifier(i) => Typed::Identifier(
@@ -535,14 +546,17 @@ fn typer(tree: &Scoped) -> Typed {
 					}
 					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
 					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
-					"var" => todo!("var"),
-					"=" => todo!("="),
+					"var" => unreachable!(),
+					"=" => Effect::function(vec![vars.new_var(), vars.old_var()], vec![]),
 					"_if_" | "_else_" => todo!("optionals"),
 					"_while_" => Effect::function(
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					i => todo!("could not type {:?}", i),
+					i => match scope.get(i) {
+						Some(v) => Effect::literal(v.clone()),
+						None => todo!("could not type {:?}", i),
+					},
 				},
 			),
 			Scoped::Number(n) => Typed::Number(*n),
@@ -583,7 +597,7 @@ fn typer(tree: &Scoped) -> Typed {
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut effect = Effect::new(vec![], vec![]);
-	let mut tree = typer(tree, &mut vars, &mut effect);
+	let mut tree = typer(tree, &mut vars, &mut effect, &std::collections::HashMap::new());
 	if !effect.inputs.is_empty() {
 		panic!("program expected {:?}", effect.inputs);
 	}
