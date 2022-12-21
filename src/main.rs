@@ -7,6 +7,7 @@ fn main() {
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
 	let tree = Tree::Brackets(Bracket::Curly, trees);
+	let tree = scoper(&tree);
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
 	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
@@ -59,7 +60,7 @@ fn test() {
 		]
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
-	let typer_test = typer(&Tree::Brackets(Bracket::Curly, parser(&typer_test)));
+	let typer_test = typer(&scoper(&Tree::Brackets(Bracket::Curly, parser(&typer_test))));
 	assert_eq!(
 		typer_test,
 		Typed::Block(
@@ -91,7 +92,8 @@ fn test() {
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
-	let mut run_test = compile(&typer(&Tree::Brackets(Bracket::Curly, parser(&run_test))));
+	let mut run_test =
+		compile(&typer(&scoper(&Tree::Brackets(Bracket::Curly, parser(&run_test)))));
 	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
 	assert_eq!(run(&run_test), [3, 3, 3]);
 }
@@ -344,6 +346,50 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+enum Scoped {
+	Group(Vec<Scoped>),
+	Block(Vec<Scoped>, Scope),
+	String(String),
+	Identifier(String),
+	Number(i64),
+}
+
+use std::cell::RefCell;
+use std::rc::Rc;
+type Scope = Rc<RefCell<S>>;
+#[derive(Clone, Debug, PartialEq)]
+struct S {
+	vars: Vec<String>,
+	parent: Option<Scope>,
+}
+
+impl S {
+	fn new(parent: Option<Scope>) -> S {
+		S { vars: vec![], parent }
+	}
+}
+
+fn scoper(tree: &Tree) -> Scoped {
+	fn scoper(tree: &Tree, scope: Option<Scope>) -> Scoped {
+		match tree {
+			Tree::Brackets(Bracket::Round, cs) => {
+				Scoped::Group(cs.iter().map(|c| scoper(c, scope.clone())).collect())
+			}
+			Tree::Brackets(Bracket::Curly, cs) => {
+				let s = Rc::new(RefCell::new(S::new(scope)));
+				Scoped::Block(cs.iter().map(|c| scoper(c, Some(s.clone()))).collect(), s)
+			}
+			Tree::Brackets(Bracket::Square, _cs) => todo!(),
+			Tree::String(s) => Scoped::String(s.clone()),
+			Tree::Identifier(_i) => todo!(),
+			Tree::Number(n) => Scoped::Number(*n),
+			Tree::Operator(..) => unreachable!(),
+		}
+	}
+	scoper(tree, None)
+}
+
+#[derive(Clone, Debug, PartialEq)]
 enum Typed {
 	Group(Vec<Typed>, Effect),
 	Block(Vec<Typed>, Effect),
@@ -457,20 +503,22 @@ impl TypeVars {
 	}
 }
 
-fn typer(tree: &Tree) -> Typed {
-	fn typer(tree: &Tree, vars: &mut TypeVars, effect: &mut Effect) -> Typed {
+fn typer(tree: &Scoped) -> Typed {
+	fn typer(tree: &Scoped, vars: &mut TypeVars, effect: &mut Effect) -> Typed {
 		let mut out = match tree {
-			Tree::Brackets(b, cs) => {
+			Scoped::Group(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e)).collect();
-				match b {
-					Bracket::Round => Typed::Group(cs, e),
-					Bracket::Curly => Typed::Block(cs, Effect::function(e.inputs, e.outputs)),
-					Bracket::Square => todo!(),
-				}
+				Typed::Group(cs, e)
 			}
-			Tree::String(s) => Typed::String(s.clone()),
-			Tree::Identifier(i) => Typed::Identifier(
+			Scoped::Block(cs, _vs) => {
+				let mut e = Effect::new(vec![], vec![]);
+				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e)).collect();
+				Typed::Block(cs, Effect::function(e.inputs, e.outputs));
+				todo!("local variables in typer");
+			}
+			Scoped::String(s) => Typed::String(s.clone()),
+			Scoped::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
 					"call" => match effect.outputs.last() {
@@ -501,8 +549,7 @@ fn typer(tree: &Tree) -> Typed {
 					_ => Effect::literal(vars.new_var()),
 				},
 			),
-			Tree::Number(n) => Typed::Number(*n),
-			Tree::Operator(..) => unreachable!(),
+			Scoped::Number(n) => Typed::Number(*n),
 		};
 		match &mut out {
 			Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) => {
