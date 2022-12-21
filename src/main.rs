@@ -495,7 +495,7 @@ fn typer(tree: &Tree) -> Typed {
 					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
 					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
 					"var" => Effect::function(
-						vec![vars.new_var()],
+						vec![Ref(Box::new(vars.new_var()))],
 						vec![Ref(Box::new(vars.old_var()))],
 					),
 					"=" => todo!("="),
