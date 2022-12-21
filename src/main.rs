@@ -237,7 +237,7 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 type Operator<'a> = (&'a str, &'a str, usize, usize);
 //                    operators  right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-	(&[("@", "call", 1, 1)], false),
+	(&[("@", "nop", 1, 1)], false),
 	(&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
 	(&[("*", "mul", 1, 1)], false),
 	(&[("+", "add", 1, 1)], false),
@@ -330,9 +330,7 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 					cs.reverse();
 					let cs = rewriter(&cs);
 					trees.insert(j + 1, Tree::Identifier(operator.1.to_owned()));
-					if operator.0 != "@" {
-						trees.insert(j + 2, Tree::Identifier("call".to_string()))
-					}
+					trees.insert(j + 2, Tree::Identifier("call".to_string()));
 					let out = cs.len() + 1;
 					trees.splice(j..j + 1, cs);
 					out
