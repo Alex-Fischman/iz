@@ -52,7 +52,7 @@ fn test() {
 				Scoped::Number(1),
 				Scoped::Identifier("add".to_string()),
 				Scoped::Identifier("call".to_string()),
-				Scoped::Identifier("a".to_string()),
+				Scoped::Declaration("a".to_string()),
 				Scoped::Identifier("=".to_string()),
 				Scoped::Identifier("call".to_string()),
 			],
@@ -60,13 +60,16 @@ fn test() {
 		)
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
+	let ts = Rc::new(RefCell::new(Ts::new(None)));
+	let ts = Rc::new(RefCell::new(Ts::new(Some(ts))));
 	assert_eq!(
 		typer(&scoper(&parser(&typer_test))),
 		Typed::Block(
 			vec![
 				Typed::Block(
-					vec![Typed::Number(1), Typed::Number(2),],
-					Effect::function(vec![], vec![Int, Int])
+					vec![Typed::Number(1), Typed::Number(2)],
+					Effect::function(vec![], vec![Int, Int]),
+					Rc::new(RefCell::new(Ts::new(Some(ts.clone()))))
 				),
 				Typed::Identifier(
 					"call".to_string(),
@@ -87,7 +90,8 @@ fn test() {
 					),
 				)
 			],
-			Effect::function(vec![], vec![Int])
+			Effect::function(vec![], vec![Int]),
+			ts,
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
@@ -320,6 +324,7 @@ enum Scoped {
 	String(String),
 	Identifier(String),
 	Number(i64),
+	Declaration(String),
 }
 
 use std::cell::RefCell;
@@ -361,7 +366,7 @@ fn scoper(trees: &[Tree]) -> Scoped {
 					"var" => match cs.as_slice() {
 						[Tree::Identifier(v)] => {
 							scope.borrow_mut().add_var(v);
-							out.push(Scoped::Identifier(v.clone()))
+							out.push(Scoped::Declaration(v.clone()))
 						}
 						cs => panic!("expected one var name, found {:?}", cs),
 					},
@@ -388,10 +393,11 @@ fn scoper(trees: &[Tree]) -> Scoped {
 #[derive(Clone, Debug, PartialEq)]
 enum Typed {
 	Group(Vec<Typed>, Effect),
-	Block(Vec<Typed>, Effect),
+	Block(Vec<Typed>, Effect, TypedScope),
 	String(String),
 	Identifier(String, Effect),
 	Number(i64),
+	Declaration(String, Effect),
 }
 
 use Type::*;
@@ -401,6 +407,7 @@ enum Type {
 	Bool,
 	Str,
 	Block(Effect),
+	Reference(Box<Type>),
 	Variable(usize),
 }
 
@@ -411,6 +418,7 @@ impl std::fmt::Debug for Type {
 			Bool => write!(f, "bool"),
 			Str => write!(f, "string"),
 			Block(e) => write!(f, "{:?}", e),
+			Reference(t) => write!(f, "ref {:?}", t),
 			Variable(_) => panic!("uneliminated var"),
 		}
 	}
@@ -424,6 +432,7 @@ impl Type {
 				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
 					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
 			}
+			(Reference(a), Reference(b)) => Type::equalize(a, b, vars),
 			(Variable(i), b) | (b, Variable(i)) => vars.set_var(*i, b),
 			_ => false,
 		}
@@ -499,30 +508,51 @@ impl TypeVars {
 	}
 }
 
-// map from var names to type var nums
-type TypedScope = std::collections::HashMap<String, Type>;
+use std::collections::HashMap;
+type TypedScope = Rc<RefCell<Ts>>;
+#[derive(Clone, Debug, PartialEq)]
+struct Ts {
+	vars: HashMap<String, Type>,
+	parent: Option<TypedScope>,
+}
+
+impl Ts {
+	fn new(parent: Option<TypedScope>) -> Ts {
+		Ts { vars: HashMap::new(), parent }
+	}
+
+	fn set_var(&mut self, s: String, t: Type) {
+		self.vars.insert(s, t);
+	}
+
+	fn get_var(&self, s: &str) -> Option<&Type> {
+		self.vars.get(s)
+	}
+}
 
 fn typer(tree: &Scoped) -> Typed {
 	fn typer(
 		tree: &Scoped,
 		vars: &mut TypeVars,
 		effect: &mut Effect,
-		scope: &TypedScope,
+		scope: TypedScope,
 	) -> Typed {
 		let mut out = match tree {
 			Scoped::Group(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
-				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e, scope)).collect();
+				let cs: Vec<Typed> =
+					cs.iter().map(|c| typer(c, vars, &mut e, scope.clone())).collect();
 				Typed::Group(cs, e)
 			}
 			Scoped::Block(cs, vs) => {
 				let mut e = Effect::new(vec![], vec![]);
-				let mut s = scope.clone();
+				let s = Rc::new(RefCell::new(Ts::new(Some(scope))));
 				for v in &vs.borrow().vars {
-					s.insert(v.to_string(), vars.new_var());
+					s.borrow_mut().set_var(v.to_string(), vars.new_var());
 				}
-				let cs: Vec<Typed> = cs.iter().map(|c| typer(c, vars, &mut e, &s)).collect();
-				Typed::Block(cs, Effect::function(e.inputs, e.outputs))
+				let cs: Vec<Typed> =
+					cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
+				Typed::Block(cs, Effect::function(e.inputs, e.outputs), s)
 			}
 			Scoped::String(s) => Typed::String(s.clone()),
 			Scoped::Identifier(i) => Typed::Identifier(
@@ -546,32 +576,42 @@ fn typer(tree: &Scoped) -> Typed {
 					}
 					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
 					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
-					"var" => unreachable!(),
-					"=" => Effect::function(vec![vars.new_var(), vars.old_var()], vec![]),
+					"=" => Effect::function(
+						vec![vars.new_var(), Reference(Box::new(vars.old_var()))],
+						vec![],
+					),
 					"_if_" | "_else_" => todo!("optionals"),
 					"_while_" => Effect::function(
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					i => match scope.get(i) {
-						Some(v) => Effect::literal(v.clone()),
+					i => match scope.borrow().get_var(i) {
+						Some(v) => Effect::literal(Reference(Box::new(v.clone()))),
 						None => todo!("could not type {:?}", i),
 					},
 				},
 			),
 			Scoped::Number(n) => Typed::Number(*n),
+			Scoped::Declaration(i) => match scope.borrow().get_var(i) {
+				Some(v) => Typed::Declaration(
+					i.clone(),
+					Effect::literal(Reference(Box::new(v.clone()))),
+				),
+				None => todo!("could not type {:?}", i),
+			},
 		};
 		match &mut out {
-			Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) => {
-				effect.compose(e, vars)
-			}
+			Typed::Group(_, e)
+			| Typed::Block(_, e, _)
+			| Typed::Identifier(_, e)
+			| Typed::Declaration(_, e) => effect.compose(e, vars),
 			Typed::String(_) => effect.compose(&mut Effect::literal(Str), vars),
 			Typed::Number(_) => effect.compose(&mut Effect::literal(Int), vars),
 		};
 		out
 	}
 	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
-		if let Typed::Group(_, e) | Typed::Block(_, e) | Typed::Identifier(_, e) = tree {
+		if let Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) = tree {
 			*e = Effect {
 				inputs: e
 					.inputs
@@ -591,13 +631,20 @@ fn typer(tree: &Scoped) -> Typed {
 					.collect(),
 			};
 		}
-		if let Typed::Group(cs, _) | Typed::Block(cs, _) = tree {
+		if let Typed::Block(_, _, ts) = tree {
+			for t in ts.borrow_mut().vars.values_mut() {
+				if let Variable(i) = t {
+					*t = vars.get_var(*i).clone();
+				}
+			}
+		}
+		if let Typed::Group(cs, _) | Typed::Block(cs, _, _) = tree {
 			cs.iter_mut().for_each(|c| replace_vars(c, vars));
 		}
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut effect = Effect::new(vec![], vec![]);
-	let mut tree = typer(tree, &mut vars, &mut effect, &std::collections::HashMap::new());
+	let mut tree = typer(tree, &mut vars, &mut effect, Rc::new(RefCell::new(Ts::new(None))));
 	if !effect.inputs.is_empty() {
 		panic!("program expected {:?}", effect.inputs);
 	}
@@ -636,7 +683,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
 		match tree {
 			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
-			Typed::Block(cs, Effect { outputs, .. }) => {
+			Typed::Block(cs, Effect { outputs, .. }, _) => {
 				let rets = match outputs.as_slice() {
 					[Block(Effect { outputs, .. })] => outputs.len(),
 					_ => unreachable!(),
@@ -686,6 +733,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				}
 			}
 			Typed::Number(n) => vec![Push(*n)],
+			Typed::Declaration(_, _) => todo!(),
 		}
 	}
 	compile(tree, &mut 0)
