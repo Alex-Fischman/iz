@@ -441,12 +441,11 @@ impl TypeVars {
 
 	fn set_var(self: &mut TypeVars, i: usize, a: &Type) -> bool {
 		match &self.0[i] {
+			Some(b) => self.equalize(a, &b.clone()),
 			None => {
 				self.0[i] = Some(a.clone());
 				true
 			}
-			// Some(Variable(j)) => self.set_var(*j, a), not sure if this is necessary or not
-			Some(b) => self.equalize(a, &b.clone()),
 		}
 	}
 
@@ -484,6 +483,23 @@ impl TypeVars {
 		Effect {
 			inputs: e.inputs.iter().map(|t| self.substitute_type(t)).collect(),
 			outputs: e.outputs.iter().map(|t| self.substitute_type(t)).collect(),
+		}
+	}
+
+	fn substitute(&self, typed: &mut Typed) {
+		match typed {
+			Typed::Group(_, e)
+			| Typed::Block(_, e, _)
+			| Typed::Identifier(_, e)
+			| Typed::Declaration(_, e)
+			| Typed::Assignment(_, e) => *e = self.substitute_effect(e),
+			Typed::Number(..) | Typed::String(..) => {}
+		}
+		if let Typed::Block(_, _, scope) = typed {
+			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t))
+		}
+		if let Typed::Group(cs, _) | Typed::Block(cs, _, _) = typed {
+			cs.iter_mut().for_each(|c| self.substitute(c))
 		}
 	}
 }
@@ -595,31 +611,13 @@ fn typer(tree: &Rewritten) -> Typed {
 		};
 		out
 	}
-	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
-		match tree {
-			Typed::Group(_, e)
-			| Typed::Block(_, e, _)
-			| Typed::Identifier(_, e)
-			| Typed::Declaration(_, e)
-			| Typed::Assignment(_, e) => *e = vars.substitute_effect(e),
-			Typed::Number(..) | Typed::String(..) => {}
-		}
-		if let Typed::Block(_, _, scope) = tree {
-			for t in scope.borrow_mut().vars.values_mut() {
-				*t = vars.substitute_type(t);
-			}
-		}
-		if let Typed::Group(cs, _) | Typed::Block(cs, _, _) = tree {
-			cs.iter_mut().for_each(|c| replace_vars(c, vars));
-		}
-	}
 	let mut vars = TypeVars(vec![]);
 	let mut effect = Effect::new(vec![], vec![]);
 	let mut tree = typer(tree, &mut vars, &mut effect, None);
 	if !effect.inputs.is_empty() {
 		panic!("program expected {:?}", effect.inputs);
 	}
-	replace_vars(&mut tree, &vars);
+	vars.substitute(&mut tree);
 	tree
 }
 
