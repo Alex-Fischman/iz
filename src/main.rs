@@ -403,20 +403,6 @@ impl std::fmt::Debug for Type {
 	}
 }
 
-impl Type {
-	fn equalize(a: &Type, b: &Type, vars: &mut TypeVars) -> bool {
-		match (a, b) {
-			(Int, Int) | (Bool, Bool) | (Str, Str) => true,
-			(Block(a), Block(b)) => {
-				a.inputs.iter().zip(&b.inputs).all(|(a, b)| Type::equalize(a, b, vars))
-					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| Type::equalize(a, b, vars))
-			}
-			(Variable(i), b) | (b, Variable(i)) => vars.set_var(*i, b),
-			_ => false,
-		}
-	}
-}
-
 #[derive(Clone, PartialEq)]
 struct Effect {
 	inputs: Vec<Type>,
@@ -449,7 +435,7 @@ impl Effect {
 			.outputs
 			.drain(i..)
 			.zip(&other.inputs[j..])
-			.all(|(a, b)| Type::equalize(&a, b, vars)));
+			.all(|(a, b)| vars.equalize(&a, b)));
 		self.inputs.extend(other.inputs[..j].iter().cloned());
 		self.outputs.extend(other.outputs.iter().cloned());
 	}
@@ -473,7 +459,7 @@ impl TypeVars {
 				self.0[i] = Some(a.clone());
 				true
 			}
-			Some(b) => Type::equalize(a, &b.clone(), self),
+			Some(b) => self.equalize(a, &b.clone()),
 		}
 	}
 
@@ -482,6 +468,18 @@ impl TypeVars {
 			None => panic!("unsolved type var in {:?}", self.0),
 			Some(Variable(j)) => self.get_var(*j),
 			Some(t) => t,
+		}
+	}
+
+	fn equalize(&mut self, a: &Type, b: &Type) -> bool {
+		match (a, b) {
+			(Int, Int) | (Bool, Bool) | (Str, Str) => true,
+			(Block(a), Block(b)) => {
+				a.inputs.iter().zip(&b.inputs).all(|(a, b)| self.equalize(a, b))
+					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| self.equalize(a, b))
+			}
+			(Variable(i), b) | (b, Variable(i)) => self.set_var(*i, b),
+			_ => false,
 		}
 	}
 }
