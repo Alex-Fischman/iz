@@ -55,11 +55,11 @@ fn test() {
 			Rewritten::Assignment("a".to_string()),
 		])
 	);
-	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
+	let typer_test = "{1 2} call add call var a a = 2 a".chars().collect::<Vec<char>>();
 	let ts = new_scope(None);
-	let ts = new_scope(Some(ts));
+	set_var(ts.clone(), "a".to_string(), Int);
 	assert_eq!(
-		typer(&rewriter(&parser(&typer_test))),
+		typer(&rewriter(&parser(&tokenizer(&typer_test)))),
 		Typed::Block(
 			vec![
 				Typed::Block(
@@ -84,9 +84,13 @@ fn test() {
 						vec![Int, Int, Block(Effect::new(vec![Int, Int], vec![Int]))],
 						vec![Int],
 					),
-				)
+				),
+				Typed::Declaration("a".to_string(), Effect::new(vec![], vec![])),
+				Typed::Number(2),
+				Typed::Assignment("a".to_string(), Effect::new(vec![Int], vec![])),
+				Typed::Identifier("a".to_string(), Effect::literal(Int)),
 			],
-			Effect::function(vec![], vec![Int]),
+			Effect::function(vec![], vec![Int, Int]),
 			ts,
 		)
 	);
@@ -382,7 +386,7 @@ enum Typed {
 }
 
 use Type::*;
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Type {
 	Int,
 	Bool,
@@ -391,28 +395,10 @@ enum Type {
 	Variable(usize),
 }
 
-impl std::fmt::Debug for Type {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			Int => write!(f, "int"),
-			Bool => write!(f, "bool"),
-			Str => write!(f, "string"),
-			Block(e) => write!(f, "{:?}", e),
-			Variable(_) => panic!("uneliminated var"),
-		}
-	}
-}
-
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Effect {
 	inputs: Vec<Type>,
 	outputs: Vec<Type>,
-}
-
-impl std::fmt::Debug for Effect {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "{:?}->{:?}", self.inputs, self.outputs)
-	}
 }
 
 impl Effect {
@@ -428,7 +414,7 @@ impl Effect {
 		Effect::literal(Block(Effect { inputs, outputs }))
 	}
 
-	fn compose(&mut self, other: &mut Effect, vars: &mut TypeVars) {
+	fn compose(&mut self, other: &Effect, vars: &mut TypeVars) {
 		let (x, y) = (other.inputs.len(), self.outputs.len());
 		let (i, j) = if x <= y { (y - x, 0) } else { (0, x - y) };
 		assert!(self
@@ -459,6 +445,7 @@ impl TypeVars {
 				self.0[i] = Some(a.clone());
 				true
 			}
+			// Some(Variable(j)) => self.set_var(*j, a), not sure if this is necessary or not
 			Some(b) => self.equalize(a, &b.clone()),
 		}
 	}
@@ -521,7 +508,7 @@ fn typer(tree: &Rewritten) -> Typed {
 		tree: &Rewritten,
 		vars: &mut TypeVars,
 		effect: &mut Effect,
-		scope: Scope<Type>,
+		scope: Option<Scope<Type>>,
 	) -> Typed {
 		let mut out = match tree {
 			Rewritten::Group(cs) => {
@@ -532,9 +519,9 @@ fn typer(tree: &Rewritten) -> Typed {
 			}
 			Rewritten::Block(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
-				let s = new_scope(Some(scope));
+				let s = new_scope(scope);
 				let cs: Vec<Typed> =
-					cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
+					cs.iter().map(|c| typer(c, vars, &mut e, Some(s.clone()))).collect();
 				Typed::Block(cs, Effect::function(e.inputs, e.outputs), s)
 			}
 			Rewritten::String(s) => Typed::String(s.clone()),
@@ -564,7 +551,7 @@ fn typer(tree: &Rewritten) -> Typed {
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					i => match get_var(scope, i) {
+					i => match get_var(scope.unwrap(), i) {
 						Some(v) => Effect::literal(v),
 						None => todo!("could not type {:?}", i),
 					},
@@ -572,10 +559,10 @@ fn typer(tree: &Rewritten) -> Typed {
 			),
 			Rewritten::Number(n) => Typed::Number(*n),
 			Rewritten::Declaration(i) => {
-				set_var(scope, i.clone(), vars.new_var());
+				set_var(scope.unwrap(), i.clone(), vars.new_var());
 				Typed::Declaration(i.clone(), Effect::new(vec![], vec![]))
 			}
-			Rewritten::Assignment(i) => match get_var(scope, i) {
+			Rewritten::Assignment(i) => match get_var(scope.unwrap(), i) {
 				Some(v) => Typed::Assignment(i.clone(), Effect::new(vec![v], vec![])),
 				None => todo!("could not type {:?}", i),
 			},
@@ -586,8 +573,8 @@ fn typer(tree: &Rewritten) -> Typed {
 			| Typed::Identifier(_, e)
 			| Typed::Declaration(_, e)
 			| Typed::Assignment(_, e) => effect.compose(e, vars),
-			Typed::String(_) => effect.compose(&mut Effect::literal(Str), vars),
-			Typed::Number(_) => effect.compose(&mut Effect::literal(Int), vars),
+			Typed::String(_) => effect.compose(&Effect::literal(Str), vars),
+			Typed::Number(_) => effect.compose(&Effect::literal(Int), vars),
 		};
 		out
 	}
@@ -620,7 +607,7 @@ fn typer(tree: &Rewritten) -> Typed {
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut effect = Effect::new(vec![], vec![]);
-	let mut tree = typer(tree, &mut vars, &mut effect, new_scope(None));
+	let mut tree = typer(tree, &mut vars, &mut effect, None);
 	if !effect.inputs.is_empty() {
 		panic!("program expected {:?}", effect.inputs);
 	}
