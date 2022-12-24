@@ -6,7 +6,7 @@ fn main() {
 
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
-	let tree = scoper(&trees);
+	let tree = rewriter(&trees);
 	let tree = typer(&tree);
 	let mut code = compile(&tree);
 	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
@@ -29,43 +29,37 @@ fn test() {
 	);
 	let parse_test = "if false 1 else if true 2 else 3\n# asdf\nvar a a = 1 + (2) * 3";
 	assert_eq!(
-		scoper(&parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()))),
-		Scoped::Block(
-			vec![
-				Scoped::Number(3),
-				Scoped::Number(2),
-				Scoped::Identifier("true".to_string()),
-				Scoped::Identifier("_if_".to_string()),
-				Scoped::Identifier("call".to_string()),
-				Scoped::Identifier("_else_".to_string()),
-				Scoped::Identifier("call".to_string()),
-				Scoped::Number(1),
-				Scoped::Identifier("false".to_string()),
-				Scoped::Identifier("_if_".to_string()),
-				Scoped::Identifier("call".to_string()),
-				Scoped::Identifier("_else_".to_string()),
-				Scoped::Identifier("call".to_string()),
-				Scoped::Declaration("a".to_string()),
-				Scoped::Number(3),
-				Scoped::Group(vec![Scoped::Number(2)]),
-				Scoped::Identifier("mul".to_string()),
-				Scoped::Identifier("call".to_string()),
-				Scoped::Number(1),
-				Scoped::Identifier("add".to_string()),
-				Scoped::Identifier("call".to_string()),
-				Scoped::Assignment("a".to_string()),
-			],
-			Rc::new(RefCell::new(S {
-				vars: HashMap::from([("a".to_string(), ())]),
-				parent: None
-			}))
-		)
+		rewriter(&parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()))),
+		Rewritten::Block(vec![
+			Rewritten::Number(3),
+			Rewritten::Number(2),
+			Rewritten::Identifier("true".to_string()),
+			Rewritten::Identifier("_if_".to_string()),
+			Rewritten::Identifier("call".to_string()),
+			Rewritten::Identifier("_else_".to_string()),
+			Rewritten::Identifier("call".to_string()),
+			Rewritten::Number(1),
+			Rewritten::Identifier("false".to_string()),
+			Rewritten::Identifier("_if_".to_string()),
+			Rewritten::Identifier("call".to_string()),
+			Rewritten::Identifier("_else_".to_string()),
+			Rewritten::Identifier("call".to_string()),
+			Rewritten::Declaration("a".to_string()),
+			Rewritten::Number(3),
+			Rewritten::Group(vec![Rewritten::Number(2)]),
+			Rewritten::Identifier("mul".to_string()),
+			Rewritten::Identifier("call".to_string()),
+			Rewritten::Number(1),
+			Rewritten::Identifier("add".to_string()),
+			Rewritten::Identifier("call".to_string()),
+			Rewritten::Assignment("a".to_string()),
+		])
 	);
 	let typer_test = tokenizer(&"{1 2} call add call".chars().collect::<Vec<char>>());
 	let ts = new_scope(None);
 	let ts = new_scope(Some(ts));
 	assert_eq!(
-		typer(&scoper(&parser(&typer_test))),
+		typer(&rewriter(&parser(&typer_test))),
 		Typed::Block(
 			vec![
 				Typed::Block(
@@ -97,7 +91,7 @@ fn test() {
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
-	let mut run_test = compile(&typer(&scoper(&parser(&run_test))));
+	let mut run_test = compile(&typer(&rewriter(&parser(&run_test))));
 	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
 	assert_eq!(run(&run_test), [3, 3, 3]);
 }
@@ -264,22 +258,24 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 ];
 
 #[derive(Clone, Debug, PartialEq)]
-enum Tree {
-	Brackets(Bracket, Vec<Tree>),
+enum Parsed {
+	Brackets(Bracket, Vec<Parsed>),
 	String(String),
 	Identifier(String),
 	Number(i64),
-	Operator(String, Vec<Tree>),
+	Operator(String, Vec<Parsed>),
 }
 
-fn parser(tokens: &[Token]) -> Vec<Tree> {
-	fn parse(tokens: &[Token], i: &mut usize, mut searching: Option<Bracket>) -> Vec<Tree> {
+fn parser(tokens: &[Token]) -> Vec<Parsed> {
+	fn parse(tokens: &[Token], i: &mut usize, mut searching: Option<Bracket>) -> Vec<Parsed> {
 		let mut trees = Vec::new();
 		while *i < tokens.len() {
 			let token = &tokens[*i];
 			*i += 1;
 			trees.push(match token {
-				Token::Bracket(b, Side::Open) => Tree::Brackets(*b, parse(tokens, i, Some(*b))),
+				Token::Bracket(b, Side::Open) => {
+					Parsed::Brackets(*b, parse(tokens, i, Some(*b)))
+				}
 				Token::Bracket(b, Side::Close) => match (b, searching) {
 					(b, Some(c)) if *b == c => {
 						searching = None;
@@ -287,9 +283,9 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 					}
 					(b, _) => panic!("extra {}", b.to_char(Side::Close)),
 				},
-				Token::String(s) => Tree::String(s.clone()),
-				Token::Identifier(i) => Tree::Identifier(i.clone()),
-				Token::Number(n) => Tree::Number(*n),
+				Token::String(s) => Parsed::String(s.clone()),
+				Token::Identifier(i) => Parsed::Identifier(i.clone()),
+				Token::Number(n) => Parsed::Number(*n),
 			});
 		}
 		if let Some(b) = searching {
@@ -298,17 +294,17 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 		for (operators, right) in OPERATORS {
 			let mut j = if *right { trees.len().wrapping_sub(1) } else { 0 };
 			while let Some(tree) = trees.get(j) {
-				if let Tree::Identifier(i) = tree {
+				if let Parsed::Identifier(i) = tree {
 					let i = i.clone();
 					if let Some(operator) = operators.iter().find(|op| op.0 == i) {
 						if j < operator.2 || j + operator.3 >= trees.len() {
 							panic!("not enough operator arguments for {}", i)
 						}
 						trees.remove(j);
-						let cs: Vec<Tree> =
+						let cs: Vec<Parsed> =
 							trees.drain(j - operator.2..j + operator.3).collect();
 						j -= operator.2;
-						trees.insert(j, Tree::Operator(i, cs));
+						trees.insert(j, Parsed::Operator(i, cs));
 					}
 				}
 				j = if *right { j.wrapping_sub(1) } else { j + 1 }
@@ -320,9 +316,9 @@ fn parser(tokens: &[Token]) -> Vec<Tree> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Scoped {
-	Group(Vec<Scoped>),
-	Block(Vec<Scoped>, Scope<()>),
+enum Rewritten {
+	Group(Vec<Rewritten>),
+	Block(Vec<Rewritten>),
 	String(String),
 	Identifier(String),
 	Number(i64),
@@ -330,67 +326,28 @@ enum Scoped {
 	Assignment(String),
 }
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-type Scope<T> = Rc<RefCell<S<T>>>;
-#[derive(Clone, Debug, PartialEq)]
-struct S<T> {
-	vars: HashMap<String, T>,
-	parent: Option<Scope<T>>,
-}
-
-fn new_scope<T>(parent: Option<Scope<T>>) -> Scope<T> {
-	Rc::new(RefCell::new(S { vars: HashMap::new(), parent }))
-}
-
-fn set_var<T>(scope: Scope<T>, name: String, value: T) {
-	find_scope(scope.clone(), &name).unwrap_or(scope).borrow_mut().vars.insert(name, value);
-}
-
-fn get_var<T: Clone>(scope: Scope<T>, name: &str) -> Option<T> {
-	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).cloned()
-}
-
-fn find_scope<T>(scope: Scope<T>, name: &str) -> Option<Scope<T>> {
-	if scope.borrow().vars.contains_key(name) {
-		Some(scope)
-	} else if let Some(parent) = &scope.borrow().parent {
-		find_scope(parent.clone(), name)
-	} else {
-		None
-	}
-}
-
-fn scoper(trees: &[Tree]) -> Scoped {
-	fn scoper(trees: &[Tree], scope: Scope<()>) -> Vec<Scoped> {
+fn rewriter(trees: &[Parsed]) -> Rewritten {
+	fn rewriter(trees: &[Parsed]) -> Vec<Rewritten> {
 		let mut out = vec![];
 		for tree in trees {
 			match tree {
-				Tree::Brackets(Bracket::Round, cs) => {
-					out.push(Scoped::Group(scoper(cs, scope.clone())))
+				Parsed::Brackets(Bracket::Round, cs) => out.push(Rewritten::Group(rewriter(cs))),
+				Parsed::Brackets(Bracket::Curly, cs) => {
+					out.push(Rewritten::Block(rewriter(cs)));
 				}
-				Tree::Brackets(Bracket::Curly, cs) => {
-					let s = new_scope(Some(scope.clone()));
-					out.push(Scoped::Block(scoper(cs, s.clone()), s));
-				}
-				Tree::Brackets(Bracket::Square, _cs) => todo!(),
-				Tree::String(s) => out.push(Scoped::String(s.clone())),
-				Tree::Identifier(i) => out.push(Scoped::Identifier(i.clone())),
-				Tree::Number(n) => out.push(Scoped::Number(*n)),
-				Tree::Operator(i, cs) => match i.as_str() {
+				Parsed::Brackets(Bracket::Square, _cs) => todo!(),
+				Parsed::String(s) => out.push(Rewritten::String(s.clone())),
+				Parsed::Identifier(i) => out.push(Rewritten::Identifier(i.clone())),
+				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
+				Parsed::Operator(i, cs) => match i.as_str() {
 					"var" => match cs.as_slice() {
-						[Tree::Identifier(v)] => {
-							set_var(scope.clone(), v.to_string(), ());
-							out.push(Scoped::Declaration(v.clone()))
-						}
+						[Parsed::Identifier(v)] => out.push(Rewritten::Declaration(v.clone())),
 						cs => panic!("expected one var name, found {:?}", cs),
 					},
 					"=" => match cs.as_slice() {
-						[Tree::Identifier(v), rhs] => {
-							assert!(get_var(scope.clone(), v).is_some());
-							out.append(&mut scoper(&[rhs.clone()], scope.clone()));
-							out.push(Scoped::Assignment(v.clone()));
+						[Parsed::Identifier(v), rhs] => {
+							out.append(&mut rewriter(&[rhs.clone()]));
+							out.push(Rewritten::Assignment(v.clone()));
 						}
 						cs => panic!("expected one var name and one value, found {:?}", cs),
 					},
@@ -401,17 +358,16 @@ fn scoper(trees: &[Tree]) -> Scoped {
 							.unwrap();
 						let mut cs = cs.clone();
 						cs.reverse();
-						out.append(&mut scoper(&cs, scope.clone()));
-						out.push(Scoped::Identifier(operator.1.to_string()));
-						out.push(Scoped::Identifier("call".to_string()));
+						out.append(&mut rewriter(&cs));
+						out.push(Rewritten::Identifier(operator.1.to_string()));
+						out.push(Rewritten::Identifier("call".to_string()));
 					}
 				},
 			}
 		}
 		out
 	}
-	let scope = new_scope(None);
-	Scoped::Block(scoper(trees, scope.clone()), scope)
+	Rewritten::Block(rewriter(trees))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -523,39 +479,68 @@ impl TypeVars {
 
 	fn get_var(self: &TypeVars, i: usize) -> &Type {
 		match &self.0[i] {
-			None => panic!("unsolved type var"),
+			None => panic!("unsolved type var in {:?}", self.0),
 			Some(Variable(j)) => self.get_var(*j),
 			Some(t) => t,
 		}
 	}
 }
 
-fn typer(tree: &Scoped) -> Typed {
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+type Scope<T> = Rc<RefCell<S<T>>>;
+#[derive(Clone, Debug, PartialEq)]
+struct S<T> {
+	vars: HashMap<String, T>,
+	parent: Option<Scope<T>>,
+}
+
+fn new_scope<T>(parent: Option<Scope<T>>) -> Scope<T> {
+	Rc::new(RefCell::new(S { vars: HashMap::new(), parent }))
+}
+
+fn set_var<T>(scope: Scope<T>, name: String, value: T) {
+	find_scope(scope.clone(), &name).unwrap_or(scope).borrow_mut().vars.insert(name, value);
+}
+
+fn get_var<T: Clone>(scope: Scope<T>, name: &str) -> Option<T> {
+	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).cloned()
+}
+
+fn find_scope<T>(scope: Scope<T>, name: &str) -> Option<Scope<T>> {
+	if scope.borrow().vars.contains_key(name) {
+		Some(scope)
+	} else if let Some(parent) = &scope.borrow().parent {
+		find_scope(parent.clone(), name)
+	} else {
+		None
+	}
+}
+
+fn typer(tree: &Rewritten) -> Typed {
 	fn typer(
-		tree: &Scoped,
+		tree: &Rewritten,
 		vars: &mut TypeVars,
 		effect: &mut Effect,
 		scope: Scope<Type>,
 	) -> Typed {
 		let mut out = match tree {
-			Scoped::Group(cs) => {
+			Rewritten::Group(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let cs: Vec<Typed> =
 					cs.iter().map(|c| typer(c, vars, &mut e, scope.clone())).collect();
 				Typed::Group(cs, e)
 			}
-			Scoped::Block(cs, vs) => {
+			Rewritten::Block(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let s = new_scope(Some(scope));
-				for (v, ()) in &vs.borrow().vars {
-					set_var(s.clone(), v.to_string(), vars.new_var());
-				}
 				let cs: Vec<Typed> =
 					cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
 				Typed::Block(cs, Effect::function(e.inputs, e.outputs), s)
 			}
-			Scoped::String(s) => Typed::String(s.clone()),
-			Scoped::Identifier(i) => Typed::Identifier(
+			Rewritten::String(s) => Typed::String(s.clone()),
+			Rewritten::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
 					"call" => match effect.outputs.last() {
@@ -587,10 +572,13 @@ fn typer(tree: &Scoped) -> Typed {
 					},
 				},
 			),
-			Scoped::Number(n) => Typed::Number(*n),
-			Scoped::Declaration(i) => Typed::Declaration(i.clone(), Effect::new(vec![], vec![])),
-			Scoped::Assignment(i) => match get_var(scope, i) {
-				Some(v) => Typed::Assignment(i.clone(), Effect::function(vec![v], vec![])),
+			Rewritten::Number(n) => Typed::Number(*n),
+			Rewritten::Declaration(i) => {
+				set_var(scope, i.clone(), vars.new_var());
+				Typed::Declaration(i.clone(), Effect::new(vec![], vec![]))
+			}
+			Rewritten::Assignment(i) => match get_var(scope, i) {
+				Some(v) => Typed::Assignment(i.clone(), Effect::new(vec![v], vec![])),
 				None => todo!("could not type {:?}", i),
 			},
 		};
@@ -606,31 +594,26 @@ fn typer(tree: &Scoped) -> Typed {
 		out
 	}
 	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
-		if let Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) = tree {
-			*e = Effect {
-				inputs: e
-					.inputs
-					.iter()
-					.map(|t| match t {
-						Variable(i) => vars.get_var(*i).clone(),
-						t => t.clone(),
-					})
-					.collect(),
-				outputs: e
-					.outputs
-					.iter()
-					.map(|t| match t {
-						Variable(i) => vars.get_var(*i).clone(),
-						t => t.clone(),
-					})
-					.collect(),
-			};
-		}
-		if let Typed::Block(_, _, ts) = tree {
-			for t in ts.borrow_mut().vars.values_mut() {
-				if let Variable(i) = t {
-					*t = vars.get_var(*i).clone();
+		let replace_var = |t: &Type| match t {
+			Variable(i) => vars.get_var(*i).clone(),
+			t => t.clone(),
+		};
+		match tree {
+			Typed::Group(_, e)
+			| Typed::Block(_, e, _)
+			| Typed::Identifier(_, e)
+			| Typed::Declaration(_, e)
+			| Typed::Assignment(_, e) => {
+				*e = Effect {
+					inputs: e.inputs.iter().map(replace_var).collect(),
+					outputs: e.outputs.iter().map(replace_var).collect(),
 				}
+			}
+			Typed::Number(..) | Typed::String(..) => {}
+		}
+		if let Typed::Block(_, _, scope) = tree {
+			for t in scope.borrow_mut().vars.values_mut() {
+				*t = replace_var(t);
 			}
 		}
 		if let Typed::Group(cs, _) | Typed::Block(cs, _, _) = tree {
