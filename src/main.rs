@@ -469,6 +469,23 @@ impl TypeVars {
 			_ => false,
 		}
 	}
+
+	fn substitute_type(&self, t: &Type) -> Type {
+		match t {
+			Int => Int,
+			Bool => Bool,
+			Str => Str,
+			Block(e) => Block(self.substitute_effect(e)),
+			Variable(i) => self.get_var(*i).clone(),
+		}
+	}
+
+	fn substitute_effect(&self, e: &Effect) -> Effect {
+		Effect {
+			inputs: e.inputs.iter().map(|t| self.substitute_type(t)).collect(),
+			outputs: e.outputs.iter().map(|t| self.substitute_type(t)).collect(),
+		}
+	}
 }
 
 use std::cell::RefCell;
@@ -579,26 +596,17 @@ fn typer(tree: &Rewritten) -> Typed {
 		out
 	}
 	fn replace_vars(tree: &mut Typed, vars: &TypeVars) {
-		let replace_var = |t: &Type| match t {
-			Variable(i) => vars.get_var(*i).clone(),
-			t => t.clone(),
-		};
 		match tree {
 			Typed::Group(_, e)
 			| Typed::Block(_, e, _)
 			| Typed::Identifier(_, e)
 			| Typed::Declaration(_, e)
-			| Typed::Assignment(_, e) => {
-				*e = Effect {
-					inputs: e.inputs.iter().map(replace_var).collect(),
-					outputs: e.outputs.iter().map(replace_var).collect(),
-				}
-			}
+			| Typed::Assignment(_, e) => *e = vars.substitute_effect(e),
 			Typed::Number(..) | Typed::String(..) => {}
 		}
 		if let Typed::Block(_, _, scope) = tree {
 			for t in scope.borrow_mut().vars.values_mut() {
-				*t = replace_var(t);
+				*t = vars.substitute_type(t);
 			}
 		}
 		if let Typed::Group(cs, _) | Typed::Block(cs, _, _) = tree {
