@@ -8,8 +8,7 @@ fn main() {
 	let trees = parser(&tokens);
 	let tree = rewriter(&trees);
 	let tree = typer(&tree);
-	let mut code = compile(&tree);
-	code.extend([Push(-1), Shove(1), Goto, Label(-1)]);
+	let code = compile(&tree);
 	let stack = run(&code);
 	println!("{:?}", stack);
 }
@@ -95,9 +94,9 @@ fn test() {
 		)
 	);
 	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
-	let mut run_test = compile(&typer(&rewriter(&parser(&run_test))));
-	run_test.extend([Push(-1), Shove(1), Goto, Label(-1)]);
-	assert_eq!(run(&run_test), [3, 3, 3]);
+	let mut stack = Stack::new();
+	[3i64, 3, 3].into_iter().for_each(|v| stack.push(v));
+	assert_eq!(run(&compile(&typer(&rewriter(&parser(&run_test))))), stack);
 }
 
 #[derive(Debug, PartialEq)]
@@ -395,6 +394,18 @@ enum Type {
 	Variable(usize),
 }
 
+impl Type {
+	fn size_of(&self) -> usize {
+		match self {
+			Int => 8,
+			Bool => 1,
+			Str => todo!(),
+			Block(_) => 8, // label
+			Variable(_) => unreachable!(),
+		}
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Effect {
 	inputs: Vec<Type>,
@@ -622,31 +633,35 @@ fn typer(tree: &Rewritten) -> Typed {
 }
 
 use Operation::*;
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum Operation {
-	Push(i64),
+	IntPush(i64),
 	IntNeg,
 	IntMul,
 	IntAdd,
 	IntEq,
 	IntLt,
 	IntGt,
-	BitNot,
-	BitAnd,
-	BitOr,
-	Grab(usize),  // index from top of the stack
-	Shove(usize), // index from top of the stack
+	BoolPush(bool),
+	BoolNot,
+	BoolAnd,
+	BoolOr,
+	BoolEq,
+	Grab(usize /* size */, usize /* location (from top of stack) */),
+	Shove(usize /* size */, usize /* movement (from top of stack) */),
 	Label(i64),
 	Goto,
 }
 
 fn compile(tree: &Typed) -> Vec<Operation> {
-	fn block(mut code: Vec<Operation>, rets: usize, labels: &mut i64) -> Vec<Operation> {
-		let start = *labels;
-		let end = *labels + 1;
+	fn size_of_slice(slice: &[Type]) -> usize {
+		slice.iter().map(Type::size_of).sum()
+	}
+	fn block(mut code: Vec<Operation>, rets_size: usize, labels: &mut i64) -> Vec<Operation> {
+		let (start, end) = (*labels, *labels + 1);
 		*labels += 2;
-		code.splice(0..0, [Push(start), Push(end), Goto, Label(start)]);
-		code.extend([Grab(rets), Goto, Label(end)]);
+		code.splice(0..0, [IntPush(start), IntPush(end), Goto, Label(start)]);
+		code.extend([Grab(8, rets_size), Goto, Label(end)]);
 		code
 	}
 	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
@@ -654,7 +669,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
 			Typed::Block(cs, Effect { outputs, .. }, _) => {
 				let rets = match outputs.as_slice() {
-					[Block(Effect { outputs, .. })] => outputs.len(),
+					[Block(Effect { outputs, .. })] => size_of_slice(outputs),
 					_ => unreachable!(),
 				};
 				// pop local vars here?
@@ -666,42 +681,38 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 					([], [Block(Effect { inputs, outputs })]) => block(
 						match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
 							("neg", [Int], [Int]) => vec![IntNeg],
-							("_not_", [Bool], [Bool]) => vec![BitNot],
+							("_not_", [Bool], [Bool]) => vec![BoolNot],
 							("mul", [Int, Int], [Int]) => vec![IntMul],
 							("add", [Int, Int], [Int]) => vec![IntAdd],
-							("eq", [Int, Int], [Bool]) | ("eq", [Bool, Bool], [Bool]) => {
-								vec![IntEq]
-							}
-							("ne", [Int, Int], [Bool]) | ("ne", [Bool, Bool], [Bool]) => {
-								vec![IntEq, BitNot]
-							}
+							("eq", [Int, Int], [Bool]) => vec![IntEq],
+							("eq", [Bool, Bool], [Bool]) => vec![BoolEq],
+							("ne", [Int, Int], [Bool]) => vec![IntEq, BoolNot],
+							("ne", [Bool, Bool], [Bool]) => vec![BoolEq, BoolNot],
 							("lt", [Int, Int], [Bool]) => vec![IntLt],
 							("gt", [Int, Int], [Bool]) => vec![IntGt],
-							("le", [Int, Int], [Bool]) => vec![IntGt, BitNot],
-							("ge", [Int, Int], [Bool]) => vec![IntLt, BitNot],
-							("_and_", [Bool, Bool], [Bool]) => vec![BitAnd],
-							("_or_", [Bool, Bool], [Bool]) => vec![BitOr],
-							(s, i, o) => {
-								todo!("could not compile {:?} with {:?} and {:?}", s, i, o)
-							}
+							("le", [Int, Int], [Bool]) => vec![IntGt, BoolNot],
+							("ge", [Int, Int], [Bool]) => vec![IntLt, BoolNot],
+							("_and_", [Bool, Bool], [Bool]) => vec![BoolAnd],
+							("_or_", [Bool, Bool], [Bool]) => vec![BoolOr],
+							(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
 						},
-						1,
+						size_of_slice(outputs),
 						labels,
 					),
 					(inputs, outputs) => match (i.as_str(), inputs, outputs) {
 						("call", _, _) => {
 							let ret = *labels;
 							*labels += 1;
-							vec![Push(ret), Shove(inputs.len()), Goto, Label(ret)]
+							vec![IntPush(ret), Shove(8, size_of_slice(inputs)), Goto, Label(ret)]
 						}
-						("false", [], [Bool]) => vec![Push(0)],
-						("true", [], [Bool]) => vec![Push(1)],
+						("false", [], [Bool]) => vec![BoolPush(false)],
+						("true", [], [Bool]) => vec![BoolPush(true)],
 						("nop", [], []) => vec![],
-						(s, i, o) => todo!("could not compile {:?} with {:?} and {:?}", s, i, o),
+						(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
 					},
 				}
 			}
-			Typed::Number(n) => vec![Push(*n)],
+			Typed::Number(n) => vec![IntPush(*n)],
 			Typed::Declaration(_, _) => todo!(),
 			Typed::Assignment(_, _) => todo!(),
 		}
@@ -709,44 +720,78 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	compile(tree, &mut 0)
 }
 
-fn run(code: &[Operation]) -> Vec<i64> {
-	let mut stack = vec![];
-	let binary = |stack: &mut Vec<i64>, f: &dyn Fn(i64, i64) -> i64| {
-		let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-		stack.push(f(a, b));
-	};
-	let unary = |stack: &mut Vec<i64>, f: &dyn Fn(i64) -> i64| {
-		let a = stack.pop().unwrap();
-		stack.push(f(a));
-	};
+#[derive(Clone, Debug, PartialEq)]
+struct Stack(Vec<u8>);
+
+impl Stack {
+	fn new() -> Stack {
+		Stack(vec![])
+	}
+
+	fn push<A>(&mut self, value: A) {
+		unsafe {
+			self.0.extend(std::slice::from_raw_parts(
+				&value as *const A as *const u8,
+				std::mem::size_of::<A>(),
+			))
+		}
+	}
+
+	fn pop<A: Clone>(&mut self) -> A {
+		unsafe {
+			let data = self.0.split_off(self.0.len() - std::mem::size_of::<A>());
+			(*data.as_ptr().cast::<A>()).clone()
+		}
+	}
+
+	fn binary<A: Clone, B, F: Fn(A, A) -> B>(&mut self, f: F) {
+		let (a, b) = (self.pop(), self.pop());
+		self.push(f(a, b));
+	}
+
+	fn unary<A: Clone, B, F: Fn(A) -> B>(&mut self, f: F) {
+		let a = self.pop();
+		self.push(f(a));
+	}
+}
+
+fn run(code: &[Operation]) -> Stack {
+	let mut code = code.to_vec();
+	code.extend([IntPush(-1), Shove(8, 8), Goto, Label(-1)]);
+
+	let mut stack = Stack::new();
 	let mut i = 0;
 	while i < code.len() {
 		match code[i] {
-			Push(i) => stack.push(i),
-			IntMul => binary(&mut stack, &|a, b| a * b),
-			IntAdd => binary(&mut stack, &|a, b| a + b),
-			IntNeg => unary(&mut stack, &|a| -a),
-			IntEq => binary(&mut stack, &|a, b| (a == b) as i64),
-			IntLt => binary(&mut stack, &|a, b| (a < b) as i64),
-			IntGt => binary(&mut stack, &|a, b| (a > b) as i64),
-			BitNot => unary(&mut stack, &|a| !a),
-			BitAnd => binary(&mut stack, &|a, b| a & b),
-			BitOr => binary(&mut stack, &|a, b| a | b),
-			Grab(i) => {
-				let a = stack.remove(stack.len() - 1 - i);
-				stack.push(a);
+			IntPush(i) => stack.push(i),
+			IntMul => stack.binary(|a: i64, b| a * b),
+			IntAdd => stack.binary(|a: i64, b| a + b),
+			IntNeg => stack.unary(|a: i64| -a),
+			IntEq => stack.binary(|a: i64, b| a == b),
+			IntLt => stack.binary(|a: i64, b| a < b),
+			IntGt => stack.binary(|a: i64, b| a > b),
+			BoolPush(b) => stack.push(b),
+			BoolNot => stack.unary(|a: bool| !a),
+			BoolAnd => stack.binary(|a: bool, b| a & b),
+			BoolOr => stack.binary(|a: bool, b| a | b),
+			BoolEq => stack.binary(|a: bool, b| a == b),
+			Grab(size, location) => {
+				let i = stack.0.len() - size - location;
+				let data = stack.0.drain(i..i + size).collect::<Vec<u8>>();
+				stack.0.extend(data);
 			}
-			Shove(i) => {
-				let a = stack.pop().unwrap();
-				stack.insert(stack.len() - i, a);
+			Shove(size, movement) => {
+				let data = stack.0.drain(stack.0.len() - size..).collect::<Vec<u8>>();
+				let j = stack.0.len() - movement;
+				stack.0.splice(j..j, data);
 			}
 			Label(_) => {}
 			Goto => {
-				let a = stack.pop().unwrap();
+				let a = stack.pop::<i64>();
 				i = code
 					.iter()
 					.position(|o| matches!(o, Label(b) if a == *b))
-					.expect("could not find label")
+					.unwrap_or_else(|| panic!("could not find label {}", a))
 			}
 		}
 		i += 1;
