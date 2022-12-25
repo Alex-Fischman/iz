@@ -84,9 +84,9 @@ fn test() {
 						vec![Int],
 					),
 				),
-				Typed::Declaration("a".to_string(), Effect::new(vec![], vec![])),
+				Typed::Declaration("a".to_string()),
 				Typed::Number(2),
-				Typed::Assignment("a".to_string(), Effect::new(vec![Int], vec![])),
+				Typed::Assignment("a".to_string(), Int),
 				Typed::Identifier("a".to_string(), Effect::literal(Int)),
 			],
 			Effect::function(vec![], vec![Int, Int]),
@@ -380,8 +380,8 @@ enum Typed {
 	String(String),
 	Identifier(String, Effect),
 	Number(i64),
-	Declaration(String, Effect),
-	Assignment(String, Effect),
+	Declaration(String),
+	Assignment(String, Type),
 }
 
 use Type::*;
@@ -499,12 +499,11 @@ impl TypeVars {
 
 	fn substitute(&self, typed: &mut Typed) {
 		match typed {
-			Typed::Group(_, e)
-			| Typed::Block(_, e, _)
-			| Typed::Identifier(_, e)
-			| Typed::Declaration(_, e)
-			| Typed::Assignment(_, e) => *e = self.substitute_effect(e),
-			Typed::Number(..) | Typed::String(..) => {}
+			Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) => {
+				*e = self.substitute_effect(e)
+			}
+			Typed::Assignment(_, t) => *t = self.substitute_type(t),
+			Typed::Declaration(_) | Typed::Number(_) | Typed::String(_) => {}
 		}
 		if let Typed::Block(_, _, scope) = typed {
 			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t))
@@ -604,19 +603,21 @@ fn typer(tree: &Rewritten) -> Typed {
 			Rewritten::Number(n) => Typed::Number(*n),
 			Rewritten::Declaration(i) => {
 				set_var(scope.unwrap(), i.clone(), vars.new_var());
-				Typed::Declaration(i.clone(), Effect::new(vec![], vec![]))
+				Typed::Declaration(i.clone())
 			}
 			Rewritten::Assignment(i) => match get_var(scope.unwrap(), i) {
-				Some(v) => Typed::Assignment(i.clone(), Effect::new(vec![v], vec![])),
+				Some(v) => Typed::Assignment(i.clone(), v),
 				None => todo!("could not type {:?}", i),
 			},
 		};
 		match &mut out {
-			Typed::Group(_, e)
-			| Typed::Block(_, e, _)
-			| Typed::Identifier(_, e)
-			| Typed::Declaration(_, e)
-			| Typed::Assignment(_, e) => effect.compose(e, vars),
+			Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) => {
+				effect.compose(e, vars)
+			}
+			Typed::Declaration(_) => {}
+			Typed::Assignment(_, t) => {
+				effect.compose(&Effect::new(vec![t.clone()], vec![]), vars)
+			}
 			Typed::String(_) => effect.compose(&Effect::literal(Str), vars),
 			Typed::Number(_) => effect.compose(&Effect::literal(Int), vars),
 		};
@@ -672,8 +673,9 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 					[Block(Effect { outputs, .. })] => size_of_slice(outputs),
 					_ => unreachable!(),
 				};
-				// pop local vars here?
-				block(cs.iter().flat_map(|c| compile(c, labels)).collect(), rets, labels)
+				let code = cs.iter().flat_map(|c| compile(c, labels)).collect();
+				// allocate and free local vars
+				block(code, rets, labels)
 			}
 			Typed::String(_) => todo!(),
 			Typed::Identifier(i, Effect { inputs, outputs }) => {
@@ -713,8 +715,8 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				}
 			}
 			Typed::Number(n) => vec![IntPush(*n)],
-			Typed::Declaration(_, _) => todo!(),
-			Typed::Assignment(_, _) => todo!(),
+			Typed::Declaration(_) => vec![], // space is allocated in Block branch
+			Typed::Assignment(_, _t) => todo!("move size of t bytes into allocated space"),
 		}
 	}
 	compile(tree, &mut 0)
