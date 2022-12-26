@@ -648,8 +648,7 @@ enum Operation {
 	BoolAnd,
 	BoolOr,
 	BoolEq,
-	Grab(usize /* size */, usize /* location (from top of stack) */),
-	Shove(usize /* size */, usize /* movement (from top of stack) */),
+	Move(usize /* start */, usize /* end */, usize /* size */), // indices from top of stack
 	Label(i64),
 	Goto,
 }
@@ -662,7 +661,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 		let (start, end) = (*labels, *labels + 1);
 		*labels += 2;
 		code.splice(0..0, [IntPush(start), IntPush(end), Goto, Label(start)]);
-		code.extend([Grab(8, rets_size), Goto, Label(end)]);
+		code.extend([Move(rets_size, 0, 8), Goto, Label(end)]);
 		code
 	}
 	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
@@ -705,7 +704,8 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 						("call", _, _) => {
 							let ret = *labels;
 							*labels += 1;
-							vec![IntPush(ret), Shove(8, size_of_slice(inputs)), Goto, Label(ret)]
+							let inputs_size = size_of_slice(inputs);
+							vec![IntPush(ret), Move(0, inputs_size, 8), Goto, Label(ret)]
 						}
 						("false", [], [Bool]) => vec![BoolPush(false)],
 						("true", [], [Bool]) => vec![BoolPush(true)],
@@ -759,7 +759,7 @@ impl Stack {
 
 fn run(code: &[Operation]) -> Stack {
 	let mut code = code.to_vec();
-	code.extend([IntPush(-1), Shove(8, 8), Goto, Label(-1)]);
+	code.extend([IntPush(-1), Move(0, 8, 8), Goto, Label(-1)]);
 
 	let mut stack = Stack::new();
 	let mut i = 0;
@@ -777,15 +777,10 @@ fn run(code: &[Operation]) -> Stack {
 			BoolAnd => stack.binary(|a: bool, b| a & b),
 			BoolOr => stack.binary(|a: bool, b| a | b),
 			BoolEq => stack.binary(|a: bool, b| a == b),
-			Grab(size, location) => {
-				let i = stack.0.len() - size - location;
-				let data = stack.0.drain(i..i + size).collect::<Vec<u8>>();
-				stack.0.extend(data);
-			}
-			Shove(size, movement) => {
-				let data = stack.0.drain(stack.0.len() - size..).collect::<Vec<u8>>();
-				let j = stack.0.len() - movement;
-				stack.0.splice(j..j, data);
+			Move(start, end, size) => {
+				let l = stack.0.len() - size;
+				let data: Vec<u8> = stack.0.drain(l - start..l - start + size).collect();
+				stack.0.splice(l - end..l - end, data);
 			}
 			Label(_) => {}
 			Goto => {
