@@ -384,6 +384,18 @@ enum Typed {
 	Assignment(String, Type),
 }
 
+impl Typed {
+	fn get_effect(&self) -> Effect {
+		match self {
+			Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
+			Typed::Declaration(_) => Effect::new(vec![], vec![]),
+			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
+			Typed::String(_) => Effect::literal(Str),
+			Typed::Number(_) => Effect::literal(Int),
+		}
+	}
+}
+
 use Type::*;
 #[derive(Clone, Debug, PartialEq)]
 enum Type {
@@ -551,7 +563,7 @@ fn typer(tree: &Rewritten) -> Typed {
 		effect: &mut Effect,
 		scope: Option<Scope<Type>>,
 	) -> Typed {
-		let mut out = match tree {
+		let out = match tree {
 			Rewritten::Group(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let cs: Vec<Typed> =
@@ -611,17 +623,7 @@ fn typer(tree: &Rewritten) -> Typed {
 				None => todo!("could not type {:?}", i),
 			},
 		};
-		match &mut out {
-			Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) => {
-				effect.compose(e, vars)
-			}
-			Typed::Declaration(_) => {}
-			Typed::Assignment(_, t) => {
-				effect.compose(&Effect::new(vec![t.clone()], vec![]), vars)
-			}
-			Typed::String(_) => effect.compose(&Effect::literal(Str), vars),
-			Typed::Number(_) => effect.compose(&Effect::literal(Int), vars),
-		};
+		effect.compose(&out.get_effect(), vars);
 		out
 	}
 	let mut vars = TypeVars(vec![]);
