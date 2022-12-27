@@ -652,9 +652,6 @@ enum Operation {
 }
 
 fn compile(tree: &Typed) -> Vec<Operation> {
-	fn size_of_slice(slice: &[Type]) -> usize {
-		slice.iter().map(Type::size_of).sum()
-	}
 	fn block(mut code: Vec<Operation>, rets_size: usize, labels: &mut i64) -> Vec<Operation> {
 		let (start, end) = (*labels, *labels + 1);
 		*labels += 2;
@@ -667,7 +664,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
 			Typed::Block(cs, Effect { outputs, .. }, _scope) => {
 				let rets_size = match outputs.as_slice() {
-					[Block(Effect { outputs, .. })] => size_of_slice(outputs),
+					[Block(Effect { outputs, .. })] => outputs.iter().map(Type::size_of).sum(),
 					_ => unreachable!(),
 				};
 				let code = cs.iter().flat_map(|c| compile(c, labels)).collect();
@@ -695,14 +692,14 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 							("_or_", [Bool, Bool], [Bool]) => vec![BoolOr],
 							(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
 						},
-						size_of_slice(outputs),
+						outputs.iter().map(Type::size_of).sum(),
 						labels,
 					),
 					(inputs, outputs) => match (i.as_str(), inputs, outputs) {
 						("call", _, _) => {
 							let ret = *labels;
 							*labels += 1;
-							let inputs_size = size_of_slice(inputs);
+							let inputs_size = inputs.iter().map(Type::size_of).sum();
 							vec![IntPush(ret), Move(0, inputs_size, 8), Goto, Label(ret)]
 						}
 						("false", [], [Bool]) => vec![BoolPush(false)],
