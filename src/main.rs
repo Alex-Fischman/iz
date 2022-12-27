@@ -646,6 +646,8 @@ enum Operation {
 	BoolAnd,
 	BoolOr,
 	BoolEq,
+	Alloc(usize /* size */),
+	Free(usize /* size */),
 	Move(usize /* start */, usize /* end */, usize /* size */), // indices from top of stack
 	Label(i64),
 	Goto,
@@ -662,13 +664,19 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
 		match tree {
 			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
-			Typed::Block(cs, Effect { outputs, .. }, _scope) => {
-				let rets_size = match outputs.as_slice() {
-					[Block(Effect { outputs, .. })] => outputs.iter().map(Type::size_of).sum(),
+			Typed::Block(cs, Effect { outputs, .. }, scope) => {
+				let e = match outputs.as_slice() {
+					[Block(e)] => e,
 					_ => unreachable!(),
 				};
-				let code = cs.iter().flat_map(|c| compile(c, labels)).collect();
-				// allocate and free local vars
+				let args_size = e.inputs.iter().map(Type::size_of).sum();
+				let rets_size = e.outputs.iter().map(Type::size_of).sum();
+				let vars_size: usize = scope.borrow().vars.values().map(Type::size_of).sum();
+
+				let mut code: Vec<Operation> =
+					cs.iter().flat_map(|c| compile(c, labels)).collect();
+				code.splice(0..0, [Alloc(vars_size), Move(0, args_size, vars_size)]);
+				code.extend([Move(rets_size, 0, vars_size), Free(vars_size)]);
 				block(code, rets_size, labels)
 			}
 			Typed::String(_) => todo!(),
@@ -772,6 +780,8 @@ fn run(code: &[Operation]) -> Stack {
 			BoolAnd => stack.binary(|a: bool, b| a & b),
 			BoolOr => stack.binary(|a: bool, b| a | b),
 			BoolEq => stack.binary(|a: bool, b| a == b),
+			Alloc(size) => stack.0.extend(std::iter::repeat(0u8).take(size)),
+			Free(size) => stack.0.truncate(stack.0.len() - size),
 			Move(start, end, size) => {
 				let l = stack.0.len() - size;
 				let data: Vec<u8> = stack.0.drain(l - start..l - start + size).collect();
