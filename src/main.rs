@@ -600,6 +600,9 @@ fn typer(tree: &Rewritten) -> Typed {
 			),
 			Rewritten::Number(n) => Typed::Number(*n),
 			Rewritten::Declaration(i) => {
+				if get_var(scope.clone().unwrap(), i).is_some() {
+					todo!("redefined local variables")
+				}
 				set_var(scope.unwrap(), i.clone(), vars.new_var());
 				Typed::Declaration(i.clone())
 			}
