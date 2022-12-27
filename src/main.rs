@@ -514,18 +514,16 @@ impl TypeVars {
 	}
 }
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc}; // avoiding HashMap to avoid random order
 type Scope<T> = Rc<RefCell<S<T>>>;
 #[derive(Clone, Debug, PartialEq)]
 struct S<T> {
-	vars: HashMap<String, T>,
+	vars: BTreeMap<String, T>,
 	parent: Option<Scope<T>>,
 }
 
 fn new_scope<T>(parent: Option<Scope<T>>) -> Scope<T> {
-	Rc::new(RefCell::new(S { vars: HashMap::new(), parent }))
+	Rc::new(RefCell::new(S { vars: BTreeMap::new(), parent }))
 }
 
 fn set_var<T>(scope: Scope<T>, name: String, value: T) {
@@ -667,14 +665,14 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
 		match tree {
 			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
-			Typed::Block(cs, Effect { outputs, .. }, _) => {
-				let rets = match outputs.as_slice() {
+			Typed::Block(cs, Effect { outputs, .. }, _scope) => {
+				let rets_size = match outputs.as_slice() {
 					[Block(Effect { outputs, .. })] => size_of_slice(outputs),
 					_ => unreachable!(),
 				};
 				let code = cs.iter().flat_map(|c| compile(c, labels)).collect();
 				// allocate and free local vars
-				block(code, rets, labels)
+				block(code, rets_size, labels)
 			}
 			Typed::String(_) => todo!(),
 			Typed::Identifier(i, Effect { inputs, outputs }) => {
