@@ -93,10 +93,11 @@ fn test() {
 			ts,
 		)
 	);
-	let run_test = tokenizer(&"add@(1 2) 1 2 add@() 1 + 2".chars().collect::<Vec<char>>());
+	let run_test: Vec<char> =
+		"var a var b var c a = add@(1 2) 2 2 b = add@() c = 3 + 2 a b c".chars().collect();
 	let mut stack = Stack::new();
-	[3i64, 3, 3].into_iter().for_each(|v| stack.push(v));
-	assert_eq!(run(&compile(&typer(&rewriter(&parser(&run_test))))), stack);
+	[3i64, 4, 5].into_iter().for_each(|v| stack.push(v));
+	assert_eq!(run(&compile(&typer(&rewriter(&parser(&tokenizer(&run_test)))))), stack);
 }
 
 #[derive(Debug, PartialEq)]
@@ -556,6 +557,13 @@ fn find_scope<T>(scope: Scope<T>, name: &str) -> Option<Scope<T>> {
 	}
 }
 
+fn modify_values<T, F: Fn(&T) -> T>(scope: Scope<T>, f: F) {
+	scope.borrow_mut().vars.values_mut().for_each(|v| *v = f(v));
+	if let Some(parent) = &mut scope.borrow_mut().parent {
+		modify_values(parent.clone(), f);
+	}
+}
+
 fn typer(tree: &Rewritten) -> Typed {
 	fn typer(
 		tree: &Rewritten,
@@ -653,7 +661,8 @@ enum Operation {
 	BoolEq,
 	Alloc(usize /* size */),
 	Free(usize /* size */),
-	Move(usize /* start */, usize /* end */, usize /* size */), // indices from top of stack
+	Move(usize /* start */, usize /* end */, usize /* size */), // indices from end of stack
+	Copy(usize /* start */, usize /* end */, usize /* size */), // indices from end of stack
 	Label(i64),
 	Goto,
 }
@@ -666,20 +675,29 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 		code.extend([Move(rets_size, 0, 8), Goto, Label(end)]);
 		code
 	}
-	fn compile(tree: &Typed, labels: &mut i64) -> Vec<Operation> {
-		match tree {
-			Typed::Group(cs, _) => cs.iter().flat_map(|c| compile(c, labels)).collect(),
-			Typed::Block(cs, Effect { outputs, .. }, scope) => {
+	fn compile(tree: &Typed, labels: &mut i64, scope: Scope<usize>) -> Vec<Operation> {
+		let out = match tree {
+			Typed::Group(cs, _) => {
+				// skip updating the scope by using return; the children will do that anyway
+				return cs.iter().flat_map(|c| compile(c, labels, scope.clone())).collect();
+			}
+			Typed::Block(cs, Effect { outputs, .. }, typed_scope) => {
 				let e = match outputs.as_slice() {
 					[Block(e)] => e,
 					_ => unreachable!(),
 				};
 				let args_size = e.inputs.iter().map(Type::size_of).sum();
 				let rets_size = e.outputs.iter().map(Type::size_of).sum();
-				let vars_size: usize = scope.borrow().vars.values().map(Type::size_of).sum();
+
+				let mut vars_size = 0;
+				let s = new_scope(Some(scope.clone()));
+				for (k, v) in &typed_scope.borrow().vars {
+					set_var(s.clone(), k.to_string(), vars_size + args_size);
+					vars_size += v.size_of();
+				}
 
 				let mut code: Vec<Operation> =
-					cs.iter().flat_map(|c| compile(c, labels)).collect();
+					cs.iter().flat_map(|c| compile(c, labels, s.clone())).collect();
 				code.splice(0..0, [Alloc(vars_size), Move(0, args_size, vars_size)]);
 				code.extend([Move(rets_size, 0, vars_size), Free(vars_size)]);
 				block(code, rets_size, labels)
@@ -712,22 +730,36 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 						("call", _, _) => {
 							let ret = *labels;
 							*labels += 1;
-							let inputs_size = inputs.iter().map(Type::size_of).sum();
-							vec![IntPush(ret), Move(0, inputs_size, 8), Goto, Label(ret)]
+							let args_size = inputs.iter().map(Type::size_of).sum();
+							vec![IntPush(ret), Move(0, args_size, 8), Goto, Label(ret)]
 						}
 						("false", [], [Bool]) => vec![BoolPush(false)],
 						("true", [], [Bool]) => vec![BoolPush(true)],
 						("nop", [], []) => vec![],
+						(s, [], [t]) if get_var(scope.clone(), s).is_some() => {
+							vec![Copy(get_var(scope.clone(), s).unwrap(), 0, t.size_of())]
+						}
 						(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
 					},
 				}
 			}
-			Typed::Number(n) => vec![IntPush(*n)],
+			Typed::Number(n) => {
+				vec![IntPush(*n)]
+			}
 			Typed::Declaration(_) => vec![], // space is allocated in Block branch
-			Typed::Assignment(_, _t) => todo!("move size of t bytes into allocated space"),
-		}
+			Typed::Assignment(s, t) => {
+				let (ptr, size) = (get_var(scope.clone(), s).unwrap(), t.size_of());
+				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
+			}
+		};
+		let e = tree.get_effect();
+		modify_values(scope, |i| {
+			i - e.inputs.iter().map(Type::size_of).sum::<usize>()
+				+ e.outputs.iter().map(Type::size_of).sum::<usize>()
+		});
+		out
 	}
-	compile(tree, &mut 0)
+	compile(tree, &mut 0, new_scope(None))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -768,10 +800,14 @@ impl Stack {
 fn run(code: &[Operation]) -> Stack {
 	let mut code = code.to_vec();
 	code.extend([IntPush(-1), Move(0, 8, 8), Goto, Label(-1)]);
+	// for (i, o) in code.iter().enumerate() {
+	// 	println!("{}: {:?}", i, o);
+	// }
 
 	let mut stack = Stack::new();
 	let mut i = 0;
 	while i < code.len() {
+		// println!("{:?}\n{}", stack, i);
 		match code[i] {
 			IntPush(i) => stack.push(i),
 			IntMul => stack.binary(|a: i64, b| a * b),
@@ -789,7 +825,12 @@ fn run(code: &[Operation]) -> Stack {
 			Free(size) => stack.0.truncate(stack.0.len() - size),
 			Move(start, end, size) => {
 				let l = stack.0.len() - size;
-				let data: Vec<u8> = stack.0.drain(l - start..l - start + size).collect();
+				let data = stack.0.drain(l - start..l - start + size).collect::<Vec<u8>>();
+				stack.0.splice(l - end..l - end, data);
+			}
+			Copy(start, end, size) => {
+				let l = stack.0.len();
+				let data = stack.0[l - start - size..l - start].to_vec();
 				stack.0.splice(l - end..l - end, data);
 			}
 			Label(_) => {}
