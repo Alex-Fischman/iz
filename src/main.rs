@@ -45,7 +45,7 @@ fn test() {
 			Rewritten::Identifier("call".to_string()),
 			Rewritten::Declaration("a".to_string()),
 			Rewritten::Number(3),
-			Rewritten::Group(vec![Rewritten::Number(2)]),
+			Rewritten::Number(2),
 			Rewritten::Identifier("mul".to_string()),
 			Rewritten::Identifier("call".to_string()),
 			Rewritten::Number(1),
@@ -321,7 +321,6 @@ fn parser(tokens: &[Token]) -> Vec<Parsed> {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Rewritten {
-	Group(Vec<Rewritten>),
 	Block(Vec<Rewritten>),
 	String(String),
 	Identifier(String),
@@ -335,7 +334,7 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 		let mut out = vec![];
 		for tree in trees {
 			match tree {
-				Parsed::Brackets(Bracket::Round, cs) => out.push(Rewritten::Group(rewriter(cs))),
+				Parsed::Brackets(Bracket::Round, cs) => out.extend(rewriter(cs)),
 				Parsed::Brackets(Bracket::Curly, cs) => {
 					out.push(Rewritten::Block(rewriter(cs)));
 				}
@@ -376,7 +375,6 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Typed {
-	Group(Vec<Typed>, Effect),
 	Block(Vec<Typed>, Effect, Scope<Type>),
 	String(String),
 	Identifier(String, Effect),
@@ -388,7 +386,7 @@ enum Typed {
 impl Typed {
 	fn get_effect(&self) -> Effect {
 		match self {
-			Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
+			Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
 			Typed::Declaration(_) => Effect::new(vec![], vec![]),
 			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
 			Typed::String(_) => Effect::literal(Str),
@@ -512,17 +510,13 @@ impl TypeVars {
 
 	fn substitute(&self, typed: &mut Typed) {
 		match typed {
-			Typed::Group(_, e) | Typed::Block(_, e, _) | Typed::Identifier(_, e) => {
-				*e = self.substitute_effect(e)
-			}
+			Typed::Block(_, e, _) | Typed::Identifier(_, e) => *e = self.substitute_effect(e),
 			Typed::Assignment(_, t) => *t = self.substitute_type(t),
 			Typed::Declaration(_) | Typed::Number(_) | Typed::String(_) => {}
 		}
-		if let Typed::Block(_, _, scope) = typed {
-			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t))
-		}
-		if let Typed::Group(cs, _) | Typed::Block(cs, _, _) = typed {
-			cs.iter_mut().for_each(|c| self.substitute(c))
+		if let Typed::Block(cs, _, scope) = typed {
+			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t));
+			cs.iter_mut().for_each(|c| self.substitute(c));
 		}
 	}
 }
@@ -572,12 +566,6 @@ fn typer(tree: &Rewritten) -> Typed {
 		scope: Option<Scope<Type>>,
 	) -> Typed {
 		let out = match tree {
-			Rewritten::Group(cs) => {
-				let mut e = Effect::new(vec![], vec![]);
-				let cs: Vec<Typed> =
-					cs.iter().map(|c| typer(c, vars, &mut e, scope.clone())).collect();
-				Typed::Group(cs, e)
-			}
 			Rewritten::Block(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let s = new_scope(scope);
@@ -677,10 +665,6 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	}
 	fn compile(tree: &Typed, labels: &mut i64, scope: Scope<usize>) -> Vec<Operation> {
 		let out = match tree {
-			Typed::Group(cs, _) => {
-				// skip updating the scope by using return; the children will do that anyway
-				return cs.iter().flat_map(|c| compile(c, labels, scope.clone())).collect();
-			}
 			Typed::Block(cs, Effect { outputs, .. }, typed_scope) => {
 				let e = match outputs.as_slice() {
 					[Block(e)] => e,
