@@ -680,10 +680,13 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 					vars_size += v.size_of();
 				}
 
+				modify_values(scope.clone(), |i| i + vars_size + 8); // vars and return address
 				let mut code: Vec<Operation> =
 					cs.iter().flat_map(|c| compile(c, labels, s.clone())).collect();
 				code.splice(0..0, [Alloc(vars_size), Move(0, args_size, vars_size)]);
 				code.extend([Move(rets_size, 0, vars_size), Free(vars_size)]);
+				modify_values(scope.clone(), |i| i - vars_size - 8);
+
 				block(code, rets_size, labels)
 			}
 			Typed::String(_) => todo!(),

@@ -2,4 +2,6 @@ var a var b var c
 a = add@(1 2)
 1 2 b = add@()
 c = 1 + 2
-a == b and b == c
+
+{a = 5 {c = 7} call} call
+a b c
