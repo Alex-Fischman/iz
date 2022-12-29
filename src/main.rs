@@ -383,9 +383,7 @@ impl Typed {
 	fn get_effect(&self) -> Effect {
 		match self {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
-			Typed::Assignment(_, t) => {
-				Effect::new(vec![t.clone()], vec![])
-			}
+			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
 			Typed::String(_) => Effect::literal(Str),
 			Typed::Number(_) => Effect::literal(Int),
 		}
