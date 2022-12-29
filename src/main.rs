@@ -84,7 +84,7 @@ fn test() {
 					),
 				),
 				Typed::Number(2),
-				Typed::Declaration("a".to_string(), Int),
+				Typed::Assignment("a".to_string(), Int),
 				Typed::Identifier("a".to_string(), Effect::literal(Int)),
 			],
 			Effect::function(vec![], vec![Int, Int]),
@@ -376,7 +376,6 @@ enum Typed {
 	String(String),
 	Identifier(String, Effect),
 	Number(i64),
-	Declaration(String, Type),
 	Assignment(String, Type),
 }
 
@@ -384,7 +383,7 @@ impl Typed {
 	fn get_effect(&self) -> Effect {
 		match self {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
-			Typed::Declaration(_, t) | Typed::Assignment(_, t) => {
+			Typed::Assignment(_, t) => {
 				Effect::new(vec![t.clone()], vec![])
 			}
 			Typed::String(_) => Effect::literal(Str),
@@ -509,7 +508,7 @@ impl TypeVars {
 	fn substitute(&self, typed: &mut Typed) {
 		match typed {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => *e = self.substitute_effect(e),
-			Typed::Declaration(_, t) | Typed::Assignment(_, t) => *t = self.substitute_type(t),
+			Typed::Assignment(_, t) => *t = self.substitute_type(t),
 			Typed::Number(_) | Typed::String(_) => {}
 		}
 		if let Typed::Block(cs, _, scope) = typed {
@@ -610,7 +609,7 @@ fn typer(tree: &Rewritten) -> Typed {
 					todo!("redefined local variables")
 				}
 				set_var(scope.unwrap(), i.clone(), vars.new_var());
-				Typed::Declaration(i.clone(), vars.old_var())
+				Typed::Assignment(i.clone(), vars.old_var()) // Typed::Block handles allocation
 			}
 			Rewritten::Assignment(i) => match get_var(scope.unwrap(), i) {
 				Some(v) => Typed::Assignment(i.clone(), v),
@@ -731,7 +730,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 			Typed::Number(n) => {
 				vec![IntPush(*n)]
 			}
-			Typed::Declaration(s, t) | Typed::Assignment(s, t) => {
+			Typed::Assignment(s, t) => {
 				let (ptr, size) = (get_var(scope.clone(), s).unwrap(), t.size_of());
 				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
 			}
