@@ -26,7 +26,7 @@ fn test() {
 			Token::String("a b\tc\nd\"".to_string()),
 		]
 	);
-	let parse_test = "if false 1 else if true 2 else 3\n# asdf\nvar a a = 1 + (2) * 3";
+	let parse_test = "if false 1 else if true 2 else 3\n# asdf\na := 1 + (2) * 3";
 	assert_eq!(
 		rewriter(&parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()))),
 		Rewritten::Block(vec![
@@ -43,7 +43,6 @@ fn test() {
 			Rewritten::Identifier("call".to_string()),
 			Rewritten::Identifier("_else_".to_string()),
 			Rewritten::Identifier("call".to_string()),
-			Rewritten::Declaration("a".to_string()),
 			Rewritten::Number(3),
 			Rewritten::Number(2),
 			Rewritten::Identifier("mul".to_string()),
@@ -51,10 +50,10 @@ fn test() {
 			Rewritten::Number(1),
 			Rewritten::Identifier("add".to_string()),
 			Rewritten::Identifier("call".to_string()),
-			Rewritten::Assignment("a".to_string()),
+			Rewritten::Declaration("a".to_string()),
 		])
 	);
-	let typer_test = "{1 2} call add call var a a = 2 a".chars().collect::<Vec<char>>();
+	let typer_test = "{1 2} call add call a := 2 a".chars().collect::<Vec<char>>();
 	let ts = new_scope(None);
 	set_var(ts.clone(), "a".to_string(), Int);
 	assert_eq!(
@@ -84,9 +83,8 @@ fn test() {
 						vec![Int],
 					),
 				),
-				Typed::Declaration("a".to_string()),
 				Typed::Number(2),
-				Typed::Assignment("a".to_string(), Int),
+				Typed::Declaration("a".to_string(), Int),
 				Typed::Identifier("a".to_string(), Effect::literal(Int)),
 			],
 			Effect::function(vec![], vec![Int, Int]),
@@ -94,7 +92,7 @@ fn test() {
 		)
 	);
 	let run_test: Vec<char> =
-		"var a var b var c a = add@(1 2) 2 2 b = add@() c = 3 + 2 a b c".chars().collect();
+		"a := add@(1 2) 2 2 b := add@() c := 3 + 2 a b c".chars().collect();
 	let mut stack = Stack::new();
 	[3i64, 4, 5].into_iter().for_each(|v| stack.push(v));
 	assert_eq!(run(&compile(&typer(&rewriter(&parser(&tokenizer(&run_test)))))), stack);
@@ -255,8 +253,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 		false,
 	),
 	(&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
-	(&[("var", "var", 0, 1)], true),
-	(&[("=", "=", 1, 1)], true),
+	(&[("=", "=", 1, 1), (":=", ":=", 1, 1)], true),
 	(&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
 	(&[("else", "_else_", 1, 1)], true),
 ];
@@ -343,14 +340,14 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 				Parsed::Identifier(i) => out.push(Rewritten::Identifier(i.clone())),
 				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
 				Parsed::Operator(i, cs) => match i.as_str() {
-					"var" => match cs.as_slice() {
-						[Parsed::Identifier(v)] => out.push(Rewritten::Declaration(v.clone())),
-						cs => panic!("expected one var name, found {:?}", cs),
-					},
-					"=" => match cs.as_slice() {
+					":=" | "=" => match cs.as_slice() {
 						[Parsed::Identifier(v), rhs] => {
 							out.append(&mut rewriter(&[rhs.clone()]));
-							out.push(Rewritten::Assignment(v.clone()));
+							out.push(match i.as_str() {
+								":=" => Rewritten::Declaration(v.clone()),
+								"=" => Rewritten::Assignment(v.clone()),
+								_ => unreachable!(),
+							});
 						}
 						cs => panic!("expected one var name and one value, found {:?}", cs),
 					},
@@ -379,7 +376,7 @@ enum Typed {
 	String(String),
 	Identifier(String, Effect),
 	Number(i64),
-	Declaration(String),
+	Declaration(String, Type),
 	Assignment(String, Type),
 }
 
@@ -387,8 +384,9 @@ impl Typed {
 	fn get_effect(&self) -> Effect {
 		match self {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
-			Typed::Declaration(_) => Effect::new(vec![], vec![]),
-			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
+			Typed::Declaration(_, t) | Typed::Assignment(_, t) => {
+				Effect::new(vec![t.clone()], vec![])
+			}
 			Typed::String(_) => Effect::literal(Str),
 			Typed::Number(_) => Effect::literal(Int),
 		}
@@ -511,8 +509,8 @@ impl TypeVars {
 	fn substitute(&self, typed: &mut Typed) {
 		match typed {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => *e = self.substitute_effect(e),
-			Typed::Assignment(_, t) => *t = self.substitute_type(t),
-			Typed::Declaration(_) | Typed::Number(_) | Typed::String(_) => {}
+			Typed::Declaration(_, t) | Typed::Assignment(_, t) => *t = self.substitute_type(t),
+			Typed::Number(_) | Typed::String(_) => {}
 		}
 		if let Typed::Block(cs, _, scope) = typed {
 			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t));
@@ -612,7 +610,7 @@ fn typer(tree: &Rewritten) -> Typed {
 					todo!("redefined local variables")
 				}
 				set_var(scope.unwrap(), i.clone(), vars.new_var());
-				Typed::Declaration(i.clone())
+				Typed::Declaration(i.clone(), vars.old_var())
 			}
 			Rewritten::Assignment(i) => match get_var(scope.unwrap(), i) {
 				Some(v) => Typed::Assignment(i.clone(), v),
@@ -733,8 +731,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 			Typed::Number(n) => {
 				vec![IntPush(*n)]
 			}
-			Typed::Declaration(_) => vec![], // space is allocated in Block branch
-			Typed::Assignment(s, t) => {
+			Typed::Declaration(s, t) | Typed::Assignment(s, t) => {
 				let (ptr, size) = (get_var(scope.clone(), s).unwrap(), t.size_of());
 				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
 			}
