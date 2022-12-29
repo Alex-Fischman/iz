@@ -1,6 +1,5 @@
-a := add@(1 2)
-1 2 b := add@()
-c := 1 + 2
+# todo: compile functions by putting address into variable
+# todo: add user-level type variables
 
-{a = 5 {c = 7} call} call
-a b c
+two_threes := {3 3}
+two_threes call
