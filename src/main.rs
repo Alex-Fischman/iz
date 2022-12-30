@@ -553,8 +553,7 @@ fn typer(tree: &Rewritten) -> Typed {
 			Rewritten::Block(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let s = new_scope(Some(scope));
-				let cs: Vec<Typed> =
-					cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
+				let cs = cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
 				Typed::Block(cs, e, s)
 			}
 			Rewritten::String(s) => Typed::String(s.clone()),
@@ -562,20 +561,18 @@ fn typer(tree: &Rewritten) -> Typed {
 				i.clone(),
 				match i.as_str() {
 					"call" => {
-						let a = |e: &Effect| {
+						let call = |e: &Effect| {
 							let mut i = e.inputs.clone();
 							i.push(Block(Effect::new(e.inputs.clone(), e.outputs.clone())));
 							Effect::new(i, e.outputs.clone())
 						};
-						let b = |t| panic!("call expected block, found {:?}", t);
-
 						match effect.outputs.last() {
-							Some(Block(e)) => a(e),
+							Some(Block(e)) => call(e),
 							Some(Variable(v)) => match vars.get_var(*v) {
-								Some(Block(e)) => a(e),
-								t => b(t.as_ref()),
+								Some(Block(e)) => call(e),
+								t => panic!("call expected block, found {:?}", t),
 							},
-							t => b(t),
+							t => panic!("call expected block, found {:?}", t),
 						}
 					}
 					"nop" => Effect::new(vec![], vec![]),
