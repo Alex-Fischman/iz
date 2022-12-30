@@ -54,7 +54,8 @@ fn test() {
 		])
 	);
 	let typer_test = "{1 2} call add call a := 2 a".chars().collect::<Vec<char>>();
-	let ts = new_scope(None);
+	let ts = new_scope(None); // typer generates a floating scope
+	let ts = new_scope(Some(ts));
 	set_var(ts.clone(), "a".to_string(), Int);
 	assert_eq!(
 		typer(&rewriter(&parser(&tokenizer(&typer_test)))),
@@ -372,7 +373,7 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Typed {
-	Block(Vec<Typed>, Effect, Scope<Type>),
+	Block(Vec<Typed>, Effect, Scope),
 	String(String),
 	Identifier(String, Effect),
 	Number(i64),
@@ -517,26 +518,26 @@ impl TypeVars {
 }
 
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc}; // avoiding HashMap to avoid random order
-type Scope<T> = Rc<RefCell<S<T>>>;
+type Scope = Rc<RefCell<S>>;
 #[derive(Clone, Debug, PartialEq)]
-struct S<T> {
-	vars: BTreeMap<String, T>,
-	parent: Option<Scope<T>>,
+struct S {
+	vars: BTreeMap<String, Type>,
+	parent: Option<Scope>,
 }
 
-fn new_scope<T>(parent: Option<Scope<T>>) -> Scope<T> {
+fn new_scope(parent: Option<Scope>) -> Scope {
 	Rc::new(RefCell::new(S { vars: BTreeMap::new(), parent }))
 }
 
-fn set_var<T>(scope: Scope<T>, name: String, value: T) {
+fn set_var(scope: Scope, name: String, value: Type) {
 	find_scope(scope.clone(), &name).unwrap_or(scope).borrow_mut().vars.insert(name, value);
 }
 
-fn get_var<T: Clone>(scope: Scope<T>, name: &str) -> Option<T> {
+fn get_var(scope: Scope, name: &str) -> Option<Type> {
 	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).cloned()
 }
 
-fn find_scope<T>(scope: Scope<T>, name: &str) -> Option<Scope<T>> {
+fn find_scope(scope: Scope, name: &str) -> Option<Scope> {
 	if scope.borrow().vars.contains_key(name) {
 		Some(scope)
 	} else if let Some(parent) = &scope.borrow().parent {
@@ -547,18 +548,13 @@ fn find_scope<T>(scope: Scope<T>, name: &str) -> Option<Scope<T>> {
 }
 
 fn typer(tree: &Rewritten) -> Typed {
-	fn typer(
-		tree: &Rewritten,
-		vars: &mut TypeVars,
-		effect: &mut Effect,
-		scope: Option<Scope<Type>>,
-	) -> Typed {
+	fn typer(tree: &Rewritten, vars: &mut TypeVars, effect: &mut Effect, scope: Scope) -> Typed {
 		let out = match tree {
 			Rewritten::Block(cs) => {
 				let mut e = Effect::new(vec![], vec![]);
-				let s = new_scope(scope);
+				let s = new_scope(Some(scope));
 				let cs: Vec<Typed> =
-					cs.iter().map(|c| typer(c, vars, &mut e, Some(s.clone()))).collect();
+					cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
 				Typed::Block(cs, e, s)
 			}
 			Rewritten::String(s) => Typed::String(s.clone()),
@@ -597,7 +593,7 @@ fn typer(tree: &Rewritten) -> Typed {
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					i => match get_var(scope.unwrap(), i) {
+					i => match get_var(scope, i) {
 						Some(v) => Effect::literal(v),
 						None => todo!("could not type {:?}", i),
 					},
@@ -605,13 +601,13 @@ fn typer(tree: &Rewritten) -> Typed {
 			),
 			Rewritten::Number(n) => Typed::Number(*n),
 			Rewritten::Declaration(i) => {
-				if get_var(scope.clone().unwrap(), i).is_some() {
+				if get_var(scope.clone(), i).is_some() {
 					todo!("redefined local variables")
 				}
-				set_var(scope.unwrap(), i.clone(), vars.new_var());
+				set_var(scope, i.clone(), vars.new_var());
 				Typed::Assignment(i.clone(), vars.old_var()) // Typed::Block handles allocation
 			}
-			Rewritten::Assignment(i) => match get_var(scope.unwrap(), i) {
+			Rewritten::Assignment(i) => match get_var(scope, i) {
 				Some(v) => Typed::Assignment(i.clone(), v),
 				None => todo!("could not type {:?}", i),
 			},
@@ -621,7 +617,7 @@ fn typer(tree: &Rewritten) -> Typed {
 	}
 	let mut vars = TypeVars(vec![]);
 	let mut effect = Effect::new(vec![], vec![]);
-	let mut tree = typer(tree, &mut vars, &mut effect, None);
+	let mut tree = typer(tree, &mut vars, &mut effect, new_scope(None));
 	if !effect.inputs.is_empty() {
 		panic!("program expected {:?}", effect.inputs);
 	}
