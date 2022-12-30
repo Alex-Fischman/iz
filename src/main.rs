@@ -92,9 +92,9 @@ fn test() {
 		)
 	);
 	let run_test: Vec<char> =
-		"a := add@(1 2) 2 2 b := add@() c := 3 + 2 a b c".chars().collect();
+		"a := add@(1 2) 2 2 b := add@() c := 3 + 2 {1 2} call a b c".chars().collect();
 	let mut stack = Stack::new();
-	[3i64, 4, 5].into_iter().for_each(|v| stack.push(v));
+	[1i64, 2, 3, 4, 5].into_iter().for_each(|v| stack.push(v));
 	assert_eq!(run(&compile(&typer(&rewriter(&parser(&tokenizer(&run_test)))))), stack);
 }
 
@@ -782,14 +782,14 @@ impl Stack {
 fn run(code: &[Operation]) -> Stack {
 	let mut code = code.to_vec();
 	code.extend([IntPush(-1), Move(0, 8, 8), Goto, Label(-1)]);
-	for (i, o) in code.iter().enumerate() {
-		println!("{}: {:?}", i, o);
-	}
+	// for (i, o) in code.iter().enumerate() {
+	// 	println!("{}: {:?}", i, o);
+	// }
 
 	let mut stack = Stack::new();
 	let mut i = 0;
 	while i < code.len() {
-		println!("{:?}\n{}", stack, i);
+		// println!("{:?}\n{}", stack, i);
 		match code[i] {
 			IntPush(i) => stack.push(i),
 			IntMul => stack.binary(|a: i64, b| a * b),
