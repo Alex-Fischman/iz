@@ -62,7 +62,7 @@ fn test() {
 			vec![
 				Typed::Block(
 					vec![Typed::Number(1), Typed::Number(2)],
-					Effect::function(vec![], vec![Int, Int]),
+					Effect::new(vec![], vec![Int, Int]),
 					new_scope(Some(ts.clone()))
 				),
 				Typed::Identifier(
@@ -87,7 +87,7 @@ fn test() {
 				Typed::Assignment("a".to_string(), Int),
 				Typed::Identifier("a".to_string(), Effect::literal(Int)),
 			],
-			Effect::function(vec![], vec![Int, Int]),
+			Effect::new(vec![], vec![Int, Int]),
 			ts,
 		)
 	);
@@ -340,7 +340,7 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 				Parsed::Identifier(i) => out.push(Rewritten::Identifier(i.clone())),
 				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
 				Parsed::Operator(i, cs) => match i.as_str() {
-					":=" | "=" => match cs.as_slice() {
+					":=" | "=" => match &cs[..] {
 						[Parsed::Identifier(v), rhs] => {
 							out.append(&mut rewriter(&[rhs.clone()]));
 							out.push(match i.as_str() {
@@ -382,7 +382,8 @@ enum Typed {
 impl Typed {
 	fn get_effect(&self) -> Effect {
 		match self {
-			Typed::Block(_, e, _) | Typed::Identifier(_, e) => e.clone(),
+			Typed::Block(_, e, _) => Effect::function(e.inputs.clone(), e.outputs.clone()),
+			Typed::Identifier(_, e) => e.clone(),
 			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
 			Typed::String(_) => Effect::literal(Str),
 			Typed::Number(_) => Effect::literal(Int),
@@ -565,7 +566,7 @@ fn typer(tree: &Rewritten) -> Typed {
 				let s = new_scope(scope);
 				let cs: Vec<Typed> =
 					cs.iter().map(|c| typer(c, vars, &mut e, Some(s.clone()))).collect();
-				Typed::Block(cs, Effect::function(e.inputs, e.outputs), s)
+				Typed::Block(cs, e, s)
 			}
 			Rewritten::String(s) => Typed::String(s.clone()),
 			Rewritten::Identifier(i) => Typed::Identifier(
@@ -668,11 +669,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	}
 	fn compile(tree: &Typed, labels: &mut i64, scope: Scope<usize>) -> Vec<Operation> {
 		let out = match tree {
-			Typed::Block(cs, Effect { outputs, .. }, typed_scope) => {
-				let e = match outputs.as_slice() {
-					[Block(e)] => e,
-					_ => unreachable!(),
-				};
+			Typed::Block(cs, e, typed_scope) => {
 				let args_size = e.inputs.iter().map(Type::size_of).sum();
 				let rets_size = e.outputs.iter().map(Type::size_of).sum();
 
@@ -693,10 +690,14 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				block(code, rets_size, labels)
 			}
 			Typed::String(_) => todo!(),
-			Typed::Identifier(i, Effect { inputs, outputs }) => {
-				match (inputs.as_slice(), outputs.as_slice()) {
-					([], [Block(Effect { inputs, outputs })]) => block(
-						match (i.as_str(), inputs.as_slice(), outputs.as_slice()) {
+			Typed::Identifier(i, e) => match get_var(scope.clone(), i) {
+				Some(loc) => match (&e.inputs[..], &e.outputs[..]) {
+					([], [t]) => vec![Copy(loc, 0, t.size_of())],
+					_ => unreachable!(),
+				},
+				None => match (i.as_str(), &e.inputs[..], &e.outputs[..]) {
+					(s, [], [Block(Effect { inputs, outputs })]) => block(
+						match (s, &inputs[..], &outputs[..]) {
 							("neg", [Int], [Int]) => vec![IntNeg],
 							("_not_", [Bool], [Bool]) => vec![BoolNot],
 							("mul", [Int, Int], [Int]) => vec![IntMul],
@@ -716,26 +717,19 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 						outputs.iter().map(Type::size_of).sum(),
 						labels,
 					),
-					(inputs, outputs) => match (i.as_str(), inputs, outputs) {
-						("call", _, _) => {
-							let ret = *labels;
-							*labels += 1;
-							let args_size = inputs.iter().map(Type::size_of).sum();
-							vec![IntPush(ret), Move(0, args_size, 8), Goto, Label(ret)]
-						}
-						("false", [], [Bool]) => vec![BoolPush(false)],
-						("true", [], [Bool]) => vec![BoolPush(true)],
-						("nop", [], []) => vec![],
-						(s, [], [t]) if get_var(scope.clone(), s).is_some() => {
-							vec![Copy(get_var(scope.clone(), s).unwrap(), 0, t.size_of())]
-						}
-						(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
-					},
-				}
-			}
-			Typed::Number(n) => {
-				vec![IntPush(*n)]
-			}
+					("call", inputs, _) => {
+						let ret = *labels;
+						*labels += 1;
+						let args_size = inputs.iter().map(Type::size_of).sum();
+						vec![IntPush(ret), Move(0, args_size, 8), Goto, Label(ret)]
+					}
+					("false", [], [Bool]) => vec![BoolPush(false)],
+					("true", [], [Bool]) => vec![BoolPush(true)],
+					("nop", [], []) => vec![],
+					(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
+				},
+			},
+			Typed::Number(n) => vec![IntPush(*n)],
 			Typed::Assignment(s, t) => {
 				let (ptr, size) = (get_var(scope.clone(), s).unwrap(), t.size_of());
 				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
@@ -789,14 +783,14 @@ impl Stack {
 fn run(code: &[Operation]) -> Stack {
 	let mut code = code.to_vec();
 	code.extend([IntPush(-1), Move(0, 8, 8), Goto, Label(-1)]);
-	// for (i, o) in code.iter().enumerate() {
-	// 	println!("{}: {:?}", i, o);
-	// }
+	for (i, o) in code.iter().enumerate() {
+		println!("{}: {:?}", i, o);
+	}
 
 	let mut stack = Stack::new();
 	let mut i = 0;
 	while i < code.len() {
-		// println!("{:?}\n{}", stack, i);
+		println!("{:?}\n{}", stack, i);
 		match code[i] {
 			IntPush(i) => stack.push(i),
 			IntMul => stack.binary(|a: i64, b| a * b),
