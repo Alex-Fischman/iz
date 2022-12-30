@@ -546,13 +546,6 @@ fn find_scope<T>(scope: Scope<T>, name: &str) -> Option<Scope<T>> {
 	}
 }
 
-fn modify_values<T, F: Fn(&T) -> T>(scope: Scope<T>, f: F) {
-	scope.borrow_mut().vars.values_mut().for_each(|v| *v = f(v));
-	if let Some(parent) = &mut scope.borrow_mut().parent {
-		modify_values(parent.clone(), f);
-	}
-}
-
 fn typer(tree: &Rewritten) -> Typed {
 	fn typer(
 		tree: &Rewritten,
@@ -667,35 +660,41 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 		code.extend([Move(rets_size, 0, 8), Goto, Label(end)]);
 		code
 	}
-	fn compile(tree: &Typed, labels: &mut i64, scope: Scope<usize>) -> Vec<Operation> {
+	fn compile(
+		tree: &Typed,
+		labels: &mut i64,
+		scope: &mut BTreeMap<String, usize>,
+	) -> Vec<Operation> {
 		let out = match tree {
 			Typed::Block(cs, e, typed_scope) => {
 				let args_size = e.inputs.iter().map(Type::size_of).sum();
 				let rets_size = e.outputs.iter().map(Type::size_of).sum();
+				let vars_size = typed_scope.borrow().vars.values().map(Type::size_of).sum();
 
-				let mut vars_size = 0;
-				let s = new_scope(Some(scope.clone()));
+				let mut s = scope.clone();
+				for v in s.values_mut() {
+					*v += vars_size + 8;
+				}
+				let mut offset = 0;
 				for (k, v) in &typed_scope.borrow().vars {
-					set_var(s.clone(), k.to_string(), vars_size + args_size);
-					vars_size += v.size_of();
+					s.insert(k.to_string(), offset + args_size);
+					offset += v.size_of();
 				}
 
-				modify_values(scope.clone(), |i| i + vars_size + 8); // vars and return address
 				let mut code: Vec<Operation> =
-					cs.iter().flat_map(|c| compile(c, labels, s.clone())).collect();
+					cs.iter().flat_map(|c| compile(c, labels, &mut s)).collect();
 				code.splice(0..0, [Alloc(vars_size), Move(0, args_size, vars_size)]);
 				code.extend([Move(rets_size, 0, vars_size), Free(vars_size)]);
-				modify_values(scope.clone(), |i| i - vars_size - 8);
 
 				block(code, rets_size, labels)
 			}
 			Typed::String(_) => todo!(),
-			Typed::Identifier(i, e) => match get_var(scope.clone(), i) {
+			Typed::Identifier(s, e) => match scope.get(s) {
 				Some(loc) => match (&e.inputs[..], &e.outputs[..]) {
-					([], [t]) => vec![Copy(loc, 0, t.size_of())],
+					([], [t]) => vec![Copy(*loc, 0, t.size_of())],
 					_ => unreachable!(),
 				},
-				None => match (i.as_str(), &e.inputs[..], &e.outputs[..]) {
+				None => match (s.as_str(), &e.inputs[..], &e.outputs[..]) {
 					(s, [], [Block(Effect { inputs, outputs })]) => block(
 						match (s, &inputs[..], &outputs[..]) {
 							("neg", [Int], [Int]) => vec![IntNeg],
@@ -731,18 +730,18 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 			},
 			Typed::Number(n) => vec![IntPush(*n)],
 			Typed::Assignment(s, t) => {
-				let (ptr, size) = (get_var(scope.clone(), s).unwrap(), t.size_of());
+				let (ptr, size) = (*scope.get(s).unwrap(), t.size_of());
 				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
 			}
 		};
 		let e = tree.get_effect();
-		modify_values(scope, |i| {
-			i - e.inputs.iter().map(Type::size_of).sum::<usize>()
-				+ e.outputs.iter().map(Type::size_of).sum::<usize>()
-		});
+		for v in scope.values_mut() {
+			*v -= e.inputs.iter().map(Type::size_of).sum::<usize>();
+			*v += e.outputs.iter().map(Type::size_of).sum::<usize>();
+		}
 		out
 	}
-	compile(tree, &mut 0, new_scope(None))
+	compile(tree, &mut 0, &mut BTreeMap::new())
 }
 
 #[derive(Clone, Debug, PartialEq)]
