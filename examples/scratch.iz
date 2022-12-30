@@ -1,5 +1,5 @@
 # todo: compile functions by putting address into variable
 # todo: add user-level type variables
 
-two_threes := {3 3}
-two_threes call
+two_threes := {3 3 add}
+two_threes call call
