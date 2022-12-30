@@ -466,11 +466,10 @@ impl TypeVars {
 		}
 	}
 
-	fn get_var(self: &TypeVars, i: usize) -> &Type {
+	fn get_var(self: &TypeVars, i: usize) -> &Option<Type> {
 		match &self.0[i] {
-			None => panic!("unsolved type var in {:?}", self.0),
 			Some(Variable(j)) => self.get_var(*j),
-			Some(t) => t,
+			o => o,
 		}
 	}
 
@@ -492,7 +491,7 @@ impl TypeVars {
 			Bool => Bool,
 			Str => Str,
 			Block(e) => Block(self.substitute_effect(e)),
-			Variable(i) => self.get_var(*i).clone(),
+			Variable(i) => self.get_var(*i).as_ref().expect("unsolved type var").clone(),
 		}
 	}
 
@@ -572,14 +571,23 @@ fn typer(tree: &Rewritten) -> Typed {
 			Rewritten::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
-					"call" => match effect.outputs.last() {
-						Some(Block(Effect { inputs, outputs })) => {
-							let mut i = inputs.clone();
-							i.push(Block(Effect::new(inputs.clone(), outputs.clone())));
-							Effect::new(i, outputs.clone())
+					"call" => {
+						let a = |e: &Effect| {
+							let mut i = e.inputs.clone();
+							i.push(Block(Effect::new(e.inputs.clone(), e.outputs.clone())));
+							Effect::new(i, e.outputs.clone())
+						};
+						let b = |t| panic!("call expected block, found {:?}", t);
+
+						match effect.outputs.last() {
+							Some(Block(e)) => a(e),
+							Some(Variable(v)) => match vars.get_var(*v) {
+								Some(Block(e)) => a(e),
+								t => b(t.as_ref()),
+							},
+							t => b(t),
 						}
-						t => panic!("call expected block, found {:?}", t),
-					},
+					}
 					"nop" => Effect::new(vec![], vec![]),
 					"false" | "true" => Effect::literal(Bool),
 					"neg" => Effect::function(vec![Int], vec![Int]),
