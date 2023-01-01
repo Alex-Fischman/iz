@@ -320,7 +320,6 @@ fn parser(tokens: &[Token]) -> Vec<Parsed> {
 #[derive(Clone, Debug, PartialEq)]
 enum Rewritten {
 	Block(Vec<Rewritten>),
-	String(String),
 	Identifier(String),
 	Number(i64),
 	Declaration(String),
@@ -337,7 +336,7 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 					out.push(Rewritten::Block(rewriter(cs)));
 				}
 				Parsed::Brackets(Bracket::Square, _cs) => todo!(),
-				Parsed::String(s) => out.push(Rewritten::String(s.clone())),
+				Parsed::String(_) => todo!(),
 				Parsed::Identifier(i) => out.push(Rewritten::Identifier(i.clone())),
 				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
 				Parsed::Operator(i, cs) => match i.as_str() {
@@ -374,7 +373,6 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 #[derive(Clone, Debug, PartialEq)]
 enum Typed {
 	Block(Vec<Typed>, Effect, Scope),
-	String(String),
 	Identifier(String, Effect),
 	Number(i64),
 	Assignment(String, Type),
@@ -386,7 +384,6 @@ impl Typed {
 			Typed::Block(_, e, _) => Effect::function(e.inputs.clone(), e.outputs.clone()),
 			Typed::Identifier(_, e) => e.clone(),
 			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
-			Typed::String(_) => Effect::literal(Str),
 			Typed::Number(_) => Effect::literal(Int),
 		}
 	}
@@ -397,7 +394,6 @@ use Type::*;
 enum Type {
 	Int,
 	Bool,
-	Str,
 	Block(Effect),
 	Variable(usize),
 }
@@ -407,7 +403,6 @@ impl Type {
 		match self {
 			Int => 8,
 			Bool => 1,
-			Str => todo!(),
 			Block(_) => 8, // label
 			Variable(_) => unreachable!(),
 		}
@@ -477,7 +472,7 @@ impl TypeVars {
 
 	fn equalize(&mut self, a: &Type, b: &Type) -> bool {
 		match (a, b) {
-			(Int, Int) | (Bool, Bool) | (Str, Str) => true,
+			(Int, Int) | (Bool, Bool) => true,
 			(Block(a), Block(b)) => {
 				a.inputs.iter().zip(&b.inputs).all(|(a, b)| self.equalize(a, b))
 					&& a.outputs.iter().zip(&b.outputs).all(|(a, b)| self.equalize(a, b))
@@ -491,7 +486,6 @@ impl TypeVars {
 		match t {
 			Int => Int,
 			Bool => Bool,
-			Str => Str,
 			Block(e) => Block(self.substitute_effect(e)),
 			Variable(i) => self.get_var(*i).as_ref().expect("unsolved type var").clone(),
 		}
@@ -508,7 +502,7 @@ impl TypeVars {
 		match typed {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => *e = self.substitute_effect(e),
 			Typed::Assignment(_, t) => *t = self.substitute_type(t),
-			Typed::Number(_) | Typed::String(_) => {}
+			Typed::Number(_) => {}
 		}
 		if let Typed::Block(cs, _, scope) = typed {
 			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t));
@@ -556,7 +550,6 @@ fn typer(tree: &Rewritten) -> Typed {
 				let cs = cs.iter().map(|c| typer(c, vars, &mut e, s.clone())).collect();
 				Typed::Block(cs, e, s)
 			}
-			Rewritten::String(s) => Typed::String(s.clone()),
 			Rewritten::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
@@ -681,7 +674,6 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 
 				block(code, rets_size, labels)
 			}
-			Typed::String(_) => todo!(),
 			Typed::Identifier(s, e) => match scope.get(s) {
 				Some(loc) => match (&e.inputs[..], &e.outputs[..]) {
 					([], [t]) => vec![Copy(*loc, 0, t.size_of())],
