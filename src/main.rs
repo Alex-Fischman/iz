@@ -50,13 +50,13 @@ fn test() {
 			Rewritten::Number(1),
 			Rewritten::Identifier("add".to_string()),
 			Rewritten::Identifier("call".to_string()),
-			Rewritten::Declaration("a".to_string()),
+			Rewritten::Declaration(0),
 		])
 	);
 	let typer_test = "{1 2} call add call a := 2 a".chars().collect::<Vec<char>>();
 	let ts = new_scope(None); // typer generates a floating scope
 	let ts = new_scope(Some(ts));
-	set_var(ts.clone(), "a".to_string(), Int);
+	set_var(ts.clone(), 0, Int);
 	assert_eq!(
 		typer(&rewriter(&parser(&tokenizer(&typer_test)))),
 		Typed::Block(
@@ -85,15 +85,15 @@ fn test() {
 					),
 				),
 				Typed::Number(2),
-				Typed::Assignment("a".to_string(), Int),
-				Typed::Identifier("a".to_string(), Effect::literal(Int)),
+				Typed::Assignment(0, Int),
+				Typed::Variable(0, Int),
 			],
 			Effect::new(vec![], vec![Int, Int]),
 			ts,
 		)
 	);
 	let run_test: Vec<char> =
-		"a := add@(1 2) 2 2 b := add@() c := 3 + 2 {1 2} call a b c".chars().collect();
+		"a := add@(1 2) 2 2 b := 0 b = add@() c := 3 + 2 {1 2} call a b c".chars().collect();
 	let mut stack = Stack::new();
 	[1i64, 2, 3, 4, 5].into_iter().for_each(|v| stack.push(v));
 	assert_eq!(run(&compile(&typer(&rewriter(&parser(&tokenizer(&run_test)))))), stack);
@@ -322,30 +322,41 @@ enum Rewritten {
 	Block(Vec<Rewritten>),
 	Identifier(String),
 	Number(i64),
-	Declaration(String),
-	Assignment(String),
+	Variable(usize),
+	Declaration(usize),
+	Assignment(usize),
 }
 
 fn rewriter(trees: &[Parsed]) -> Rewritten {
-	fn rewriter(trees: &[Parsed]) -> Vec<Rewritten> {
+	fn rewriter(trees: &[Parsed], vars: &mut Vec<String>) -> Vec<Rewritten> {
 		let mut out = vec![];
 		for tree in trees {
 			match tree {
-				Parsed::Brackets(Bracket::Round, cs) => out.extend(rewriter(cs)),
+				Parsed::Brackets(Bracket::Round, cs) => out.extend(rewriter(cs, vars)),
 				Parsed::Brackets(Bracket::Curly, cs) => {
-					out.push(Rewritten::Block(rewriter(cs)));
+					out.push(Rewritten::Block(rewriter(cs, vars)));
 				}
 				Parsed::Brackets(Bracket::Square, _cs) => todo!(),
 				Parsed::String(_) => todo!(),
-				Parsed::Identifier(i) => out.push(Rewritten::Identifier(i.clone())),
+				Parsed::Identifier(i) => match vars.iter().rposition(|j| i == j) {
+					Some(v) => out.push(Rewritten::Variable(v)),
+					None => out.push(Rewritten::Identifier(i.clone())),
+				},
 				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
 				Parsed::Operator(i, cs) => match i.as_str() {
 					":=" | "=" => match &cs[..] {
 						[Parsed::Identifier(v), rhs] => {
-							out.append(&mut rewriter(&[rhs.clone()]));
+							out.append(&mut rewriter(&[rhs.clone()], vars));
+							if i == ":=" {
+								vars.push(v.clone());
+							}
 							out.push(match i.as_str() {
-								":=" => Rewritten::Declaration(v.clone()),
-								"=" => Rewritten::Assignment(v.clone()),
+								":=" => Rewritten::Declaration(
+									vars.iter().rposition(|j| v == j).unwrap(),
+								),
+								"=" => Rewritten::Assignment(
+									vars.iter().rposition(|j| v == j).unwrap(),
+								),
 								_ => unreachable!(),
 							});
 						}
@@ -358,7 +369,7 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 							.unwrap();
 						let mut cs = cs.clone();
 						cs.reverse();
-						out.append(&mut rewriter(&cs));
+						out.append(&mut rewriter(&cs, vars));
 						out.push(Rewritten::Identifier(operator.1.to_string()));
 						out.push(Rewritten::Identifier("call".to_string()));
 					}
@@ -367,7 +378,7 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 		}
 		out
 	}
-	Rewritten::Block(rewriter(trees))
+	Rewritten::Block(rewriter(trees, &mut vec![]))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -375,7 +386,8 @@ enum Typed {
 	Block(Vec<Typed>, Effect, Scope),
 	Identifier(String, Effect),
 	Number(i64),
-	Assignment(String, Type),
+	Variable(usize, Type),
+	Assignment(usize, Type),
 }
 
 impl Typed {
@@ -383,8 +395,9 @@ impl Typed {
 		match self {
 			Typed::Block(_, e, _) => Effect::function(e.inputs.clone(), e.outputs.clone()),
 			Typed::Identifier(_, e) => e.clone(),
-			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
 			Typed::Number(_) => Effect::literal(Int),
+			Typed::Variable(_, t) => Effect::new(vec![], vec![t.clone()]),
+			Typed::Assignment(_, t) => Effect::new(vec![t.clone()], vec![]),
 		}
 	}
 }
@@ -501,8 +514,8 @@ impl TypeVars {
 	fn substitute(&self, typed: &mut Typed) {
 		match typed {
 			Typed::Block(_, e, _) | Typed::Identifier(_, e) => *e = self.substitute_effect(e),
-			Typed::Assignment(_, t) => *t = self.substitute_type(t),
 			Typed::Number(_) => {}
+			Typed::Variable(_, t) | Typed::Assignment(_, t) => *t = self.substitute_type(t),
 		}
 		if let Typed::Block(cs, _, scope) = typed {
 			scope.borrow_mut().vars.values_mut().for_each(|t| *t = self.substitute_type(t));
@@ -515,7 +528,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc}; // avoiding HashMap to 
 type Scope = Rc<RefCell<S>>;
 #[derive(Clone, Debug, PartialEq)]
 struct S {
-	vars: BTreeMap<String, Type>,
+	vars: BTreeMap<usize, Type>,
 	parent: Option<Scope>,
 }
 
@@ -523,16 +536,16 @@ fn new_scope(parent: Option<Scope>) -> Scope {
 	Rc::new(RefCell::new(S { vars: BTreeMap::new(), parent }))
 }
 
-fn set_var(scope: Scope, name: String, value: Type) {
-	find_scope(scope.clone(), &name).unwrap_or(scope).borrow_mut().vars.insert(name, value);
+fn set_var(scope: Scope, name: usize, value: Type) {
+	find_scope(scope.clone(), name).unwrap_or(scope).borrow_mut().vars.insert(name, value);
 }
 
-fn get_var(scope: Scope, name: &str) -> Option<Type> {
-	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).cloned()
+fn get_var(scope: Scope, name: usize) -> Option<Type> {
+	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(&name).cloned()
 }
 
-fn find_scope(scope: Scope, name: &str) -> Option<Scope> {
-	if scope.borrow().vars.contains_key(name) {
+fn find_scope(scope: Scope, name: usize) -> Option<Scope> {
+	if scope.borrow().vars.contains_key(&name) {
 		Some(scope)
 	} else if let Some(parent) = &scope.borrow().parent {
 		find_scope(parent.clone(), name)
@@ -583,23 +596,18 @@ fn typer(tree: &Rewritten) -> Typed {
 						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
 						vec![],
 					),
-					i => match get_var(scope, i) {
-						Some(v) => Effect::literal(v),
-						None => todo!("could not type {:?}", i),
-					},
+					i => todo!("could not type {:?}", i),
 				},
 			),
 			Rewritten::Number(n) => Typed::Number(*n),
-			Rewritten::Declaration(i) => {
-				if get_var(scope.clone(), i).is_some() {
-					todo!("redefined local variables")
-				}
-				set_var(scope, i.clone(), vars.new_var());
-				Typed::Assignment(i.clone(), vars.old_var()) // Typed::Block handles allocation
+			Rewritten::Variable(v) => Typed::Variable(*v, get_var(scope, *v).unwrap()),
+			Rewritten::Declaration(v) => {
+				set_var(scope, *v, vars.new_var());
+				Typed::Assignment(*v, vars.old_var()) // Typed::Block handles allocation
 			}
-			Rewritten::Assignment(i) => match get_var(scope, i) {
-				Some(v) => Typed::Assignment(i.clone(), v),
-				None => todo!("could not type {:?}", i),
+			Rewritten::Assignment(v) => match get_var(scope, *v) {
+				Some(t) => Typed::Assignment(*v, t),
+				None => todo!("could not type variable"),
 			},
 		};
 		effect.compose(&out.get_effect(), vars);
@@ -649,7 +657,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	fn compile(
 		tree: &Typed,
 		labels: &mut i64,
-		scope: &mut BTreeMap<String, usize>,
+		scope: &mut BTreeMap<usize, usize>, // from variable index to stack offset
 	) -> Vec<Operation> {
 		let out = match tree {
 			Typed::Block(cs, e, typed_scope) => {
@@ -663,7 +671,7 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				}
 				let mut offset = 0;
 				for (k, v) in &typed_scope.borrow().vars {
-					s.insert(k.to_string(), offset + args_size);
+					s.insert(*k, offset + args_size);
 					offset += v.size_of();
 				}
 
@@ -674,48 +682,43 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 
 				block(code, rets_size, labels)
 			}
-			Typed::Identifier(s, e) => match scope.get(s) {
-				Some(loc) => match (&e.inputs[..], &e.outputs[..]) {
-					([], [t]) => vec![Copy(*loc, 0, t.size_of())],
-					_ => unreachable!(),
-				},
-				None => match (s.as_str(), &e.inputs[..], &e.outputs[..]) {
-					(s, [], [Block(Effect { inputs, outputs })]) => block(
-						match (s, &inputs[..], &outputs[..]) {
-							("neg", [Int], [Int]) => vec![IntNeg],
-							("_not_", [Bool], [Bool]) => vec![BoolNot],
-							("mul", [Int, Int], [Int]) => vec![IntMul],
-							("add", [Int, Int], [Int]) => vec![IntAdd],
-							("eq", [Int, Int], [Bool]) => vec![IntEq],
-							("eq", [Bool, Bool], [Bool]) => vec![BoolEq],
-							("ne", [Int, Int], [Bool]) => vec![IntEq, BoolNot],
-							("ne", [Bool, Bool], [Bool]) => vec![BoolEq, BoolNot],
-							("lt", [Int, Int], [Bool]) => vec![IntLt],
-							("gt", [Int, Int], [Bool]) => vec![IntGt],
-							("le", [Int, Int], [Bool]) => vec![IntGt, BoolNot],
-							("ge", [Int, Int], [Bool]) => vec![IntLt, BoolNot],
-							("_and_", [Bool, Bool], [Bool]) => vec![BoolAnd],
-							("_or_", [Bool, Bool], [Bool]) => vec![BoolOr],
-							(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
-						},
-						outputs.iter().map(Type::size_of).sum(),
-						labels,
-					),
-					("call", inputs, _) => {
-						let ret = *labels;
-						*labels += 1;
-						let args_size = inputs.iter().map(Type::size_of).sum();
-						vec![IntPush(ret), Move(0, args_size, 8), Goto, Label(ret)]
-					}
-					("false", [], [Bool]) => vec![BoolPush(false)],
-					("true", [], [Bool]) => vec![BoolPush(true)],
-					("nop", [], []) => vec![],
-					(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
-				},
+			Typed::Identifier(s, e) => match (s.as_str(), &e.inputs[..], &e.outputs[..]) {
+				(s, [], [Block(Effect { inputs, outputs })]) => block(
+					match (s, &inputs[..], &outputs[..]) {
+						("neg", [Int], [Int]) => vec![IntNeg],
+						("_not_", [Bool], [Bool]) => vec![BoolNot],
+						("mul", [Int, Int], [Int]) => vec![IntMul],
+						("add", [Int, Int], [Int]) => vec![IntAdd],
+						("eq", [Int, Int], [Bool]) => vec![IntEq],
+						("eq", [Bool, Bool], [Bool]) => vec![BoolEq],
+						("ne", [Int, Int], [Bool]) => vec![IntEq, BoolNot],
+						("ne", [Bool, Bool], [Bool]) => vec![BoolEq, BoolNot],
+						("lt", [Int, Int], [Bool]) => vec![IntLt],
+						("gt", [Int, Int], [Bool]) => vec![IntGt],
+						("le", [Int, Int], [Bool]) => vec![IntGt, BoolNot],
+						("ge", [Int, Int], [Bool]) => vec![IntLt, BoolNot],
+						("_and_", [Bool, Bool], [Bool]) => vec![BoolAnd],
+						("_or_", [Bool, Bool], [Bool]) => vec![BoolOr],
+						(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
+					},
+					outputs.iter().map(Type::size_of).sum(),
+					labels,
+				),
+				("call", inputs, _) => {
+					let ret = *labels;
+					*labels += 1;
+					let args_size = inputs.iter().map(Type::size_of).sum();
+					vec![IntPush(ret), Move(0, args_size, 8), Goto, Label(ret)]
+				}
+				("false", [], [Bool]) => vec![BoolPush(false)],
+				("true", [], [Bool]) => vec![BoolPush(true)],
+				("nop", [], []) => vec![],
+				(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
 			},
 			Typed::Number(n) => vec![IntPush(*n)],
-			Typed::Assignment(s, t) => {
-				let (ptr, size) = (*scope.get(s).unwrap(), t.size_of());
+			Typed::Variable(v, t) => vec![Copy(*scope.get(v).unwrap(), 0, t.size_of())],
+			Typed::Assignment(v, t) => {
+				let (ptr, size) = (*scope.get(v).unwrap(), t.size_of());
 				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
 			}
 		};

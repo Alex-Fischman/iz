@@ -1,4 +1,5 @@
-dup := {a := nop a a}
-dup@1
-dup@2
-dup@false
+a := 2
+{
+	a := 3
+}
+a
