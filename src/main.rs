@@ -570,12 +570,14 @@ fn typer(tree: &Rewritten) -> Typed {
 		let out = match tree {
 			Rewritten::Block(cs, scope) => {
 				let mut e = Effect::new(vec![], vec![]);
+				let mut ls = BTreeMap::new();
 				let mut locals = locals.clone();
 				for v in scope.borrow().vars.values() {
-					locals.insert(*v, vars.new_var());
+					ls.insert(*v, vars.new_var());
+					locals.insert(*v, vars.old_var());
 				}
 				let cs = cs.iter().map(|c| typer(c, vars, &mut e, &mut locals)).collect();
-				Typed::Block(cs, e, locals)
+				Typed::Block(cs, e, ls)
 			}
 			Rewritten::Identifier(i) => Typed::Identifier(
 				i.clone(),
