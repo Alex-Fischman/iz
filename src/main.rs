@@ -96,8 +96,15 @@ fn test() {
 			BTreeMap::from([(1, Int)]),
 		)
 	);
-	let run_test: Vec<char> =
-		"a := add@(1 2) 2 2 b := 0 b = add@() c := 3 + 2 {1 2} call a b c".chars().collect();
+	let run_test: Vec<char> = "
+		a := add@(1 2) 2 2
+		b := 0 b = add@()
+		c := 3 + 2 {1 2} call
+		a b c
+		c := 2
+	"
+	.chars()
+	.collect();
 	let mut stack = Stack::new();
 	[1i64, 2, 3, 4, 5].into_iter().for_each(|v| stack.push(v));
 	assert_eq!(run(&compile(&typer(&rewriter(&parser(&tokenizer(&run_test)))))), stack);
@@ -385,36 +392,29 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 					None => out.push(Rewritten::Identifier(i.clone())),
 				},
 				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
-				Parsed::Operator(i, cs) => {
-					let operator = OPERATORS
-						.iter()
-						.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
-						.unwrap();
-					let mut cs = cs.clone();
-					cs.reverse();
-					out.append(&mut rewriter(&cs, vars.clone()));
-					match i.as_str() {
-						":=" => {
-							let v = match out.pop() {
-								Some(Rewritten::Identifier(v)) => v,
-								t => panic!("expected var name, found {:?}", t),
-							};
-							new_var(vars.clone(), v.clone());
-							out.push(Rewritten::Assignment(get_var(vars.clone(), &v).unwrap()));
+				Parsed::Operator(i, cs) => match i.as_str() {
+					":=" | "=" => match &cs[..] {
+						[Parsed::Identifier(v), rhs] => {
+							out.append(&mut rewriter(&[rhs.clone()], vars.clone()));
+							if i == ":=" {
+								new_var(vars.clone(), v.clone());
+							}
+							out.push(Rewritten::Assignment(get_var(vars.clone(), v).unwrap()));
 						}
-						"=" => {
-							let v = match out.pop() {
-								Some(Rewritten::Variable(v)) => v,
-								t => panic!("expected var name, found {:?}", t),
-							};
-							out.push(Rewritten::Assignment(v));
-						}
-						_ => {
-							out.push(Rewritten::Identifier(operator.1.to_string()));
-							out.push(Rewritten::Identifier("call".to_string()));
-						}
-					};
-				}
+						cs => panic!("expected one var name and one value, found {:?}", cs),
+					},
+					_ => {
+						let operator = OPERATORS
+							.iter()
+							.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
+							.unwrap();
+						let mut cs = cs.clone();
+						cs.reverse();
+						out.append(&mut rewriter(&cs, vars.clone()));
+						out.push(Rewritten::Identifier(operator.1.to_string()));
+						out.push(Rewritten::Identifier("call".to_string()));
+					}
+				},
 			}
 		}
 		out

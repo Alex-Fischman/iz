@@ -1,2 +1,4 @@
-dup := { a := () a a }
+dup := { a := 3 a a }
+dup := { 3 }
+
 dup@3
