@@ -666,20 +666,20 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 	fn compile(
 		tree: &Typed,
 		labels: &mut i64,
-		scope: &mut BTreeMap<usize, usize>, // from variable index to stack offset
+		locals: &mut BTreeMap<usize, usize>, // from variable index to stack offset
 	) -> Vec<Operation> {
 		let out = match tree {
-			Typed::Block(cs, e, locals) => {
+			Typed::Block(cs, e, ls) => {
 				let args_size = e.inputs.iter().map(Type::size_of).sum();
 				let rets_size = e.outputs.iter().map(Type::size_of).sum();
-				let vars_size = locals.values().map(Type::size_of).sum();
+				let vars_size = ls.values().map(Type::size_of).sum();
 
-				let mut s = scope.clone();
+				let mut s = locals.clone();
 				for v in s.values_mut() {
 					*v += vars_size + 8;
 				}
 				let mut offset = 0;
-				for (k, v) in locals {
+				for (k, v) in ls {
 					s.insert(*k, offset + args_size);
 					offset += v.size_of();
 				}
@@ -725,14 +725,14 @@ fn compile(tree: &Typed) -> Vec<Operation> {
 				(s, i, o) => todo!("could not compile {:?} {:?}->{:?}", s, i, o),
 			},
 			Typed::Number(n) => vec![IntPush(*n)],
-			Typed::Variable(v, t) => vec![Copy(*scope.get(v).unwrap(), 0, t.size_of())],
+			Typed::Variable(v, t) => vec![Copy(*locals.get(v).unwrap(), 0, t.size_of())],
 			Typed::Assignment(v, t) => {
-				let (ptr, size) = (*scope.get(v).unwrap(), t.size_of());
+				let (ptr, size) = (*locals.get(v).unwrap(), t.size_of());
 				vec![Move(ptr, 0, size), Free(size), Move(0, ptr - size, size)]
 			}
 		};
 		let e = tree.get_effect();
-		for v in scope.values_mut() {
+		for v in locals.values_mut() {
 			*v -= e.inputs.iter().map(Type::size_of).sum::<usize>();
 			*v += e.outputs.iter().map(Type::size_of).sum::<usize>();
 		}
