@@ -342,14 +342,15 @@ type Scope = Rc<RefCell<S>>;
 #[derive(Clone, Debug, PartialEq)]
 struct S {
 	vars: BTreeMap<String, usize>,
+	olds: Vec<usize>, // hold variables that go out of scope
 	parent: Option<Scope>,
 }
 
 fn new_scope(parent: Option<Scope>) -> Scope {
-	Rc::new(RefCell::new(S { vars: BTreeMap::new(), parent }))
+	Rc::new(RefCell::new(S { vars: BTreeMap::new(), olds: vec![], parent }))
 }
 
-fn new_var(scope: Scope, name: String) {
+fn new_var(scope: Scope, name: String) -> Option<usize> {
 	fn highest_index(scope: Scope, max: usize) -> usize {
 		let max = max.max(*scope.borrow().vars.values().max().unwrap_or(&0));
 		match &scope.borrow().parent {
@@ -358,7 +359,7 @@ fn new_var(scope: Scope, name: String) {
 		}
 	}
 	let i = highest_index(scope.clone(), 0);
-	scope.borrow_mut().vars.insert(name, i + 1);
+	scope.borrow_mut().vars.insert(name, i + 1)
 }
 
 fn get_var(scope: Scope, name: &String) -> Option<usize> {
@@ -397,7 +398,9 @@ fn rewriter(trees: &[Parsed]) -> Rewritten {
 						[Parsed::Identifier(v), rhs] => {
 							out.append(&mut rewriter(&[rhs.clone()], vars.clone()));
 							if i == ":=" {
-								new_var(vars.clone(), v.clone());
+								if let Some(old) = new_var(vars.clone(), v.clone()) {
+									vars.borrow_mut().olds.push(old);
+								}
 							}
 							out.push(Rewritten::Assignment(get_var(vars.clone(), v).unwrap()));
 						}
@@ -579,7 +582,8 @@ fn typer(tree: &Rewritten) -> Typed {
 				let mut e = Effect::new(vec![], vec![]);
 				let mut ls = BTreeMap::new();
 				let mut locals = locals.clone();
-				for v in scope.borrow().vars.values() {
+				let scope = scope.borrow();
+				for v in scope.vars.values().chain(&scope.olds) {
 					ls.insert(*v, vars.new_var());
 					locals.insert(*v, vars.old_var());
 				}
