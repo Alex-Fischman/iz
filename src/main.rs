@@ -619,10 +619,7 @@ fn typer(tree: &Rewritten) -> Typed {
 					"lt" | "gt" | "le" | "ge" => Effect::function(vec![Int, Int], vec![Bool]),
 					"_and_" | "_or_" => Effect::function(vec![Bool, Bool], vec![Bool]),
 					"_if_" | "_else_" => todo!("optionals"),
-					"_while_" => Effect::function(
-						vec![Block(Effect::literal(Bool)), Block(Effect::new(vec![], vec![]))],
-						vec![],
-					),
+					"_while_" => todo!("multiple variable length type variables?"),
 					i => todo!("could not type {:?}", i),
 				},
 			),
