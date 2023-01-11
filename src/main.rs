@@ -337,63 +337,6 @@ enum Rewritten {
 	Number(i64),
 }
 
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc}; // not using HashMap to avoid random order
-type Scope = Rc<RefCell<S>>;
-#[derive(Clone, Debug, PartialEq)]
-struct S {
-	vars: BTreeMap<String, usize>,
-	olds: Vec<usize>, // hold variables that go out of scope
-	parent: Option<Scope>,
-}
-
-fn new_scope(parent: Option<Scope>) -> Scope {
-	Rc::new(RefCell::new(S { vars: BTreeMap::new(), olds: vec![], parent }))
-}
-
-fn new_var(scope: Scope, name: String) -> Option<usize> {
-	fn highest_index(scope: Scope, max: usize) -> usize {
-		let max = max.max(*scope.borrow().vars.values().max().unwrap_or(&0));
-		match &scope.borrow().parent {
-			Some(parent) => highest_index(parent.clone(), max),
-			None => max,
-		}
-	}
-	let i = highest_index(scope.clone(), 0);
-	scope.borrow_mut().vars.insert(name, i + 1)
-}
-
-fn get_var(scope: Scope, name: &String) -> Option<usize> {
-	fn find_scope(scope: Scope, name: &str) -> Option<Scope> {
-		if scope.borrow().vars.contains_key(name) {
-			Some(scope)
-		} else if let Some(parent) = &scope.borrow().parent {
-			find_scope(parent.clone(), name)
-		} else {
-			None
-		}
-	}
-	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).copied()
-}
-
-fn get_var_name(scope: Scope, value: usize) -> Option<String> {
-	fn find_scope(scope: Scope, value: usize) -> Option<Scope> {
-		if scope.borrow().vars.values().any(|v| *v == value) {
-			Some(scope)
-		} else if let Some(parent) = &scope.borrow().parent {
-			find_scope(parent.clone(), value)
-		} else {
-			None
-		}
-	}
-	find_scope(scope.clone(), value).unwrap_or(scope).borrow().vars.iter().find_map(|(k, v)| {
-		if *v == value {
-			Some(k.clone())
-		} else {
-			None
-		}
-	})
-}
-
 fn rewriter(trees: &[Parsed]) -> Vec<Rewritten> {
 	let mut out = vec![];
 	for tree in trees {
@@ -429,6 +372,68 @@ enum Scoped {
 	Assignment(usize),
 }
 
+use std::{cell::RefCell, rc::Rc};
+type Scope = Rc<RefCell<S>>;
+#[derive(Clone, Debug, PartialEq)]
+struct S {
+	vars: Vec<(String, usize)>,
+	parent: Option<Scope>,
+}
+
+fn new_scope(parent: Option<Scope>) -> Scope {
+	Rc::new(RefCell::new(S { vars: vec![], parent }))
+}
+
+fn new_var(scope: Scope, name: String) {
+	fn highest_index(scope: Scope, max: usize) -> usize {
+		let max = max.max(*scope.borrow().vars.iter().map(|(_, v)| v).max().unwrap_or(&0));
+		match &scope.borrow().parent {
+			Some(parent) => highest_index(parent.clone(), max),
+			None => max,
+		}
+	}
+	let i = highest_index(scope.clone(), 0);
+	scope.borrow_mut().vars.insert(0, (name, i + 1));
+}
+
+fn get_var(scope: Scope, name: &String) -> Option<usize> {
+	fn find_scope(scope: Scope, name: &str) -> Option<Scope> {
+		if scope.borrow().vars.iter().any(|(k, _)| k == name) {
+			Some(scope)
+		} else if let Some(parent) = &scope.borrow().parent {
+			find_scope(parent.clone(), name)
+		} else {
+			None
+		}
+	}
+	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.iter().find_map(|(k, v)| {
+		if k == name {
+			Some(*v)
+		} else {
+			None
+		}
+	})
+}
+
+fn get_var_name(scope: Scope, value: usize) -> Option<String> {
+	fn find_scope(scope: Scope, value: usize) -> Option<Scope> {
+		if scope.borrow().vars.iter().any(|(_, v)| *v == value) {
+			Some(scope)
+		} else if let Some(parent) = &scope.borrow().parent {
+			find_scope(parent.clone(), value)
+		} else {
+			None
+		}
+	}
+	find_scope(scope.clone(), value).unwrap_or(scope).borrow().vars.iter().find_map(|(k, v)| {
+		if *v == value {
+			Some(k.clone())
+		} else {
+			None
+		}
+	})
+}
+
 fn scoper(trees: &[Rewritten]) -> Scoped {
 	fn scoper(trees: &[Rewritten], vars: Scope) -> Vec<Scoped> {
 		let mut out = vec![];
@@ -454,9 +459,7 @@ fn scoper(trees: &[Rewritten]) -> Scoped {
 							};
 							skip_next = true;
 							if i == ":=" {
-								if let Some(old) = new_var(vars.clone(), v.clone()) {
-									vars.borrow_mut().olds.push(old);
-								}
+								new_var(vars.clone(), v.clone());
 							}
 							out.push(Scoped::Assignment(get_var(vars.clone(), &v).unwrap()));
 						}
@@ -477,6 +480,7 @@ fn scoper(trees: &[Rewritten]) -> Scoped {
 	Scoped::Block(cs, s)
 }
 
+use std::collections::BTreeMap; // avoiding random order of HashMap
 #[derive(Clone, Debug, PartialEq)]
 enum Typed {
 	Block(Vec<Typed>, Effect, BTreeMap<usize, Type>),
@@ -633,7 +637,7 @@ fn typer(tree: &Scoped) -> Typed {
 				let mut ls = BTreeMap::new();
 				let mut locals = locals.clone();
 				let scope = scope.borrow();
-				for v in scope.vars.values().chain(&scope.olds) {
+				for (_, v) in &scope.vars {
 					ls.insert(*v, vars.new_var());
 					locals.insert(*v, vars.old_var());
 				}
