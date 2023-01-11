@@ -4,13 +4,7 @@ fn main() {
 	let chars: Vec<char> =
 		std::fs::read_to_string(file).expect("could not read file").chars().collect();
 
-	let tokens = tokenizer(&chars);
-	let trees = parser(&tokens);
-	let trees = rewriter(&trees);
-	let tree = scoper(&trees);
-	let tree = typer(&tree);
-	let code = compile(&tree);
-	let stack = run(&code);
+	let stack = run(&compile(&typer(&scoper(&rewriter(&parser(&tokenizer(&chars)))))));
 	println!("{:?}", stack);
 }
 
@@ -199,16 +193,12 @@ fn tokenizer(chars: &[char]) -> Vec<Token> {
 				{
 					i += 1;
 				}
-
 				tokens.push(Token::Identifier(chars[start..i].iter().collect()));
-
 				i -= 1;
 			}
 		}
-
 		i += 1;
 	}
-
 	for token in &mut tokens {
 		if let Token::Identifier(i) = token {
 			let chars: Vec<char> = i.chars().collect();
@@ -474,7 +464,6 @@ fn scoper(trees: &[Rewritten]) -> Scoped {
 		}
 		out
 	}
-
 	let s = new_scope(None);
 	let cs = scoper(trees, s.clone());
 	Scoped::Block(cs, s)
@@ -844,7 +833,6 @@ fn run(code: &[Operation]) -> Stack {
 	// for (i, o) in code.iter().enumerate() {
 	// 	println!("{}: {:?}", i, o);
 	// }
-
 	let mut stack = Stack::new();
 	let mut i = 0;
 	while i < code.len() {
