@@ -108,6 +108,7 @@ fn test() {
 	.collect();
 	let mut stack = Stack::new();
 	[1i64, 2, 3, 4, 5].into_iter().for_each(|v| stack.push(v));
+	println!("{:?}", scoper(&rewriter(&parser(&tokenizer(&run_test)))));
 	assert_eq!(run(&compile(&typer(&scoper(&rewriter(&parser(&tokenizer(&run_test))))))), stack);
 }
 
@@ -374,6 +375,25 @@ fn get_var(scope: Scope, name: &String) -> Option<usize> {
 	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).copied()
 }
 
+fn get_var_name(scope: Scope, value: usize) -> Option<String> {
+	fn find_scope(scope: Scope, value: usize) -> Option<Scope> {
+		if scope.borrow().vars.values().any(|v| *v == value) {
+			Some(scope)
+		} else if let Some(parent) = &scope.borrow().parent {
+			find_scope(parent.clone(), value)
+		} else {
+			None
+		}
+	}
+	find_scope(scope.clone(), value).unwrap_or(scope).borrow().vars.iter().find_map(|(k, v)| {
+		if *v == value {
+			Some(k.clone())
+		} else {
+			None
+		}
+	})
+}
+
 fn rewriter(trees: &[Parsed]) -> Vec<Rewritten> {
 	let mut out = vec![];
 	for tree in trees {
@@ -427,6 +447,9 @@ fn scoper(trees: &[Rewritten]) -> Scoped {
 						":=" | "=" => {
 							let v = match out.pop() {
 								Some(Scoped::Identifier(i)) => i,
+								Some(Scoped::Variable(v)) => {
+									get_var_name(vars.clone(), v).unwrap()
+								}
 								_ => panic!("expected var name"),
 							};
 							skip_next = true;
@@ -437,16 +460,12 @@ fn scoper(trees: &[Rewritten]) -> Scoped {
 							}
 							out.push(Scoped::Assignment(get_var(vars.clone(), &v).unwrap()));
 						}
-						_ => out.push(Scoped::Identifier(i.clone())),
+						_ => match get_var(vars.clone(), i) {
+							Some(v) => out.push(Scoped::Variable(v)),
+							None => out.push(Scoped::Identifier(i.clone())),
+						},
 					},
 					Rewritten::Number(n) => out.push(Scoped::Number(*n)),
-				}
-			}
-		}
-		for tree in &mut out {
-			if let Scoped::Identifier(i) = tree {
-				if let Some(v) = get_var(vars.clone(), i) {
-					*tree = Scoped::Variable(v);
 				}
 			}
 		}
