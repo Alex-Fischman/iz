@@ -6,7 +6,8 @@ fn main() {
 
 	let tokens = tokenizer(&chars);
 	let trees = parser(&tokens);
-	let tree = rewriter(&trees);
+	let trees = rewriter(&trees);
+	let tree = scoper(&trees);
 	let tree = typer(&tree);
 	let code = compile(&tree);
 	let stack = run(&code);
@@ -30,39 +31,39 @@ fn test() {
 	let s = new_scope(None);
 	new_var(s.clone(), "a".to_string());
 	assert_eq!(
-		rewriter(&parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>()))),
-		Rewritten::Block(
+		scoper(&rewriter(&parser(&tokenizer(&parse_test.chars().collect::<Vec<char>>())))),
+		Scoped::Block(
 			vec![
-				Rewritten::Number(3),
-				Rewritten::Number(2),
-				Rewritten::Identifier("true".to_string()),
-				Rewritten::Identifier("_if_".to_string()),
-				Rewritten::Identifier("call".to_string()),
-				Rewritten::Identifier("_else_".to_string()),
-				Rewritten::Identifier("call".to_string()),
-				Rewritten::Number(1),
-				Rewritten::Identifier("false".to_string()),
-				Rewritten::Identifier("_if_".to_string()),
-				Rewritten::Identifier("call".to_string()),
-				Rewritten::Identifier("_else_".to_string()),
-				Rewritten::Identifier("call".to_string()),
-				Rewritten::Block(vec![Rewritten::Number(2)], new_scope(Some(s.clone()))),
-				Rewritten::Number(3),
-				Rewritten::Number(2),
-				Rewritten::Identifier("mul".to_string()),
-				Rewritten::Identifier("call".to_string()),
-				Rewritten::Number(1),
-				Rewritten::Identifier("add".to_string()),
-				Rewritten::Identifier("call".to_string()),
-				Rewritten::Assignment(1),
-				Rewritten::Variable(1),
+				Scoped::Number(3),
+				Scoped::Number(2),
+				Scoped::Identifier("true".to_string()),
+				Scoped::Identifier("_if_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Identifier("_else_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Number(1),
+				Scoped::Identifier("false".to_string()),
+				Scoped::Identifier("_if_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Identifier("_else_".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Block(vec![Scoped::Number(2)], new_scope(Some(s.clone()))),
+				Scoped::Number(3),
+				Scoped::Number(2),
+				Scoped::Identifier("mul".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Number(1),
+				Scoped::Identifier("add".to_string()),
+				Scoped::Identifier("call".to_string()),
+				Scoped::Assignment(1),
+				Scoped::Variable(1),
 			],
 			s
 		)
 	);
 	let typer_test = "{1 2} call add call a := 2 a".chars().collect::<Vec<char>>();
 	assert_eq!(
-		typer(&rewriter(&parser(&tokenizer(&typer_test)))),
+		typer(&scoper(&rewriter(&parser(&tokenizer(&typer_test))))),
 		Typed::Block(
 			vec![
 				Typed::Block(
@@ -97,17 +98,17 @@ fn test() {
 		)
 	);
 	let run_test: Vec<char> = "
-		a := add@(1 2) 2 2
-		b := 0 b = add@()
-		c := 3 + 2 {1 2} call
-		a b c
+		a := add@(1 2)
+		b := 0 2 2 b = add@()
+		c := 3 + 2
+		{1 2} call a b c
 		c := 2
 	"
 	.chars()
 	.collect();
 	let mut stack = Stack::new();
 	[1i64, 2, 3, 4, 5].into_iter().for_each(|v| stack.push(v));
-	assert_eq!(run(&compile(&typer(&rewriter(&parser(&tokenizer(&run_test)))))), stack);
+	assert_eq!(run(&compile(&typer(&scoper(&rewriter(&parser(&tokenizer(&run_test))))))), stack);
 }
 
 #[derive(Debug, PartialEq)]
@@ -330,11 +331,9 @@ fn parser(tokens: &[Token]) -> Vec<Parsed> {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Rewritten {
-	Block(Vec<Rewritten>, Scope),
+	Block(Vec<Rewritten>),
 	Identifier(String),
 	Number(i64),
-	Variable(usize),
-	Assignment(usize),
 }
 
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc}; // not using HashMap to avoid random order
@@ -375,56 +374,88 @@ fn get_var(scope: Scope, name: &String) -> Option<usize> {
 	find_scope(scope.clone(), name).unwrap_or(scope).borrow().vars.get(name).copied()
 }
 
-fn rewriter(trees: &[Parsed]) -> Rewritten {
-	fn rewriter(trees: &[Parsed], vars: Scope) -> Vec<Rewritten> {
+fn rewriter(trees: &[Parsed]) -> Vec<Rewritten> {
+	let mut out = vec![];
+	for tree in trees {
+		match tree {
+			Parsed::Brackets(Bracket::Round, cs) => out.extend(rewriter(cs)),
+			Parsed::Brackets(Bracket::Curly, cs) => out.push(Rewritten::Block(rewriter(cs))),
+			Parsed::Brackets(Bracket::Square, _cs) => todo!(),
+			Parsed::String(_) => todo!(),
+			Parsed::Identifier(i) => out.push(Rewritten::Identifier(i.clone())),
+			Parsed::Number(n) => out.push(Rewritten::Number(*n)),
+			Parsed::Operator(i, cs) => {
+				let operator = OPERATORS
+					.iter()
+					.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
+					.unwrap();
+				let mut cs = cs.clone();
+				cs.reverse();
+				out.append(&mut rewriter(&cs));
+				out.push(Rewritten::Identifier(operator.1.to_string()));
+				out.push(Rewritten::Identifier("call".to_string()));
+			}
+		}
+	}
+	out
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Scoped {
+	Block(Vec<Scoped>, Scope),
+	Identifier(String),
+	Number(i64),
+	Variable(usize),
+	Assignment(usize),
+}
+
+fn scoper(trees: &[Rewritten]) -> Scoped {
+	fn scoper(trees: &[Rewritten], vars: Scope) -> Vec<Scoped> {
 		let mut out = vec![];
+		let mut skip_next = false;
 		for tree in trees {
-			match tree {
-				Parsed::Brackets(Bracket::Round, cs) => out.extend(rewriter(cs, vars.clone())),
-				Parsed::Brackets(Bracket::Curly, cs) => {
-					let s = new_scope(Some(vars.clone()));
-					let cs = rewriter(cs, s.clone());
-					out.push(Rewritten::Block(cs, s));
-				}
-				Parsed::Brackets(Bracket::Square, _cs) => todo!(),
-				Parsed::String(_) => todo!(),
-				Parsed::Identifier(i) => match get_var(vars.clone(), i) {
-					Some(v) => out.push(Rewritten::Variable(v)),
-					None => out.push(Rewritten::Identifier(i.clone())),
-				},
-				Parsed::Number(n) => out.push(Rewritten::Number(*n)),
-				Parsed::Operator(i, cs) => match i.as_str() {
-					":=" | "=" => match &cs[..] {
-						[Parsed::Identifier(v), rhs] => {
-							out.append(&mut rewriter(&[rhs.clone()], vars.clone()));
+			if skip_next {
+				skip_next = false
+			} else {
+				match tree {
+					Rewritten::Block(cs) => {
+						let s = new_scope(Some(vars.clone()));
+						let cs = scoper(cs, s.clone());
+						out.push(Scoped::Block(cs, s))
+					}
+					Rewritten::Identifier(i) => match i.as_str() {
+						":=" | "=" => {
+							let v = match out.pop() {
+								Some(Scoped::Identifier(i)) => i,
+								_ => panic!("expected var name"),
+							};
+							skip_next = true;
 							if i == ":=" {
 								if let Some(old) = new_var(vars.clone(), v.clone()) {
 									vars.borrow_mut().olds.push(old);
 								}
 							}
-							out.push(Rewritten::Assignment(get_var(vars.clone(), v).unwrap()));
+							out.push(Scoped::Assignment(get_var(vars.clone(), &v).unwrap()));
 						}
-						cs => panic!("expected one var name and one value, found {:?}", cs),
+						_ => out.push(Scoped::Identifier(i.clone())),
 					},
-					_ => {
-						let operator = OPERATORS
-							.iter()
-							.find_map(|(ops, _)| ops.iter().find(|op| op.0 == i))
-							.unwrap();
-						let mut cs = cs.clone();
-						cs.reverse();
-						out.append(&mut rewriter(&cs, vars.clone()));
-						out.push(Rewritten::Identifier(operator.1.to_string()));
-						out.push(Rewritten::Identifier("call".to_string()));
-					}
-				},
+					Rewritten::Number(n) => out.push(Scoped::Number(*n)),
+				}
+			}
+		}
+		for tree in &mut out {
+			if let Scoped::Identifier(i) = tree {
+				if let Some(v) = get_var(vars.clone(), i) {
+					*tree = Scoped::Variable(v);
+				}
 			}
 		}
 		out
 	}
+
 	let s = new_scope(None);
-	let cs = rewriter(trees, s.clone());
-	Rewritten::Block(cs, s)
+	let cs = scoper(trees, s.clone());
+	Scoped::Block(cs, s)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -570,15 +601,15 @@ impl TypeVars {
 	}
 }
 
-fn typer(tree: &Rewritten) -> Typed {
+fn typer(tree: &Scoped) -> Typed {
 	fn typer(
-		tree: &Rewritten,
+		tree: &Scoped,
 		vars: &mut TypeVars,
 		effect: &mut Effect,
 		locals: &mut BTreeMap<usize, Type>,
 	) -> Typed {
 		let out = match tree {
-			Rewritten::Block(cs, scope) => {
+			Scoped::Block(cs, scope) => {
 				let mut e = Effect::new(vec![], vec![]);
 				let mut ls = BTreeMap::new();
 				let mut locals = locals.clone();
@@ -590,7 +621,7 @@ fn typer(tree: &Rewritten) -> Typed {
 				let cs = cs.iter().map(|c| typer(c, vars, &mut e, &mut locals)).collect();
 				Typed::Block(cs, e, ls)
 			}
-			Rewritten::Identifier(i) => Typed::Identifier(
+			Scoped::Identifier(i) => Typed::Identifier(
 				i.clone(),
 				match i.as_str() {
 					"call" => {
@@ -623,9 +654,9 @@ fn typer(tree: &Rewritten) -> Typed {
 					i => todo!("could not type {:?}", i),
 				},
 			),
-			Rewritten::Number(n) => Typed::Number(*n),
-			Rewritten::Variable(v) => Typed::Variable(*v, locals.get(v).unwrap().clone()),
-			Rewritten::Assignment(v) => Typed::Assignment(*v, locals.get(v).unwrap().clone()),
+			Scoped::Number(n) => Typed::Number(*n),
+			Scoped::Variable(v) => Typed::Variable(*v, locals.get(v).unwrap().clone()),
+			Scoped::Assignment(v) => Typed::Assignment(*v, locals.get(v).unwrap().clone()),
 		};
 		effect.compose(&out.get_effect(), vars);
 		out
