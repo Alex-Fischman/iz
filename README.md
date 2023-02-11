@@ -1,4 +1,4 @@
-# iz: The Programming Language (for me)
+# iz: a programming language (for me)
 
 ## Mission Statement: I want to create a language that I, personally, will enjoy using for the foreseeable future.
 
@@ -20,20 +20,3 @@ Here is a list of things that should be possible for users of this programming l
 - Macros? (look at Racket, Rust)
 
 What’s wrong with Lisp? Lisp, while certainly an extremely powerful language for users, makes choices that end up limiting it in quite a few ways. The most obvious is garbage collection, but the real issue with it is that it’s based on a model of computation that isn’t how real computers work.
-
-## Base Language Spec
-
-### Semantics
-Memory Model: stack of 64-bit integers
-Instructions:
-- psh(int): push an int literal
-- add: pop two ints, push their sum
-- neg: pop one int, push its negation
-- ltz: pop one int, push 1 if it is less than zero, 0 otherwise
-- lbl(int): does nothing
-- jmp: pop two ints, if the first is 0 goto the label that holds the value of the second
-
-### Syntax
-Grammar:
-- Integer literals
-- Identifiers
