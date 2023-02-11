@@ -21,9 +21,9 @@ Here is a list of things that should be possible for users of this programming l
 
 What’s wrong with Lisp? Lisp, while certainly an extremely powerful language for users, makes choices that end up limiting it in quite a few ways. The most obvious is garbage collection, but the real issue with it is that it’s based on a model of computation that isn’t how real computers work.
 
-# Base Language Spec
+## Base Language Spec
 
-## Semantics
+### Semantics
 Memory Model: stack of 64-bit integers
 Instructions:
 - psh(int): push an int literal
@@ -33,3 +33,7 @@ Instructions:
 - lbl(int): does nothing
 - jmp: pop two ints, if the first is 0 goto the label that holds the value of the second
 
+### Syntax
+Grammar:
+- Integer literals
+- Identifiers
