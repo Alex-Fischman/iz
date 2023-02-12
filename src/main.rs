@@ -1,31 +1,38 @@
+use std::any::Any;
+use std::fmt::Debug;
+
 #[derive(Debug)]
 struct Tree {
     data: Box<dyn Data>,
     children: Vec<Tree>,
 }
 
-trait Data: std::fmt::Debug + std::any::Any {}
-impl<T: std::fmt::Debug + std::any::Any> Data for T {}
+trait Data: Any + Debug {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl<T: Any + Debug> Data for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
 impl dyn Data {
-    fn is<T: std::any::Any>(&self) -> bool {
-        self.type_id() == std::any::TypeId::of::<T>()
+    fn is<T: Any>(&self) -> bool {
+        self.as_any().is::<T>()
     }
 
-    fn xx<T: std::any::Any>(&self) -> Option<&T> {
-        if self.is::<T>() {
-            unsafe { Some(&*(self as *const dyn Data as *const T)) }
-        } else {
-            None
-        }
+    fn xx<T: Any>(&self) -> Option<&T> {
+        self.as_any().downcast_ref::<T>()
     }
 
-    fn xxx<T: std::any::Any>(&mut self) -> Option<&mut T> {
-        if self.is::<T>() {
-            unsafe { Some(&mut *(self as *mut dyn Data as *mut T)) }
-        } else {
-            None
-        }
+    fn xxx<T: Any>(&mut self) -> Option<&mut T> {
+        self.as_any_mut().downcast_mut::<T>()
     }
 }
 
@@ -58,13 +65,11 @@ fn main() {
         while i < trees.len() {
             match trees[i].data.xx::<char>().cloned() {
                 Some(c) if matches!(c, '_' | 'a' ..= 'z' | 'A' ..= 'Z' | '0' ..= '9') => {
-                    if i == 0 {
+                    if i == 0 || !trees[i - 1].data.is::<String>() {
                         trees[i].data = Box::new(c.to_string());
-                    } else if let Some(s) = trees[i - 1].data.xxx::<String>() {
-                        s.push(c);
-                        trees.remove(i);
                     } else {
-                        trees[i].data = Box::new(c.to_string());
+                        trees[i - 1].data.xxx::<String>().unwrap().push(c);
+                        trees.remove(i);
                     }
                 }
                 _ => i += 1,
