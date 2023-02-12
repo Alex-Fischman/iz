@@ -59,6 +59,25 @@ fn main() {
         children: tokens,
     };
 
+    // --------------------------------------------------------------------------
+
+    // remove comments
+    postorder(&mut tree, |trees| {
+        let mut i = 0;
+        while i < trees.len() {
+            match trees[i].data.xx::<char>() {
+                Some('#') => {
+                    let mut j = i;
+                    while j < trees.len() && trees[j].data.xx::<char>() != Some(&'\n') {
+                        j += 1;
+                    }
+                    trees.drain(i..j);
+                }
+                _ => i += 1,
+            }
+        }
+    });
+
     // group identifiers
     postorder(&mut tree, |trees| {
         let mut i = 0;
@@ -90,19 +109,116 @@ fn main() {
         }
     });
 
-    println!("{tree:#?}");
+    // parse integer literals
+    postorder(&mut tree, |trees| {
+        let mut i = 0;
+        while i < trees.len() {
+            match trees[i].data.xx::<String>().map(|s| s.parse::<i64>()) {
+                Some(Ok(int)) => trees[i].data = Box::new(int),
+                _ => i += 1,
+            }
+        }
+    });
+
+    // convert to ops
+    postorder(&mut tree, |trees| {
+        let mut i = 0;
+        while i < trees.len() {
+            if let Some(int) = trees[i].data.xx::<i64>() {
+                trees[i].data = Box::new(Op::Psh(*int))
+            } else if let Some(s) = trees[i].data.xx::<String>() {
+                trees[i].data = Box::new(match s.as_str() {
+                    "add" => Op::Add,
+                    "neg" => Op::Neg,
+                    "ltz" => Op::Ltz,
+                    "lbl" => {
+                        i += 1;
+                        Op::Lbl(*trees[i].data.xx::<i64>().unwrap())
+                    }
+                    "jmp" => Op::Jmp,
+                    _ => panic!("unknown op"),
+                })
+            } else {
+                panic!("unknown op")
+            }
+            i += 1;
+        }
+    });
+
+    // --------------------------------------------------------------------------
+
+    // interpreter backend
+
+    assert!(tree.data.is::<()>());
+    let program: Vec<Op> = tree
+        .children
+        .iter()
+        .map(|tree| {
+            assert!(tree.children.is_empty());
+            tree.data.xx::<Op>().unwrap().clone()
+        })
+        .collect();
+
+    let mut labels = std::collections::HashMap::new();
+    let mut i = 0;
+    while i < program.len() {
+        if let Op::Lbl(lbl) = program[i] {
+            let old = labels.insert(lbl, i);
+            assert!(old.is_none());
+        }
+        i += 1;
+    }
+
+    let mut stack = vec![];
+    let mut pc = 0;
+    while pc < program.len() {
+        match program[pc] {
+            Op::Psh(i) => stack.push(i),
+            Op::Add => {
+                let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
+                stack.push(a + b);
+            }
+            Op::Neg => {
+                let a = stack.pop().unwrap();
+                stack.push(-a);
+            }
+            Op::Ltz => match stack.pop().unwrap() < 0 {
+                true => stack.push(1),
+                false => stack.push(0),
+            },
+            Op::Lbl(_) => {}
+            Op::Jmp => {
+                let lbl = stack.pop().unwrap();
+                if stack.pop().unwrap() == 0 {
+                    pc = *labels.get(&lbl).unwrap();
+                }
+            }
+        }
+        pc += 1;
+    }
+
+    println!("{stack:?}");
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Clone)]
 enum Op {
-    Push(i64),
+    Psh(i64),
     Add,
     Neg,
     Ltz,
-    Lbl(usize),
+    Lbl(i64),
     Jmp,
 }
 
-#[allow(dead_code)]
-type Stack = Vec<i64>;
+impl Debug for Op {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Op::Psh(i) => write!(f, "psh {i}"),
+            Op::Add => write!(f, "add"),
+            Op::Neg => write!(f, "neg"),
+            Op::Ltz => write!(f, "ltz"),
+            Op::Lbl(i) => write!(f, "lbl {i}"),
+            Op::Jmp => write!(f, "jmp"),
+        }
+    }
+}
