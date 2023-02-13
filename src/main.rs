@@ -102,6 +102,47 @@ fn main() {
         }
     });
 
+    // match and group brackets
+    postorder(&mut tree, |trees| bracket_matcher(trees, &mut 0, None));
+    fn bracket_matcher(trees: &mut Vec<Tree>, i: &mut usize, target: Option<&str>) {
+        while *i < trees.len() {
+            *i += 1;
+            match &trees[*i - 1].data {
+                Data::String(s) if s == ")" || s == "}" || s == "]" => match (s, target) {
+                    (s, Some(t)) if s == t => return,
+                    (s, _) => panic!("extra {s}"),
+                },
+                Data::String(s) if s == "(" || s == "{" || s == "[" => {
+                    let start = *i;
+                    bracket_matcher(
+                        trees,
+                        i,
+                        Some(match s.as_str() {
+                            "(" => ")",
+                            "{" => "}",
+                            "[" => "]",
+                            _ => unreachable!(),
+                        }),
+                    );
+                    let mut children: Vec<Tree> = trees.drain(start..*i).collect();
+                    children.pop();
+                    *i = start;
+                    assert!(trees[*i - 1].children.is_empty());
+                    trees[*i - 1].children = children;
+                }
+                _ => {}
+            }
+            if let Some(s) = target {
+                panic!("missing {s}");
+            }
+        }
+    }
+
+    // pull arguments into operators
+    // postorder(&mut tree, |_trees| todo!());
+
+    println!("{tree:#?}");
+
     // convert to ops
     let ops: std::collections::HashMap<&str, &[Op]> =
         std::collections::HashMap::from([("not", &[Op::Neg, Op::Psh(1), Op::Add][..])]);
