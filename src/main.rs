@@ -105,6 +105,12 @@ fn main() {
     // match and group brackets
     postorder(&mut tree, |trees| bracket_matcher(trees, &mut 0, None));
     fn bracket_matcher(trees: &mut Vec<Tree>, i: &mut usize, target: Option<&str>) {
+        let brackets = std::collections::HashMap::from([
+            ("(".to_string(), ")".to_string()),
+            ("{".to_string(), "}".to_string()),
+            ("[".to_string(), "]".to_string()),
+        ]);
+
         while *i < trees.len() {
             *i += 1;
             match &trees[*i - 1].data {
@@ -112,17 +118,12 @@ fn main() {
                     (s, Some(t)) if s == t => return,
                     (s, _) => panic!("extra {s}"),
                 },
-                Data::String(s) if s == "(" || s == "{" || s == "[" => {
+                Data::String(s) if brackets.contains_key(s) => {
                     let start = *i;
                     bracket_matcher(
                         trees,
                         i,
-                        Some(match s.as_str() {
-                            "(" => ")",
-                            "{" => "}",
-                            "[" => "]",
-                            _ => unreachable!(),
-                        }),
+                        Some(brackets.get(s).unwrap()),
                     );
                     let mut children: Vec<Tree> = trees.drain(start..*i).collect();
                     children.pop();
@@ -139,7 +140,7 @@ fn main() {
     }
 
     // pull arguments into operators
-    // postorder(&mut tree, |_trees| todo!());
+    // postorder(&mut tree, |trees| todo);
 
     println!("{tree:#?}");
 
