@@ -60,7 +60,7 @@ fn main() {
         let mut i = 0;
         while i < trees.len() {
             match trees[i].data {
-                Data::Char(c @ ('_' | 'a'..='z' | 'A'..='Z' | '0'..='9')) => {
+                Data::Char(c) if !c.is_whitespace() => {
                     if i == 0 {
                         trees[i].data = Data::String(c.to_string());
                     } else if let Data::String(s) = &mut trees[i - 1].data {
@@ -103,26 +103,46 @@ fn main() {
     });
 
     // convert to ops
+    let ops: std::collections::HashMap<&str, &[Op]> =
+        std::collections::HashMap::from([("not", &[Op::Neg, Op::Psh(1), Op::Add][..])]);
     postorder(&mut tree, |trees| {
         let mut i = 0;
         while i < trees.len() {
             if let Data::Int(int) = trees[i].data {
                 trees[i].data = Data::Op(Op::Psh(int))
             } else if let Data::String(s) = &trees[i].data {
-                trees[i].data = Data::Op(match s.as_str() {
-                    "add" => Op::Add,
-                    "neg" => Op::Neg,
-                    "ltz" => Op::Ltz,
+                match s.as_str() {
+                    "dup" => trees[i].data = Data::Op(Op::Dup),
+                    "add" => trees[i].data = Data::Op(Op::Add),
+                    "neg" => trees[i].data = Data::Op(Op::Neg),
+                    "ltz" => trees[i].data = Data::Op(Op::Ltz),
                     "lbl" => {
-                        i += 1;
-                        Op::Lbl(match &trees[i].data {
-                            Data::Int(int) => *int,
-                            data => panic!("expected int, found {data:?}"),
-                        })
+                        trees.splice(
+                            i..=i + 1,
+                            [match &trees[i + 1].data {
+                                Data::Int(int) => Tree {
+                                    data: Data::Op(Op::Lbl(*int)),
+                                    children: vec![],
+                                },
+                                data => panic!("expected int, found {data:?}"),
+                            }],
+                        );
                     }
-                    "jmp" => Op::Jmp,
-                    op => panic!("unknown op {op:?}"),
-                })
+                    "jmp" => trees[i].data = Data::Op(Op::Jmp),
+                    op => match ops.get(op) {
+                        Some(ops) => {
+                            trees.splice(
+                                i..=i,
+                                ops.iter().map(|op| Tree {
+                                    data: Data::Op(op.clone()),
+                                    children: vec![],
+                                }),
+                            );
+                            i += ops.len() - 1;
+                        }
+                        None => panic!("unknown op {op:?}"),
+                    },
+                }
             } else {
                 panic!("unknown op")
             }
@@ -162,6 +182,11 @@ fn main() {
     while pc < program.len() {
         match program[pc] {
             Op::Psh(i) => stack.push(i),
+            Op::Dup => {
+                let a = stack.pop().unwrap();
+                stack.push(a);
+                stack.push(a);
+            }
             Op::Add => {
                 let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
                 stack.push(a + b);
@@ -191,6 +216,7 @@ fn main() {
 #[derive(Clone, PartialEq)]
 enum Op {
     Psh(i64),
+    Dup,
     Add,
     Neg,
     Ltz,
@@ -202,6 +228,7 @@ impl std::fmt::Debug for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Op::Psh(i) => write!(f, "psh {i}"),
+            Op::Dup => write!(f, "dup"),
             Op::Add => write!(f, "add"),
             Op::Neg => write!(f, "neg"),
             Op::Ltz => write!(f, "ltz"),
