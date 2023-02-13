@@ -106,11 +106,10 @@ fn main() {
     postorder(&mut tree, |trees| bracket_matcher(trees, &mut 0, None));
     fn bracket_matcher(trees: &mut Vec<Tree>, i: &mut usize, target: Option<&str>) {
         let brackets = std::collections::HashMap::from([
-            ("(".to_string(), ")".to_string()),
-            ("{".to_string(), "}".to_string()),
-            ("[".to_string(), "]".to_string()),
+            ("(".to_owned(), ")".to_owned()),
+            ("{".to_owned(), "}".to_owned()),
+            ("[".to_owned(), "]".to_owned()),
         ]);
-
         while *i < trees.len() {
             *i += 1;
             match &trees[*i - 1].data {
@@ -120,11 +119,7 @@ fn main() {
                 },
                 Data::String(s) if brackets.contains_key(s) => {
                     let start = *i;
-                    bracket_matcher(
-                        trees,
-                        i,
-                        Some(brackets.get(s).unwrap()),
-                    );
+                    bracket_matcher(trees, i, Some(brackets.get(s).unwrap()));
                     let mut children: Vec<Tree> = trees.drain(start..*i).collect();
                     children.pop();
                     *i = start;
@@ -139,8 +134,84 @@ fn main() {
         }
     }
 
+    let operators = &[
+        //  name func  left right   right-associativity
+        (&[("@", "nop", 1, 1)][..], false),
+        (&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
+        (&[("*", "mul", 1, 1)], false),
+        (&[("+", "add", 1, 1)], false),
+        (
+            &[
+                ("==", "eq", 1, 1),
+                ("!=", "ne", 1, 1),
+                ("<", "lt", 1, 1),
+                (">", "gt", 1, 1),
+                ("<=", "le", 1, 1),
+                (">=", "ge", 1, 1),
+            ],
+            false,
+        ),
+        (&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
+        (&[("=", "=", 1, 1), (":=", ":=", 1, 1)], true),
+        (&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
+        (&[("else", "_else_", 1, 1)], true),
+    ];
+
     // pull arguments into operators
-    // postorder(&mut tree, |trees| todo);
+    postorder(&mut tree, |trees| {
+        for (ops, right) in operators {
+            let mut i = if *right {
+                trees.len().wrapping_sub(1)
+            } else {
+                0
+            };
+            while let Some(tree) = trees.get(i) {
+                if let Data::String(s) = &tree.data {
+                    let s = s.clone();
+                    if let Some(op) = ops.iter().find(|op| op.0 == s) {
+                        if i < op.2 || i + op.3 >= trees.len() {
+                            panic!("not enough operator arguments for {s}");
+                        }
+                        trees.remove(i);
+                        let children: Vec<Tree> = trees.drain(i - op.2..i + op.3).collect();
+                        i -= op.2;
+                        trees.insert(
+                            i,
+                            Tree {
+                                data: Data::String(s),
+                                children,
+                            },
+                        );
+                    }
+                }
+                i = if *right { i.wrapping_sub(1) } else { i + 1 }
+            }
+        }
+    });
+
+    // unroll operators
+    postorder(&mut tree, |trees| {
+        let mut i = 0;
+        while i < trees.len() {
+            if let Data::String(s) = &trees[i].data {
+                if let Some(op) = operators
+                    .iter()
+                    .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
+                {
+                    let mut children: Vec<Tree> = trees[i].children.drain(..).collect();
+                    children.reverse();
+                    let l = children.len();
+                    children.push(Tree {
+                        data: Data::String(op.1.to_owned()),
+                        children: vec![],
+                    });
+                    trees.splice(i..=i, children);
+                    i += l;
+                }
+            }
+            i += 1;
+        }
+    });
 
     println!("{tree:#?}");
 
