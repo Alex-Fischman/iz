@@ -13,11 +13,18 @@ enum Data {
     Op(Op),
 }
 
-fn postorder<F: Fn(&mut Vec<Tree>) + Clone>(tree: &mut Tree, f: F) {
-    for tree in &mut tree.children {
-        postorder(tree, f.clone());
+impl Tree {
+    fn postorder<F: Fn(&mut Vec<Tree>) + Clone>(&mut self, f: F) {
+        for tree in &mut self.children {
+            tree.postorder(f.clone());
+        }
+        f(&mut self.children);
     }
-    f(&mut tree.children);
+
+    fn assert<F: Fn(&Tree) -> bool>(&mut self, f: F) {
+        self.postorder(|trees| trees.iter().for_each(|tree| assert!(f(tree))));
+    }
+
 }
 
 fn main() {
@@ -38,8 +45,10 @@ fn main() {
 
     // --------------------------------------------------------------------------
 
+    tree.assert(|tree| matches!(tree.data, Data::Char(_)));
+
     // remove comments
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         let mut i = 0;
         while i < trees.len() {
             match trees[i].data {
@@ -56,7 +65,7 @@ fn main() {
     });
 
     // group identifiers
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         let mut i = 0;
         while i < trees.len() {
             match trees[i].data {
@@ -76,7 +85,7 @@ fn main() {
     });
 
     // remove whitespace
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         let mut i = 0;
         while i < trees.len() {
             match trees[i].data {
@@ -89,7 +98,7 @@ fn main() {
     });
 
     // parse integer literals
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         let mut i = 0;
         while i < trees.len() {
             match &trees[i].data {
@@ -103,7 +112,7 @@ fn main() {
     });
 
     // match and group brackets
-    postorder(&mut tree, |trees| bracket_matcher(trees, &mut 0, None));
+    tree.postorder(|trees| bracket_matcher(trees, &mut 0, None));
     fn bracket_matcher(trees: &mut Vec<Tree>, i: &mut usize, target: Option<&str>) {
         let brackets = std::collections::HashMap::from([
             ("(".to_owned(), ")".to_owned()),
@@ -158,7 +167,7 @@ fn main() {
     ];
 
     // pull arguments into operators
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         for (ops, right) in operators {
             let mut i = if *right {
                 trees.len().wrapping_sub(1)
@@ -190,7 +199,7 @@ fn main() {
     });
 
     // unroll operators
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         let mut i = 0;
         while i < trees.len() {
             if let Data::String(s) = &trees[i].data {
@@ -218,7 +227,7 @@ fn main() {
     // convert to ops
     let ops: std::collections::HashMap<&str, &[Op]> =
         std::collections::HashMap::from([("not", &[Op::Neg, Op::Psh(1), Op::Add][..])]);
-    postorder(&mut tree, |trees| {
+    tree.postorder(|trees| {
         let mut i = 0;
         while i < trees.len() {
             if let Data::Int(int) = trees[i].data {
