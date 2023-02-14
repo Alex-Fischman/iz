@@ -14,17 +14,16 @@ enum Data {
 }
 
 impl Tree {
-    fn postorder<F: Fn(&mut Vec<Tree>) + Clone>(&mut self, f: F) {
+    fn postorder<F: Fn(&mut Tree) + Clone>(&mut self, f: F) {
         for tree in &mut self.children {
             tree.postorder(f.clone());
         }
-        f(&mut self.children);
+        f(self);
     }
 
     fn assert<F: Fn(&Tree) -> bool>(&mut self, f: F) {
-        self.postorder(|trees| trees.iter().for_each(|tree| assert!(f(tree))));
+        self.postorder(|tree| assert!(f(tree)));
     }
-
 }
 
 fn main() {
@@ -45,19 +44,21 @@ fn main() {
 
     // --------------------------------------------------------------------------
 
-    tree.assert(|tree| matches!(tree.data, Data::Char(_)));
+    tree.assert(|tree| matches!(tree.data, Data::Empty | Data::Char(_)));
 
     // remove comments
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         let mut i = 0;
-        while i < trees.len() {
-            match trees[i].data {
+        while i < tree.children.len() {
+            match tree.children[i].data {
                 Data::Char('#') => {
                     let mut j = i;
-                    while j < trees.len() && !matches!(trees[j].data, Data::Char('\n')) {
+                    while j < tree.children.len()
+                        && !matches!(tree.children[j].data, Data::Char('\n'))
+                    {
                         j += 1;
                     }
-                    trees.drain(i..j);
+                    tree.children.drain(i..j);
                 }
                 _ => i += 1,
             }
@@ -65,18 +66,18 @@ fn main() {
     });
 
     // group identifiers
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         let mut i = 0;
-        while i < trees.len() {
-            match trees[i].data {
+        while i < tree.children.len() {
+            match tree.children[i].data {
                 Data::Char(c) if !c.is_whitespace() => {
                     if i == 0 {
-                        trees[i].data = Data::String(c.to_string());
-                    } else if let Data::String(s) = &mut trees[i - 1].data {
+                        tree.children[i].data = Data::String(c.to_string());
+                    } else if let Data::String(s) = &mut tree.children[i - 1].data {
                         s.push(c);
-                        trees.remove(i);
+                        tree.children.remove(i);
                     } else {
-                        trees[i].data = Data::String(c.to_string());
+                        tree.children[i].data = Data::String(c.to_string());
                     }
                 }
                 _ => i += 1,
@@ -85,25 +86,27 @@ fn main() {
     });
 
     // remove whitespace
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         let mut i = 0;
-        while i < trees.len() {
-            match trees[i].data {
+        while i < tree.children.len() {
+            match tree.children[i].data {
                 Data::Char(c) if c.is_whitespace() => {
-                    trees.remove(i);
+                    tree.children.remove(i);
                 }
                 _ => i += 1,
             }
         }
     });
 
+    tree.assert(|tree| matches!(tree.data, Data::Empty | Data::String(_)));
+
     // parse integer literals
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         let mut i = 0;
-        while i < trees.len() {
-            match &trees[i].data {
+        while i < tree.children.len() {
+            match &tree.children[i].data {
                 Data::String(s) => match s.parse::<i64>() {
-                    Ok(int) => trees[i].data = Data::Int(int),
+                    Ok(int) => tree.children[i].data = Data::Int(int),
                     _ => i += 1,
                 },
                 _ => i += 1,
@@ -112,7 +115,7 @@ fn main() {
     });
 
     // match and group brackets
-    tree.postorder(|trees| bracket_matcher(trees, &mut 0, None));
+    tree.postorder(|tree| bracket_matcher(&mut tree.children, &mut 0, None));
     fn bracket_matcher(trees: &mut Vec<Tree>, i: &mut usize, target: Option<&str>) {
         let brackets = std::collections::HashMap::from([
             ("(".to_owned(), ")".to_owned()),
@@ -167,24 +170,24 @@ fn main() {
     ];
 
     // pull arguments into operators
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         for (ops, right) in operators {
             let mut i = if *right {
-                trees.len().wrapping_sub(1)
+                tree.children.len().wrapping_sub(1)
             } else {
                 0
             };
-            while let Some(tree) = trees.get(i) {
-                if let Data::String(s) = &tree.data {
+            while let Some(child) = tree.children.get(i) {
+                if let Data::String(s) = &child.data {
                     let s = s.clone();
                     if let Some(op) = ops.iter().find(|op| op.0 == s) {
-                        if i < op.2 || i + op.3 >= trees.len() {
+                        if i < op.2 || i + op.3 >= tree.children.len() {
                             panic!("not enough operator arguments for {s}");
                         }
-                        trees.remove(i);
-                        let children: Vec<Tree> = trees.drain(i - op.2..i + op.3).collect();
+                        tree.children.remove(i);
+                        let children: Vec<Tree> = tree.children.drain(i - op.2..i + op.3).collect();
                         i -= op.2;
-                        trees.insert(
+                        tree.children.insert(
                             i,
                             Tree {
                                 data: Data::String(s),
@@ -199,22 +202,22 @@ fn main() {
     });
 
     // unroll operators
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         let mut i = 0;
-        while i < trees.len() {
-            if let Data::String(s) = &trees[i].data {
+        while i < tree.children.len() {
+            if let Data::String(s) = &tree.children[i].data {
                 if let Some(op) = operators
                     .iter()
                     .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
                 {
-                    let mut children: Vec<Tree> = trees[i].children.drain(..).collect();
+                    let mut children: Vec<Tree> = tree.children[i].children.drain(..).collect();
                     children.reverse();
                     let l = children.len();
                     children.push(Tree {
                         data: Data::String(op.1.to_owned()),
                         children: vec![],
                     });
-                    trees.splice(i..=i, children);
+                    tree.children.splice(i..=i, children);
                     i += l;
                 }
             }
@@ -227,21 +230,21 @@ fn main() {
     // convert to ops
     let ops: std::collections::HashMap<&str, &[Op]> =
         std::collections::HashMap::from([("not", &[Op::Neg, Op::Psh(1), Op::Add][..])]);
-    tree.postorder(|trees| {
+    tree.postorder(|tree| {
         let mut i = 0;
-        while i < trees.len() {
-            if let Data::Int(int) = trees[i].data {
-                trees[i].data = Data::Op(Op::Psh(int))
-            } else if let Data::String(s) = &trees[i].data {
+        while i < tree.children.len() {
+            if let Data::Int(int) = tree.children[i].data {
+                tree.children[i].data = Data::Op(Op::Psh(int))
+            } else if let Data::String(s) = &tree.children[i].data {
                 match s.as_str() {
-                    "dup" => trees[i].data = Data::Op(Op::Dup),
-                    "add" => trees[i].data = Data::Op(Op::Add),
-                    "neg" => trees[i].data = Data::Op(Op::Neg),
-                    "ltz" => trees[i].data = Data::Op(Op::Ltz),
+                    "dup" => tree.children[i].data = Data::Op(Op::Dup),
+                    "add" => tree.children[i].data = Data::Op(Op::Add),
+                    "neg" => tree.children[i].data = Data::Op(Op::Neg),
+                    "ltz" => tree.children[i].data = Data::Op(Op::Ltz),
                     "lbl" => {
-                        trees.splice(
+                        tree.children.splice(
                             i..=i + 1,
-                            [match &trees[i + 1].data {
+                            [match &tree.children[i + 1].data {
                                 Data::Int(int) => Tree {
                                     data: Data::Op(Op::Lbl(*int)),
                                     children: vec![],
@@ -250,10 +253,10 @@ fn main() {
                             }],
                         );
                     }
-                    "jmp" => trees[i].data = Data::Op(Op::Jmp),
+                    "jmp" => tree.children[i].data = Data::Op(Op::Jmp),
                     op => match ops.get(op) {
                         Some(ops) => {
-                            trees.splice(
+                            tree.children.splice(
                                 i..=i,
                                 ops.iter().map(|op| Tree {
                                     data: Data::Op(op.clone()),
@@ -271,6 +274,8 @@ fn main() {
             i += 1;
         }
     });
+
+    tree.assert(|tree| matches!(tree.data, Data::Empty | Data::Op(_)));
 
     // --------------------------------------------------------------------------
 
