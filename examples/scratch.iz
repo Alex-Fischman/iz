@@ -1,12 +1,10 @@
 # this is a comment
 
-# here is some code
+# here is a while loop
 1
 cond_start:
-copy 0 neg 5 add cond body_end
+(0 copy) neg 5 add body_end?
 body_start:
 1 add
-0 cond cond_start
+0 cond_start?
 body_end:
-
-# comment on last line of file
