@@ -292,15 +292,12 @@ fn unroll_operators(tree: &mut Tree) {
                 .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
             {
                 if op.4 {
-                    let mut children: Vec<Tree> = tree.children[i].children.drain(..).collect();
-                    children.reverse();
+                    let children: Vec<Tree> = tree.children[i].children.drain(..).collect();
                     let l = children.len();
-                    children.push(Tree::new(Data::String(op.1.to_owned()), vec![]));
-                    tree.children.splice(i..=i, children);
+                    tree.children.splice(i..i, children);
                     i += l;
-                } else {
-                    tree.children[i].data = Data::String(op.1.to_owned());
                 }
+                tree.children[i].data = Data::String(op.1.to_owned());
             }
             i += 1;
         }
