@@ -63,7 +63,7 @@ impl Data {
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
     Push(i64),
-    Scour(usize),
+    Free(usize),
     Shove(usize),
     Steal(usize),
     Add,
@@ -136,7 +136,7 @@ fn main() {
         println!("{stack:?}");
         match &program[pc] {
             Op::Push(i) => stack.push(*i),
-            Op::Scour(i) => {
+            Op::Free(i) => {
                 stack.drain(stack.len() - i..);
             }
             Op::Shove(i) => {
@@ -259,7 +259,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
     (&[(":", ":", 1, 0, false), ("?", "?", 1, 0, false)], false),
     (
         &[
-            ("scour", "scour", 0, 1, false),
+            ("free", "free", 0, 1, false),
             ("shove", "shove", 0, 1, false),
             ("steal", "steal", 0, 1, false),
         ],
@@ -359,7 +359,7 @@ fn convert_to_ops(tree: &mut Tree) {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
             Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
-                "scour" => Op::Scour(tree.children[i].children.remove(0).data.as_int() as usize),
+                "free" => Op::Free(tree.children[i].children.remove(0).data.as_int() as usize),
                 "shove" => Op::Shove(tree.children[i].children.remove(0).data.as_int() as usize),
                 "steal" => Op::Steal(tree.children[i].children.remove(0).data.as_int() as usize),
                 "add" => Op::Add,

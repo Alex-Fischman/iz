@@ -12,10 +12,16 @@ body_end: # 5
 
 13 # 5 13
 steal 1 # 5 13 5
-scour 1 # 5 13
+free 1 # 5 13
 shove 0 # 13
 
+
+steal 0 # dup
+free 1 # drop
+
 1 2 # 13 1 2
+
+# swap
 steal 0 # 13 1 2 2
 steal 2 # 13 1 2 2 1
 shove 1 # 13 1 1 2
