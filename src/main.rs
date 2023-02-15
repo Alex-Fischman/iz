@@ -125,6 +125,7 @@ fn main() {
 
     while pc < code.len() {
         print_stack(&data, sp);
+        print!("{:?}\t", code[pc]);
         match &code[pc] {
             Op::Int(i) => {
                 data.insert(sp, *i);
