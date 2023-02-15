@@ -45,6 +45,13 @@ impl Data {
         self.as_string().chars().next().unwrap()
     }
 
+    fn as_int(&self) -> i64 {
+        match self {
+            Data::Int(i) => *i,
+            _ => panic!("expected int, found {self:?}"),
+        }
+    }
+
     fn as_op(&self) -> &Op {
         match self {
             Data::Op(o) => o,
@@ -55,13 +62,12 @@ impl Data {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Op {
-    Int(i64),
+    Push(i64),
+    Move(i64),
+    Copy(i64),
     Add,
     Neg,
     Ltz,
-    Shirk,
-    Shove,
-    Steal,
     Pc,
     Jz,
 }
@@ -135,8 +141,13 @@ fn main() {
 
     while pc < code.len() {
         match &code[pc] {
-            Op::Int(i) => {
+            Op::Push(i) => {
                 data[sp + 1] = *i;
+                sp += 1;
+            }
+            Op::Move(i) => sp -= i,
+            Op::Copy(i) => {
+                data[sp + 1] = data[sp - i];
                 sp += 1;
             }
             Op::Add => {
@@ -145,16 +156,6 @@ fn main() {
             }
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Shirk => sp = sp - 2 - data[sp],
-            Op::Shove => {
-                let i = data[sp];
-                data[sp - 2 - i] = data[sp - 1];
-                sp -= 2;
-            }
-            Op::Steal => {
-                let i = data[sp];
-                data[sp] = data[sp - 1 - i];
-            }
             Op::Pc => {
                 data[sp + 1] = pc as i64;
                 sp += 1;
@@ -195,7 +196,7 @@ fn remove_comments(tree: &mut Tree) {
 fn group_characters(tree: &mut Tree) {
     fn char_type(c: char) -> usize {
         match c {
-            '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => 0,
+            '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => 0,
             _ if c.is_whitespace() => 1,
             '(' | ')' | '{' | '}' | '[' | ']' => 2,
             _ => 3,
@@ -261,6 +262,10 @@ fn group_brackets(tree: &mut Tree) {
 type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
+    (
+        &[("move", "move", 0, 1, false), ("copy", "copy", 0, 1, false)],
+        true,
+    ),
     (
         &[("-", "neg", 0, 1, true), ("not", "_not_", 0, 1, true)],
         true,
@@ -350,14 +355,13 @@ fn convert_to_ops(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
-            Data::Int(int) => Op::Int(*int),
+            Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
+                "move" => Op::Move(tree.children[i].children.remove(0).data.as_int()),
+                "copy" => Op::Copy(tree.children[i].children.remove(0).data.as_int()),
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
-                "shirk" => Op::Shirk,
-                "shove" => Op::Shove,
-                "steal" => Op::Steal,
                 "pc" => Op::Pc,
                 "jz" => Op::Jz,
                 op => panic!("unknown op {op}"),

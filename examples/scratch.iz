@@ -1,34 +1,32 @@
 # this is a comment
 
 # here is a while loop
-pc + 11 # cond start
-0 steal 8 add # body start
-0 steal 6 add # body end
+pc        9 add # cond start
+(copy 0) 6 add # body start
+(copy 0) 5 add # body end
 1
 # a b c i (cond)
 # cond start
-0 steal neg 5 add
-2 steal jz
+(copy 0) neg 5 add
+(copy 2) jz
 # body start
 1 add
 0
-4 steal jz
+(copy 4) jz
 # body end
 
-2 shove 1 shirk # i
+(move 4) (copy -4) # i
 
 # here are some examples of stack memory management
 13 # a bare literal pushes its value
-0 shirk # shirk truncates the nth-from-top elements
-0 steal # steal copies from the nth-from-top element
-0 shove # shove copies into the nth-from-top element
+(copy 0) # copy uses the nth-from-top element
+(move 2) # move moves the stack pointer
+# both move and copy can take negative arguments
 
-0 steal # dup
-0 shirk # drop
-
-# swap
 0 # 5 0
-0 steal # 5 0 0
-2 steal # 5 0 0 5
-1 shove # 5 5 0
-1 shove # 0 5
+
+(copy 0) # dup
+(move 1) # drop
+(copy 1 move 3 copy -2 copy -2) # swap
+
+# 0 5
