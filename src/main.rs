@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Debug, PartialEq)]
 struct Tree {
     data: Data,
@@ -68,6 +66,25 @@ enum Op {
     Jz,
 }
 
+struct Memory(Vec<i64>);
+
+impl std::ops::Index<i64> for Memory {
+    type Output = i64;
+    fn index(&self, i: i64) -> &i64 {
+        &self.0[i as usize]
+    }
+}
+
+impl std::ops::IndexMut<i64> for Memory {
+    fn index_mut(&mut self, i: i64) -> &mut i64 {
+        let i = i as usize;
+        if self.0.len() <= i {
+            self.0.resize(i + 1, 0);
+        }
+        &mut self.0[i]
+    }
+}
+
 fn main() {
     // frontend
     let args: Vec<String> = std::env::args().collect();
@@ -113,81 +130,55 @@ fn main() {
         .collect();
 
     let mut pc = 0;
-    let mut data = HashMap::new();
+    let mut data = Memory(vec![]);
     let mut sp = 0;
 
-    let print_stack = |data: &HashMap<usize, i64>, sp| {
-        for i in 0..sp {
-            print!("{:?}\t", data[&i]);
-        }
-        println!();
-    };
-
     while pc < code.len() {
-        print_stack(&data, sp);
+        println!("{:?}", &data.0[0..sp as usize]);
         print!("{:?}\t", code[pc]);
         match &code[pc] {
             Op::Int(i) => {
-                data.insert(sp, *i);
                 sp += 1;
+                data[sp - 1] = *i;
             }
             Op::Add => {
                 sp -= 1;
-                let a = data[&sp];
-                sp -= 1;
-                let b = data[&sp];
-                data.insert(sp, a + b);
-                sp += 1;
+                data[sp - 1] += data[sp];
             }
             Op::Neg => {
-                sp -= 1;
-                let a = data[&sp];
-                data.insert(sp, -a);
-                sp += 1;
+                data[sp - 1] = -data[sp - 1];
             }
             Op::Ltz => {
-                sp -= 1;
-                let a = data[&sp];
-                data.insert(sp, (a < 0) as i64);
-                sp += 1;
+                data[sp - 1] = (data[sp - 1] < 0) as i64;
             }
             Op::Shirk => {
                 sp -= 1;
-                let i = data[&sp];
-                sp = ((sp as i64) - 1 - i) as usize;
+                sp = sp - 1 - data[sp];
             }
             Op::Shove => {
-                sp -= 1;
-                let i = data[&sp];
-                sp -= 1;
-                let a = data[&sp];
-                data.insert(((sp as i64) - 1 - i) as usize, a);
+                sp -= 2;
+                let i = data[sp + 1];
+                data[sp - 1 - i] = data[sp];
             }
             Op::Steal => {
-                sp -= 1;
-                let i = data[&sp];
-                let a = data[&(((sp as i64) - 1 - i) as usize)];
-                data.insert(sp, a);
-                sp += 1;
+                let i = data[sp - 1];
+                data[sp - 1] = data[sp - 2 - i];
             }
             Op::Pc => {
-                data.insert(sp, pc as i64);
                 sp += 1;
+                data[sp - 1] = pc as i64;
             }
             Op::Jz => {
-                sp -= 1;
-                let a = data[&sp];
-                sp -= 1;
-                let b = data[&sp];
-                if b == 0 {
-                    pc = a as usize;
+                sp -= 2;
+                if data[sp] == 0 {
+                    pc = data[sp + 1] as usize;
                 }
             }
         }
         pc += 1;
     }
 
-    print_stack(&data, sp);
+    println!("{:?}", &data.0[0..sp as usize]);
 }
 
 fn remove_comments(tree: &mut Tree) {
