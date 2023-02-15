@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, PartialEq)]
 struct Tree {
     data: Data,
@@ -53,7 +55,7 @@ impl Data {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Op {
     Int(i64),
     Add,
@@ -67,7 +69,7 @@ enum Op {
 }
 
 fn main() {
-    // file reading frontend
+    // frontend
     let args: Vec<String> = std::env::args().collect();
     let file = args.get(1).expect("no file passed");
     let tokens = std::fs::read_to_string(file)
@@ -77,8 +79,7 @@ fn main() {
         .collect();
     let mut tree = Tree::new(Data::Empty, tokens);
 
-    // --------------------------------------------------------------------------
-
+    // compiler
     let passes = [
         // tokenizer
         remove_comments,
@@ -100,8 +101,9 @@ fn main() {
         pass(&mut tree)
     }
 
+    // backend
     assert_eq!(tree.data, Data::Empty);
-    let program: Vec<Op> = tree
+    let code: Vec<Op> = tree
         .children
         .into_iter()
         .map(|tree| {
@@ -110,54 +112,81 @@ fn main() {
         })
         .collect();
 
-    // --------------------------------------------------------------------------
-
-    // interpreter backend
-    let mut stack: Vec<i64> = vec![];
     let mut pc = 0;
-    while pc < program.len() {
-        println!("{stack:?}");
-        match &program[pc] {
-            Op::Int(i) => stack.push(*i),
+    let mut data = HashMap::new();
+    let mut sp = 0;
+
+    let print_stack = |data: &HashMap<usize, i64>, sp| {
+        for i in 0..sp {
+            print!("{:?}\t", data[&i]);
+        }
+        println!();
+    };
+
+    while pc < code.len() {
+        print_stack(&data, sp);
+        match &code[pc] {
+            Op::Int(i) => {
+                data.insert(sp, *i);
+                sp += 1;
+            }
             Op::Add => {
-                let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
-                stack.push(a + b);
+                sp -= 1;
+                let a = data[&sp];
+                sp -= 1;
+                let b = data[&sp];
+                data.insert(sp, a + b);
+                sp += 1;
             }
             Op::Neg => {
-                let a = stack.pop().unwrap();
-                stack.push(-a);
+                sp -= 1;
+                let a = data[&sp];
+                data.insert(sp, -a);
+                sp += 1;
             }
             Op::Ltz => {
-                let a = stack.pop().unwrap();
-                stack.push((a < 0) as i64);
+                sp -= 1;
+                let a = data[&sp];
+                data.insert(sp, (a < 0) as i64);
+                sp += 1;
             }
             Op::Shirk => {
-                let i = stack.pop().unwrap() as usize;
-                stack.truncate(stack.len() - 1 - i);
+                sp -= 1;
+                let i = data[&sp];
+                sp = ((sp as i64) - 1 - i) as usize;
             }
             Op::Shove => {
-                let i = stack.pop().unwrap() as usize;
-                let a = stack.pop().unwrap();
-                let j = stack.len() - 1 - i;
-                stack[j] = a;
+                sp -= 1;
+                let i = data[&sp];
+                sp -= 1;
+                let a = data[&sp];
+                data.insert(((sp as i64) - 1 - i) as usize, a);
             }
             Op::Steal => {
-                let i = stack.pop().unwrap() as usize;
-                let a = stack.get(stack.len() - 1 - i).unwrap();
-                stack.push(*a);
+                sp -= 1;
+                let i = data[&sp];
+                let a = data[&(((sp as i64) - 1 - i) as usize)];
+                data.insert(sp, a);
+                sp += 1;
             }
-            Op::Pc => stack.push(pc as i64),
+            Op::Pc => {
+                data.insert(sp, pc as i64);
+                sp += 1;
+            }
             Op::Jz => {
-                let target = stack.pop().unwrap() as usize;
-                if stack.pop().unwrap() == 0 {
-                    pc = target;
+                sp -= 1;
+                let a = data[&sp];
+                sp -= 1;
+                let b = data[&sp];
+                if b == 0 {
+                    pc = a as usize;
                 }
             }
         }
         pc += 1;
     }
 
-    println!("{stack:?}");
+    print_stack(&data, sp);
 }
 
 fn remove_comments(tree: &mut Tree) {
