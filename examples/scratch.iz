@@ -14,3 +14,9 @@ body_end: # 5
 steal 1 # 5 13 5
 scour 1 # 5 13
 shove 0 # 13
+
+1 2 # 13 1 2
+steal 0 # 13 1 2 2
+steal 2 # 13 1 2 2 1
+shove 1 # 13 1 1 2
+shove 1 # 13 2 1
