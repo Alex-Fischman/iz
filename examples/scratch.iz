@@ -1,28 +1,37 @@
 # this is a comment
 
 # here is a while loop
-1 # i
-cond_start:
-steal 0 # i i
-neg 5 add body_end? # i
-body_start:
-1 add # i+1
-0 cond_start? # i+1
-body_end: # 5
+pc      11 add # cond start
+0 steal 8 add # body start
+0 steal 6 add # body end
+
+# a b c i (cond)
+1
+# cond start
+0 steal neg 5 add
+2 steal jz
+# body start
+1 add
+0
+4 steal jz
+# body end
+# a b c i (cond)
+2 shove
+2 free
+# i
 
 13 # 5 13
-steal 1 # 5 13 5
-free 1 # 5 13
-shove 0 # 13
+1 steal # 5 13 5
+1 free # 5 13
+0 shove # 13
 
-
-steal 0 # dup
-free 1 # drop
+0 steal # dup
+1 free # drop
 
 1 2 # 13 1 2
 
 # swap
-steal 0 # 13 1 2 2
-steal 2 # 13 1 2 2 1
-shove 1 # 13 1 1 2
-shove 1 # 13 2 1
+0 steal # 13 1 2 2
+2 steal # 13 1 2 2 1
+1 shove # 13 1 1 2
+1 shove # 13 2 1

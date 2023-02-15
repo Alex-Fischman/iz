@@ -45,13 +45,6 @@ impl Data {
         self.as_string().chars().next().unwrap()
     }
 
-    fn as_int(&self) -> i64 {
-        match self {
-            Data::Int(i) => *i,
-            _ => panic!("expected int, found {self:?}"),
-        }
-    }
-
     fn as_op(&self) -> &Op {
         match self {
             Data::Op(o) => o,
@@ -63,14 +56,14 @@ impl Data {
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
     Push(i64),
-    Free(usize),
-    Shove(usize),
-    Steal(usize),
+    Free,
+    Shove,
+    Steal,
     Add,
     Neg,
     Ltz,
-    Mark(String), // TODO: replace with Addr
-    Cond(String),
+    Pc,
+    Jz,
 }
 
 fn main() {
@@ -120,30 +113,24 @@ fn main() {
     // --------------------------------------------------------------------------
 
     // interpreter backend
-    let mut marks = std::collections::HashMap::new();
-    let mut i = 0;
-    while i < program.len() {
-        if let Op::Mark(mark) = &program[i] {
-            let old = marks.insert(mark, i);
-            assert!(old.is_none());
-        }
-        i += 1;
-    }
-
     let mut stack: Vec<i64> = vec![];
     let mut pc = 0;
     while pc < program.len() {
         println!("{stack:?}");
         match &program[pc] {
             Op::Push(i) => stack.push(*i),
-            Op::Free(i) => {
-                stack.drain(stack.len() - i..);
+            Op::Free => {
+                let i = stack.pop().unwrap() as usize;
+                let _ = stack.drain(stack.len() - i..);
             }
-            Op::Shove(i) => {
-                let j = stack.len() - 2 - i;
-                stack[j] = stack.pop().unwrap();
+            Op::Shove => {
+                let i = stack.pop().unwrap() as usize;
+                let a = stack.pop().unwrap();
+                let j = stack.len() - 1 - i;
+                stack[j] = a;
             }
-            Op::Steal(i) => {
+            Op::Steal => {
+                let i = stack.pop().unwrap() as usize;
                 let a = stack.get(stack.len() - 1 - i).unwrap();
                 stack.push(*a);
             }
@@ -159,10 +146,11 @@ fn main() {
                 let a = stack.pop().unwrap();
                 stack.push((a < 0) as i64);
             }
-            Op::Mark(_) => {}
-            Op::Cond(s) => {
+            Op::Pc => stack.push(pc as i64),
+            Op::Jz => {
+                let target = stack.pop().unwrap() as usize;
                 if stack.pop().unwrap() == 0 {
-                    pc = *marks.get(&s).unwrap();
+                    pc = target;
                 }
             }
         }
@@ -256,15 +244,6 @@ fn group_brackets(tree: &mut Tree) {
 type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-    (&[(":", ":", 1, 0, false), ("?", "?", 1, 0, false)], false),
-    (
-        &[
-            ("free", "free", 0, 1, false),
-            ("shove", "shove", 0, 1, false),
-            ("steal", "steal", 0, 1, false),
-        ],
-        true,
-    ),
     (
         &[("-", "neg", 0, 1, true), ("not", "_not_", 0, 1, true)],
         true,
@@ -359,14 +338,14 @@ fn convert_to_ops(tree: &mut Tree) {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
             Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
-                "free" => Op::Free(tree.children[i].children.remove(0).data.as_int() as usize),
-                "shove" => Op::Shove(tree.children[i].children.remove(0).data.as_int() as usize),
-                "steal" => Op::Steal(tree.children[i].children.remove(0).data.as_int() as usize),
+                "free" => Op::Free,
+                "shove" => Op::Shove,
+                "steal" => Op::Steal,
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
-                ":" => Op::Mark(tree.children[i].children.remove(0).data.as_string().clone()),
-                "?" => Op::Cond(tree.children[i].children.remove(0).data.as_string().clone()),
+                "pc" => Op::Pc,
+                "jz" => Op::Jz,
                 op => panic!("unknown op {op}"),
             },
             data => panic!("expected an int or string, found {data:?}"),
