@@ -1,10 +1,16 @@
 # this is a comment
 
 # here is a while loop
-1
+1 # i
 cond_start:
-(0 copy) neg 5 add body_end?
+steal 0 # i i
+neg 5 add body_end? # i
 body_start:
-1 add
-0 cond_start?
-body_end:
+1 add # i+1
+0 cond_start? # i+1
+body_end: # 5
+
+13 # 5 13
+steal 1 # 5 13 5
+scour 1 # 5 13
+shove 0 # 13

@@ -45,6 +45,13 @@ impl Data {
         self.as_string().chars().next().unwrap()
     }
 
+    fn as_int(&self) -> i64 {
+        match self {
+            Data::Int(i) => *i,
+            _ => panic!("expected int, found {self:?}"),
+        }
+    }
+
     fn as_op(&self) -> &Op {
         match self {
             Data::Op(o) => o,
@@ -56,11 +63,13 @@ impl Data {
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
     Push(i64),
-    Copy,
+    Scour(usize),
+    Shove(usize),
+    Steal(usize),
     Add,
     Neg,
     Ltz,
-    Mark(String),
+    Mark(String), // TODO: replace with Addr
     Cond(String),
 }
 
@@ -127,8 +136,14 @@ fn main() {
         println!("{stack:?}");
         match &program[pc] {
             Op::Push(i) => stack.push(*i),
-            Op::Copy => {
-                let i = stack.pop().unwrap() as usize;
+            Op::Scour(i) => {
+                stack.drain(stack.len() - i..);
+            }
+            Op::Shove(i) => {
+                let j = stack.len() - 2 - i;
+                stack[j] = stack.pop().unwrap();
+            }
+            Op::Steal(i) => {
                 let a = stack.get(stack.len() - 1 - i).unwrap();
                 stack.push(*a);
             }
@@ -241,7 +256,15 @@ fn group_brackets(tree: &mut Tree) {
 type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-    (&[(":", ":", 1, 0, false), ("?", "?", 1, 0, false)], true),
+    (&[(":", ":", 1, 0, false), ("?", "?", 1, 0, false)], false),
+    (
+        &[
+            ("scour", "scour", 0, 1, false),
+            ("shove", "shove", 0, 1, false),
+            ("steal", "steal", 0, 1, false),
+        ],
+        true,
+    ),
     (
         &[("-", "neg", 0, 1, true), ("not", "_not_", 0, 1, true)],
         true,
@@ -336,7 +359,9 @@ fn convert_to_ops(tree: &mut Tree) {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
             Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
-                "copy" => Op::Copy,
+                "scour" => Op::Scour(tree.children[i].children.remove(0).data.as_int() as usize),
+                "shove" => Op::Shove(tree.children[i].children.remove(0).data.as_int() as usize),
+                "steal" => Op::Steal(tree.children[i].children.remove(0).data.as_int() as usize),
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
