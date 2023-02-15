@@ -1,6 +1,12 @@
 # this is a comment
 
 # here is some code
-1 + 2
+1
+cond_start :
+copy 0 neg 5 add cond body_end
+body_start :
+1 add
+0 cond cond_start
+body_end :
 
 # comment on last line of file

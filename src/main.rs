@@ -4,15 +4,6 @@ struct Tree {
     children: Vec<Tree>,
 }
 
-#[derive(Debug, PartialEq)]
-enum Data {
-    Empty,
-    Char(char),
-    String(String),
-    Int(i64),
-    Op(Op),
-}
-
 impl Tree {
     fn postorder<F: Fn(&mut Tree) + Clone>(&mut self, f: F) {
         for tree in &mut self.children {
@@ -22,29 +13,59 @@ impl Tree {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
+enum Data {
+    Empty,
+    Char(char),
+    String(String),
+    Int(i64),
+    Op(Op),
+}
+
+impl Data {
+    fn as_char(&self) -> char {
+        match self {
+            Data::Char(c) => *c,
+            _ => panic!("expected char, found {self:?}"),
+        }
+    }
+
+    fn as_string(&mut self) -> &mut String {
+        match self {
+            Data::String(s) => s,
+            _ => panic!("expected string, found {self:?}"),
+        }
+    }
+
+    fn first_char(&mut self) -> char {
+        self.as_string().chars().next().unwrap()
+    }
+
+    fn as_int(&self) -> i64 {
+        match self {
+            Data::Int(i) => *i,
+            _ => panic!("expected int, found {self:?}"),
+        }
+    }
+
+    fn as_op(&self) -> &Op {
+        match self {
+            Data::Op(o) => o,
+            _ => panic!("expected op, found {self:?}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum Op {
-    Psh(i64),
-    Dup,
+    Push(i64),
+    Copy(usize),
+    Pull(usize),
     Add,
     Neg,
     Ltz,
-    Lbl(i64),
-    Jmp,
-}
-
-impl std::fmt::Debug for Op {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Op::Psh(i) => write!(f, "psh {i}"),
-            Op::Dup => write!(f, "dup"),
-            Op::Add => write!(f, "add"),
-            Op::Neg => write!(f, "neg"),
-            Op::Ltz => write!(f, "ltz"),
-            Op::Lbl(i) => write!(f, "lbl {i}"),
-            Op::Jmp => write!(f, "jmp"),
-        }
-    }
+    Mark(String),
+    Cond(String),
 }
 
 fn main() {
@@ -69,13 +90,13 @@ fn main() {
     let passes = [
         // tokenizer
         remove_comments,
-        group_identifiers,
+        group_characters,
         remove_whitespace,
-        integer_literals,
         // parser
         group_brackets,
         group_operators,
         unroll_operators,
+        integer_literals,
         // analysis
         // transformation
         convert_to_ops,
@@ -91,35 +112,35 @@ fn main() {
         .into_iter()
         .map(|tree| {
             assert!(tree.children.is_empty());
-            match tree.data {
-                Data::Op(op) => op,
-                data => panic!("expected op, found {data:?}"),
-            }
+            tree.data.as_op().clone()
         })
         .collect();
 
     // --------------------------------------------------------------------------
 
     // interpreter backend
-    let mut labels = std::collections::HashMap::new();
+    let mut marks = std::collections::HashMap::new();
     let mut i = 0;
     while i < program.len() {
-        if let Op::Lbl(lbl) = program[i] {
-            let old = labels.insert(lbl, i);
+        if let Op::Mark(mark) = &program[i] {
+            let old = marks.insert(mark, i);
             assert!(old.is_none());
         }
         i += 1;
     }
 
-    let mut stack = vec![];
+    let mut stack: Vec<i64> = vec![];
     let mut pc = 0;
     while pc < program.len() {
-        match program[pc] {
-            Op::Psh(i) => stack.push(i),
-            Op::Dup => {
-                let a = stack.pop().unwrap();
-                stack.push(a);
-                stack.push(a);
+        println!("{stack:?}");
+        match &program[pc] {
+            Op::Push(i) => stack.push(*i),
+            Op::Copy(i) => {
+                let a = stack.get(stack.len() - 1 - i).unwrap();
+                stack.push(*a);
+            }
+            Op::Pull(i) => {
+                stack.remove(stack.len() - 1 - i);
             }
             Op::Add => {
                 let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
@@ -133,11 +154,11 @@ fn main() {
                 true => stack.push(1),
                 false => stack.push(0),
             },
-            Op::Lbl(_) => {}
-            Op::Jmp => {
-                let lbl = stack.pop().unwrap();
-                if stack.pop().unwrap() == 0 {
-                    pc = *labels.get(&lbl).unwrap();
+            Op::Mark(_) => {}
+            Op::Cond(s) => {
+                let a = stack.pop().unwrap();
+                if a == 0 {
+                    pc = *marks.get(&s).unwrap();
                 }
             }
         }
@@ -150,35 +171,36 @@ fn main() {
 fn remove_comments(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
-        match tree.children[i].data {
-            Data::Char('#') => {
-                let mut j = i;
-                while j < tree.children.len() && !matches!(tree.children[j].data, Data::Char('\n'))
-                {
-                    j += 1;
-                }
-                tree.children.drain(i..j);
+        if tree.children[i].data.as_char() == '#' {
+            let mut j = i;
+            while j < tree.children.len() && tree.children[j].data.as_char() != '\n' {
+                j += 1;
             }
-            _ => i += 1,
+            tree.children.drain(i..j);
+        } else {
+            i += 1;
         }
     }
 }
 
-fn group_identifiers(tree: &mut Tree) {
+fn char_type(c: char) -> usize {
+    match c {
+        '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => 0,
+        _ if c.is_whitespace() => 1,
+        _ => 2,
+    }
+}
+
+fn group_characters(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
-        match tree.children[i].data {
-            Data::Char(c) if !c.is_whitespace() => {
-                if i == 0 {
-                    tree.children[i].data = Data::String(c.to_string());
-                } else if let Data::String(s) = &mut tree.children[i - 1].data {
-                    s.push(c);
-                    tree.children.remove(i);
-                } else {
-                    tree.children[i].data = Data::String(c.to_string());
-                }
-            }
-            _ => i += 1,
+        let c = tree.children[i].data.as_char();
+        if i != 0 && char_type(c) == char_type(tree.children[i - 1].data.first_char()) {
+            tree.children[i - 1].data.as_string().push(c);
+            tree.children.remove(i);
+        } else {
+            tree.children[i].data = Data::String(c.to_string());
+            i += 1;
         }
     }
 }
@@ -186,24 +208,10 @@ fn group_identifiers(tree: &mut Tree) {
 fn remove_whitespace(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
-        match tree.children[i].data {
-            Data::Char(c) if c.is_whitespace() => {
-                tree.children.remove(i);
-            }
-            _ => i += 1,
-        }
-    }
-}
-
-fn integer_literals(tree: &mut Tree) {
-    let mut i = 0;
-    while i < tree.children.len() {
-        match &tree.children[i].data {
-            Data::String(s) => match s.parse::<i64>() {
-                Ok(int) => tree.children[i].data = Data::Int(int),
-                _ => i += 1,
-            },
-            _ => i += 1,
+        if tree.children[i].data.first_char().is_whitespace() {
+            tree.children.remove(i);
+        } else {
+            i += 1;
         }
     }
 }
@@ -218,12 +226,12 @@ fn group_brackets(tree: &mut Tree) {
         ]);
         while *i < trees.len() {
             *i += 1;
-            match &trees[*i - 1].data {
-                Data::String(s) if s == ")" || s == "}" || s == "]" => match (s, target) {
+            match trees[*i - 1].data.as_string().clone().as_str() {
+                s @ (")" | "}" | "]") => match (s, target) {
                     (s, Some(t)) if s == t => return,
                     (s, _) => panic!("extra {s}"),
                 },
-                Data::String(s) if brackets.contains_key(s) => {
+                s if brackets.contains_key(s) => {
                     let start = *i;
                     bracket_matcher(trees, i, Some(brackets.get(s).unwrap()));
                     let mut children: Vec<Tree> = trees.drain(start..*i).collect();
@@ -241,29 +249,29 @@ fn group_brackets(tree: &mut Tree) {
     }
 }
 
-//                   name     func     left   right
-type Operator<'a> = (&'a str, &'a str, usize, usize);
+//                   name     func     left   right  unroll
+type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-    (&[("@", "nop", 1, 1)], false),
-    (&[("-", "neg", 0, 1), ("not", "_not_", 0, 1)], true),
-    (&[("*", "mul", 1, 1)], false),
-    (&[("+", "add", 1, 1)], false),
     (
         &[
-            ("==", "eq", 1, 1),
-            ("!=", "ne", 1, 1),
-            ("<", "lt", 1, 1),
-            (">", "gt", 1, 1),
-            ("<=", "le", 1, 1),
-            (">=", "ge", 1, 1),
+            ("copy", "copy", 0, 1, false),
+            ("pull", "pull", 0, 1, false),
+            (":", "mark", 1, 0, false),
+            ("cond", "cond", 0, 1, false),
         ],
-        false,
+        true,
     ),
-    (&[("and", "_and_", 1, 1), ("or", "_or_", 1, 1)], true),
-    (&[("=", "=", 1, 1), (":=", ":=", 1, 1)], true),
-    (&[("if", "_if_", 0, 2), ("while", "_while_", 0, 2)], true),
-    (&[("else", "_else_", 1, 1)], true),
+    (
+        &[("-", "neg", 0, 1, true), ("not", "_not_", 0, 1, true)],
+        true,
+    ),
+    (&[("*", "mul", 1, 1, true)], false),
+    (&[("+", "add", 1, 1, true)], false),
+    (
+        &[("and", "_and_", 1, 1, true), ("or", "_or_", 1, 1, true)],
+        true,
+    ),
 ];
 
 fn group_operators(tree: &mut Tree) {
@@ -308,15 +316,19 @@ fn unroll_operators(tree: &mut Tree) {
                     .iter()
                     .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
                 {
-                    let mut children: Vec<Tree> = tree.children[i].children.drain(..).collect();
-                    children.reverse();
-                    let l = children.len();
-                    children.push(Tree {
-                        data: Data::String(op.1.to_owned()),
-                        children: vec![],
-                    });
-                    tree.children.splice(i..=i, children);
-                    i += l;
+                    if op.4 {
+                        let mut children: Vec<Tree> = tree.children[i].children.drain(..).collect();
+                        children.reverse();
+                        let l = children.len();
+                        children.push(Tree {
+                            data: Data::String(op.1.to_owned()),
+                            children: vec![],
+                        });
+                        tree.children.splice(i..=i, children);
+                        i += l;
+                    } else {
+                        tree.children[i].data = Data::String(op.1.to_owned());
+                    }
                 }
             }
             i += 1;
@@ -324,51 +336,35 @@ fn unroll_operators(tree: &mut Tree) {
     });
 }
 
-fn convert_to_ops(tree: &mut Tree) {
-    let ops: std::collections::HashMap<&str, &[Op]> =
-        std::collections::HashMap::from([("not", &[Op::Neg, Op::Psh(1), Op::Add][..])]);
-    tree.postorder(|tree| {
-        let mut i = 0;
-        while i < tree.children.len() {
-            if let Data::Int(int) = tree.children[i].data {
-                tree.children[i].data = Data::Op(Op::Psh(int))
-            } else if let Data::String(s) = &tree.children[i].data {
-                match s.as_str() {
-                    "dup" => tree.children[i].data = Data::Op(Op::Dup),
-                    "add" => tree.children[i].data = Data::Op(Op::Add),
-                    "neg" => tree.children[i].data = Data::Op(Op::Neg),
-                    "ltz" => tree.children[i].data = Data::Op(Op::Ltz),
-                    "lbl" => {
-                        tree.children.splice(
-                            i..=i + 1,
-                            [match &tree.children[i + 1].data {
-                                Data::Int(int) => Tree {
-                                    data: Data::Op(Op::Lbl(*int)),
-                                    children: vec![],
-                                },
-                                data => panic!("expected int, found {data:?}"),
-                            }],
-                        );
-                    }
-                    "jmp" => tree.children[i].data = Data::Op(Op::Jmp),
-                    op => match ops.get(op) {
-                        Some(ops) => {
-                            tree.children.splice(
-                                i..=i,
-                                ops.iter().map(|op| Tree {
-                                    data: Data::Op(op.clone()),
-                                    children: vec![],
-                                }),
-                            );
-                            i += ops.len() - 1;
-                        }
-                        None => panic!("unknown op {op:?}"),
-                    },
-                }
-            } else {
-                panic!("unknown op")
+fn integer_literals(tree: &mut Tree) {
+    tree.postorder(|tree| match &tree.data {
+        Data::Empty => {}
+        Data::String(s) => {
+            if let Ok(int) = s.parse::<i64>() {
+                tree.data = Data::Int(int)
             }
-            i += 1;
         }
+        data => panic!("expected empty or string, found {data:?}"),
     });
+}
+
+fn convert_to_ops(tree: &mut Tree) {
+    let mut i = 0;
+    while i < tree.children.len() {
+        tree.children[i].data = Data::Op(match &tree.children[i].data {
+            Data::Int(int) => Op::Push(*int),
+            Data::String(s) => match s.as_str() {
+                "copy" => Op::Copy(tree.children[i].children.remove(0).data.as_int() as usize),
+                "pull" => Op::Pull(tree.children[i].children.remove(0).data.as_int() as usize),
+                "add" => Op::Add,
+                "neg" => Op::Neg,
+                "ltz" => Op::Ltz,
+                "mark" => Op::Mark(tree.children[i].children.remove(0).data.as_string().clone()),
+                "cond" => Op::Cond(tree.children[i].children.remove(0).data.as_string().clone()),
+                op => panic!("unknown op {op}"),
+            },
+            data => panic!("expected an int or string, found {data:?}"),
+        });
+        i += 1;
+    }
 }
