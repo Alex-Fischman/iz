@@ -131,54 +131,50 @@ fn main() {
 
     let mut pc = 0;
     let mut data = Memory(vec![]);
-    let mut sp = 0;
+    let mut sp = -1;
 
     while pc < code.len() {
-        println!("{:?}", &data.0[0..sp as usize]);
-        print!("{:?}\t", code[pc]);
         match &code[pc] {
             Op::Int(i) => {
+                data[sp + 1] = *i;
                 sp += 1;
-                data[sp - 1] = *i;
             }
             Op::Add => {
-                sp -= 1;
                 data[sp - 1] += data[sp];
-            }
-            Op::Neg => {
-                data[sp - 1] = -data[sp - 1];
-            }
-            Op::Ltz => {
-                data[sp - 1] = (data[sp - 1] < 0) as i64;
-            }
-            Op::Shirk => {
                 sp -= 1;
-                sp = sp - 1 - data[sp];
             }
+            Op::Neg => data[sp] = -data[sp],
+            Op::Ltz => data[sp] = (data[sp] < 0) as i64,
+            Op::Shirk => sp = sp - 2 - data[sp],
             Op::Shove => {
+                let i = data[sp];
+                data[sp - 2 - i] = data[sp - 1];
                 sp -= 2;
-                let i = data[sp + 1];
-                data[sp - 1 - i] = data[sp];
             }
             Op::Steal => {
-                let i = data[sp - 1];
-                data[sp - 1] = data[sp - 2 - i];
+                let i = data[sp];
+                data[sp] = data[sp - 1 - i];
             }
             Op::Pc => {
+                data[sp + 1] = pc as i64;
                 sp += 1;
-                data[sp - 1] = pc as i64;
             }
             Op::Jz => {
-                sp -= 2;
-                if data[sp] == 0 {
-                    pc = data[sp + 1] as usize;
+                if data[sp - 1] == 0 {
+                    pc = data[sp] as usize;
                 }
+                sp -= 2;
             }
         }
+
+        print!("{:?}\t", code[pc]);
+        match sp {
+            -1 => println!(),
+            sp => println!("{:?}", &data.0[0..=sp as usize]),
+        }
+
         pc += 1;
     }
-
-    println!("{:?}", &data.0[0..sp as usize]);
 }
 
 fn remove_comments(tree: &mut Tree) {
