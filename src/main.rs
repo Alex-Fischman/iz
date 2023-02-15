@@ -247,10 +247,7 @@ fn group_brackets(tree: &mut Tree) {
 type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-    (
-        &[(":", "mark", 1, 0, false), ("?", "cond", 1, 0, false)],
-        true,
-    ),
+    (&[(":", ":", 1, 0, false), ("?", "?", 1, 0, false)], true),
     (
         &[("-", "neg", 0, 1, true), ("not", "_not_", 0, 1, true)],
         true,
@@ -358,8 +355,8 @@ fn convert_to_ops(tree: &mut Tree) {
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
-                "mark" => Op::Mark(tree.children[i].children.remove(0).data.as_string().clone()),
-                "cond" => Op::Cond(tree.children[i].children.remove(0).data.as_string().clone()),
+                ":" => Op::Mark(tree.children[i].children.remove(0).data.as_string().clone()),
+                "?" => Op::Cond(tree.children[i].children.remove(0).data.as_string().clone()),
                 op => panic!("unknown op {op}"),
             },
             data => panic!("expected an int or string, found {data:?}"),
