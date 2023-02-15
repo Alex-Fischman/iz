@@ -5,6 +5,10 @@ struct Tree {
 }
 
 impl Tree {
+    fn new(data: Data, children: Vec<Tree>) -> Tree {
+        Tree { data, children }
+    }
+
     fn postorder<F: Fn(&mut Tree) + Clone>(&mut self, f: F) {
         for tree in &mut self.children {
             tree.postorder(f.clone());
@@ -68,15 +72,9 @@ fn main() {
     let tokens = std::fs::read_to_string(file)
         .expect("could not read file")
         .chars()
-        .map(|c| Tree {
-            data: Data::Char(c),
-            children: vec![],
-        })
+        .map(|c| Tree::new(Data::Char(c), vec![]))
         .collect();
-    let mut tree = Tree {
-        data: Data::Empty,
-        children: tokens,
-    };
+    let mut tree = Tree::new(Data::Empty, tokens);
 
     // --------------------------------------------------------------------------
 
@@ -92,6 +90,7 @@ fn main() {
         unroll_brackets,
         integer_literals,
         // analysis
+
         // transformation
         convert_to_ops,
     ];
@@ -277,13 +276,8 @@ fn group_operators(tree: &mut Tree) {
                     tree.children.remove(i);
                     let children: Vec<Tree> = tree.children.drain(i - op.2..i + op.3).collect();
                     i -= op.2;
-                    tree.children.insert(
-                        i,
-                        Tree {
-                            data: Data::String(s),
-                            children,
-                        },
-                    );
+                    tree.children
+                        .insert(i, Tree::new(Data::String(s), children));
                 }
                 i = if *right { i.wrapping_sub(1) } else { i + 1 }
             }
@@ -304,10 +298,7 @@ fn unroll_operators(tree: &mut Tree) {
                     let mut children: Vec<Tree> = tree.children[i].children.drain(..).collect();
                     children.reverse();
                     let l = children.len();
-                    children.push(Tree {
-                        data: Data::String(op.1.to_owned()),
-                        children: vec![],
-                    });
+                    children.push(Tree::new(Data::String(op.1.to_owned()), vec![]));
                     tree.children.splice(i..=i, children);
                     i += l;
                 } else {
