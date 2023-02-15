@@ -55,13 +55,13 @@ impl Data {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
-    Push(i64),
-    Free,
-    Shove,
-    Steal,
+    Int(i64),
     Add,
     Neg,
     Ltz,
+    Shirk,
+    Shove,
+    Steal,
     Pc,
     Jz,
 }
@@ -118,22 +118,7 @@ fn main() {
     while pc < program.len() {
         println!("{stack:?}");
         match &program[pc] {
-            Op::Push(i) => stack.push(*i),
-            Op::Free => {
-                let i = stack.pop().unwrap() as usize;
-                let _ = stack.drain(stack.len() - i..);
-            }
-            Op::Shove => {
-                let i = stack.pop().unwrap() as usize;
-                let a = stack.pop().unwrap();
-                let j = stack.len() - 1 - i;
-                stack[j] = a;
-            }
-            Op::Steal => {
-                let i = stack.pop().unwrap() as usize;
-                let a = stack.get(stack.len() - 1 - i).unwrap();
-                stack.push(*a);
-            }
+            Op::Int(i) => stack.push(*i),
             Op::Add => {
                 let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
                 stack.push(a + b);
@@ -145,6 +130,21 @@ fn main() {
             Op::Ltz => {
                 let a = stack.pop().unwrap();
                 stack.push((a < 0) as i64);
+            }
+            Op::Shirk => {
+                let i = stack.pop().unwrap() as usize;
+                stack.truncate(stack.len() - 1 - i);
+            }
+            Op::Shove => {
+                let i = stack.pop().unwrap() as usize;
+                let a = stack.pop().unwrap();
+                let j = stack.len() - 1 - i;
+                stack[j] = a;
+            }
+            Op::Steal => {
+                let i = stack.pop().unwrap() as usize;
+                let a = stack.get(stack.len() - 1 - i).unwrap();
+                stack.push(*a);
             }
             Op::Pc => stack.push(pc as i64),
             Op::Jz => {
@@ -333,14 +333,14 @@ fn convert_to_ops(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
-            Data::Int(int) => Op::Push(*int),
+            Data::Int(int) => Op::Int(*int),
             Data::String(s) => match s.as_str() {
-                "free" => Op::Free,
-                "shove" => Op::Shove,
-                "steal" => Op::Steal,
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
+                "shirk" => Op::Shirk,
+                "shove" => Op::Shove,
+                "steal" => Op::Steal,
                 "pc" => Op::Pc,
                 "jz" => Op::Jz,
                 op => panic!("unknown op {op}"),

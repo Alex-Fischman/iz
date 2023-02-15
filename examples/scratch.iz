@@ -15,18 +15,16 @@ pc + 11 # cond start
 4 steal jz
 # body end
 
-2 shove 2 free # i
+2 shove 1 shirk # i
 
 # here are some examples of stack memory management
 13 # a bare literal pushes its value
-1 free # free removes the top n elements
+0 shirk # shirk truncates the nth-from-top elements
 0 steal # steal copies from the nth-from-top element
 0 shove # shove copies into the nth-from-top element
 
 0 steal # dup
-1 free # drop
-
-
+0 shirk # drop
 
 # swap
 0 # 5 0
