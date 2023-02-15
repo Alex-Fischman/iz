@@ -57,7 +57,6 @@ impl Data {
 enum Op {
     Push(i64),
     Copy,
-    Pull,
     Add,
     Neg,
     Ltz,
@@ -132,10 +131,6 @@ fn main() {
                 let i = stack.pop().unwrap() as usize;
                 let a = stack.get(stack.len() - 1 - i).unwrap();
                 stack.push(*a);
-            }
-            Op::Pull => {
-                let i = stack.pop().unwrap() as usize;
-                stack.remove(stack.len() - 1 - i);
             }
             Op::Add => {
                 let (a, b) = (stack.pop().unwrap(), stack.pop().unwrap());
@@ -342,7 +337,6 @@ fn convert_to_ops(tree: &mut Tree) {
             Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
                 "copy" => Op::Copy,
-                "pull" => Op::Pull,
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
