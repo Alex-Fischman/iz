@@ -1,21 +1,14 @@
 # this is a comment
 
 # here is a while loop
-pc        9 add # cond start
-(copy 0) 6 add # body start
-(copy 0) 5 add # body end
 1
-# a b c i (cond)
-# cond start
-(copy 0) neg 5 add
-(copy 2) jz
-# body start
+cond_start:
+(copy 0) neg 5 add body_end?
+body_start:
 1 add
-0
-(copy 4) jz
-# body end
-
-(move 4) (copy -4) # i
+0 cond_start jz
+body_end:
+# stack should just be 5 here
 
 # here are some examples of stack memory management
 13 # a bare literal pushes its value

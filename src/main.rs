@@ -68,7 +68,6 @@ enum Op {
     Add,
     Neg,
     Ltz,
-    Pc,
     Jz,
 }
 
@@ -139,8 +138,10 @@ fn main() {
     let mut data = Memory(vec![]);
     let mut sp = -1;
 
-    while pc < code.len() {
-        match &code[pc] {
+    while (pc as usize) < code.len() {
+        print!("{:?}\t", code[pc as usize]);
+
+        match &code[pc as usize] {
             Op::Push(i) => {
                 data[sp + 1] = *i;
                 sp += 1;
@@ -156,19 +157,14 @@ fn main() {
             }
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Pc => {
-                data[sp + 1] = pc as i64;
-                sp += 1;
-            }
             Op::Jz => {
                 if data[sp - 1] == 0 {
-                    pc = data[sp] as usize;
+                    pc = data[sp] - 1;
                 }
                 sp -= 2;
             }
         }
 
-        print!("{:?}\t", code[pc]);
         match sp {
             -1 => println!(),
             sp => println!("{:?}", &data.0[0..=sp as usize]),
@@ -262,20 +258,13 @@ fn group_brackets(tree: &mut Tree) {
 type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
+    (&[(":", ":", 1, 0, false), ("?", "jz", 1, 0, true)], false),
     (
         &[("move", "move", 0, 1, false), ("copy", "copy", 0, 1, false)],
         true,
     ),
-    (
-        &[("-", "neg", 0, 1, true), ("not", "_not_", 0, 1, true)],
-        true,
-    ),
-    (&[("*", "mul", 1, 1, true)], false),
+    (&[("-", "neg", 0, 1, true)], true),
     (&[("+", "add", 1, 1, true)], false),
-    (
-        &[("and", "_and_", 1, 1, true), ("or", "_or_", 1, 1, true)],
-        true,
-    ),
 ];
 
 fn group_operators(tree: &mut Tree) {
@@ -352,6 +341,19 @@ fn integer_literals(tree: &mut Tree) {
 }
 
 fn convert_to_ops(tree: &mut Tree) {
+    let mut labels = std::collections::HashMap::new();
+    let mut i = 0;
+    while i < tree.children.len() {
+        if tree.children[i].data == Data::String(":".to_string()) {
+            let label = tree.children[i].children.remove(0).data.as_string().clone();
+            let old = labels.insert(label, i);
+            assert_eq!(old, None);
+            tree.children.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+
     let mut i = 0;
     while i < tree.children.len() {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
@@ -362,9 +364,11 @@ fn convert_to_ops(tree: &mut Tree) {
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
-                "pc" => Op::Pc,
                 "jz" => Op::Jz,
-                op => panic!("unknown op {op}"),
+                _ => match labels.get(s) {
+                    Some(j) => Op::Push(*j as i64),
+                    None => panic!("expected an op or a label, found {s} in {labels:?}"),
+                },
             },
             data => panic!("expected an int or string, found {data:?}"),
         });
