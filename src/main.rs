@@ -68,7 +68,7 @@ enum Op {
     Add,
     Neg,
     Ltz,
-    Jz,
+    Jz(i64),
 }
 
 struct Memory(Vec<i64>);
@@ -157,11 +157,15 @@ fn main() {
             }
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Jz => {
-                if data[sp - 1] == 0 {
-                    pc = data[sp] - 1;
+            Op::Jz(i) => {
+                if data[sp] == 0 {
+                    if *i < 0 {
+                        todo!("syscalls?")
+                    } else {
+                        pc = i - 1;
+                    }
                 }
-                sp -= 2;
+                sp -= 1;
             }
         }
 
@@ -259,8 +263,11 @@ type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
     (&[(":", ":", 1, 0, false)], false),
+    (&[("?", "?", 1, 0, false)], false),
     (&[("~", "~", 0, 1, false)], true),
     (&[("$", "$", 0, 1, false)], true),
+    (&[("-", "neg", 0, 1, true)], true),
+    (&[("+", "add", 1, 1, true)], false),
 ];
 
 fn group_operators(tree: &mut Tree) {
@@ -342,7 +349,7 @@ fn convert_to_ops(tree: &mut Tree) {
     while i < tree.children.len() {
         if tree.children[i].data == Data::String(":".to_string()) {
             let label = tree.children[i].children.remove(0).data.as_string().clone();
-            let old = labels.insert(label, i);
+            let old = labels.insert(label, i as i64);
             assert_eq!(old, None);
             tree.children.remove(i);
             continue;
@@ -360,11 +367,11 @@ fn convert_to_ops(tree: &mut Tree) {
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
-                "jz" => Op::Jz,
-                _ => match labels.get(s) {
-                    Some(j) => Op::Push(*j as i64),
-                    None => panic!("expected an op or a label, found {s} in {labels:?}"),
-                },
+                "?" => {
+                    let label = tree.children[i].children.remove(0).data.as_string().clone();
+                    Op::Jz(*labels.get(&label).unwrap())
+                }
+                _ => panic!("expected an op, found {s}"),
             },
             data => panic!("expected an int or string, found {data:?}"),
         });
