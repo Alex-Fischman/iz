@@ -3,7 +3,7 @@
 # here is a while loop
 1
 cond_start:
-(copy 0) neg 5 add body_end?
+(copy 0) neg 5 add body_end jz
 body_start:
 1 add
 0 cond_start jz

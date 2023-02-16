@@ -258,7 +258,7 @@ fn group_brackets(tree: &mut Tree) {
 type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
-    (&[(":", ":", 1, 0, false), ("?", "jz", 1, 0, true)], false),
+    (&[(":", ":", 1, 0, false)], false),
     (
         &[("move", "move", 0, 1, false), ("copy", "copy", 0, 1, false)],
         true,
