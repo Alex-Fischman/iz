@@ -259,12 +259,8 @@ type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
 //                               right associativity
 const OPERATORS: &[(&[Operator], bool)] = &[
     (&[(":", ":", 1, 0, false)], false),
-    (
-        &[("move", "move", 0, 1, false), ("copy", "copy", 0, 1, false)],
-        true,
-    ),
-    (&[("-", "neg", 0, 1, true)], true),
-    (&[("+", "add", 1, 1, true)], false),
+    (&[("~", "~", 0, 1, false)], true),
+    (&[("$", "$", 0, 1, false)], true),
 ];
 
 fn group_operators(tree: &mut Tree) {
@@ -359,8 +355,8 @@ fn convert_to_ops(tree: &mut Tree) {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
             Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
-                "move" => Op::Move(tree.children[i].children.remove(0).data.as_int()),
-                "copy" => Op::Copy(tree.children[i].children.remove(0).data.as_int()),
+                "~" => Op::Move(tree.children[i].children.remove(0).data.as_int()),
+                "$" => Op::Copy(tree.children[i].children.remove(0).data.as_int()),
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
