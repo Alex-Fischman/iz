@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, PartialEq)]
 struct Tree {
     data: Data,
@@ -18,8 +20,13 @@ impl Tree {
 }
 
 #[derive(Debug, PartialEq)]
+struct Scope {
+    labels: HashMap<String, i64>,
+}
+
+#[derive(Debug, PartialEq)]
 enum Data {
-    Empty,
+    Scope(Scope),
     Char(char),
     String(String),
     Int(i64),
@@ -27,6 +34,13 @@ enum Data {
 }
 
 impl Data {
+    fn as_scope(&mut self) -> &mut Scope {
+        match self {
+            Data::Scope(s) => s,
+            _ => panic!("expected scope, found {self:?}"),
+        }
+    }
+
     fn as_char(&self) -> char {
         match self {
             Data::Char(c) => *c,
@@ -99,7 +113,12 @@ fn main() {
         .chars()
         .map(|c| Tree::new(Data::Char(c), vec![]))
         .collect();
-    let mut tree = Tree::new(Data::Empty, tokens);
+    let mut tree = Tree::new(
+        Data::Scope(Scope {
+            labels: HashMap::new(),
+        }),
+        tokens,
+    );
 
     // compiler
     let passes = [
@@ -116,6 +135,7 @@ fn main() {
         // analysis
 
         // transformation
+        add_labels_to_scope,
         convert_to_ops,
     ];
 
@@ -124,7 +144,7 @@ fn main() {
     }
 
     // backend
-    assert_eq!(tree.data, Data::Empty);
+    assert!(matches!(tree.data, Data::Scope(_)));
     let code: Vec<Op> = tree
         .children
         .into_iter()
@@ -333,7 +353,7 @@ fn unroll_brackets(tree: &mut Tree) {
 
 fn integer_literals(tree: &mut Tree) {
     tree.postorder(|tree| match &tree.data {
-        Data::Empty => {}
+        Data::Scope(_) => {}
         Data::String(s) => {
             if let Ok(int) = s.parse::<i64>() {
                 tree.data = Data::Int(int)
@@ -343,20 +363,22 @@ fn integer_literals(tree: &mut Tree) {
     });
 }
 
-fn convert_to_ops(tree: &mut Tree) {
-    let mut labels = std::collections::HashMap::new();
+fn add_labels_to_scope(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
         if tree.children[i].data == Data::String(":".to_string()) {
             let label = tree.children[i].children.remove(0).data.as_string().clone();
-            let old = labels.insert(label, i as i64);
+            let old = tree.data.as_scope().labels.insert(label, i as i64);
             assert_eq!(old, None);
             tree.children.remove(i);
             continue;
         }
         i += 1;
     }
+}
 
+fn convert_to_ops(tree: &mut Tree) {
+    let labels = &tree.data.as_scope().labels;
     let mut i = 0;
     while i < tree.children.len() {
         tree.children[i].data = Data::Op(match &tree.children[i].data {
