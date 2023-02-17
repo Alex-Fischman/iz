@@ -198,22 +198,22 @@ fn main() {
     }
 }
 
-fn remove_comments(tree: &mut Tree) {
+fn remove_comments(root: &mut Tree) {
     let mut i = 0;
-    while i < tree.children.len() {
-        if tree.children[i].data.as_char() == '#' {
+    while i < root.children.len() {
+        if root.children[i].data.as_char() == '#' {
             let mut j = i;
-            while j < tree.children.len() && tree.children[j].data.as_char() != '\n' {
+            while j < root.children.len() && root.children[j].data.as_char() != '\n' {
                 j += 1;
             }
-            tree.children.drain(i..j);
+            root.children.drain(i..j);
         } else {
             i += 1;
         }
     }
 }
 
-fn group_characters(tree: &mut Tree) {
+fn group_characters(root: &mut Tree) {
     fn char_type(c: char) -> usize {
         match c {
             '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => 0,
@@ -224,23 +224,23 @@ fn group_characters(tree: &mut Tree) {
     }
 
     let mut i = 0;
-    while i < tree.children.len() {
-        let c = tree.children[i].data.as_char();
-        if i != 0 && char_type(c) == char_type(tree.children[i - 1].data.first_char()) {
-            tree.children[i - 1].data.as_string().push(c);
-            tree.children.remove(i);
+    while i < root.children.len() {
+        let c = root.children[i].data.as_char();
+        if i != 0 && char_type(c) == char_type(root.children[i - 1].data.first_char()) {
+            root.children[i - 1].data.as_string().push(c);
+            root.children.remove(i);
         } else {
-            tree.children[i].data = Data::String(c.to_string());
+            root.children[i].data = Data::String(c.to_string());
             i += 1;
         }
     }
 }
 
-fn remove_whitespace(tree: &mut Tree) {
+fn remove_whitespace(root: &mut Tree) {
     let mut i = 0;
-    while i < tree.children.len() {
-        if tree.children[i].data.first_char().is_whitespace() {
-            tree.children.remove(i);
+    while i < root.children.len() {
+        if root.children[i].data.first_char().is_whitespace() {
+            root.children.remove(i);
         } else {
             i += 1;
         }
@@ -249,8 +249,8 @@ fn remove_whitespace(tree: &mut Tree) {
 
 const BRACKETS: &[(&str, &str)] = &[("(", ")"), ("{", "}"), ("[", "]")];
 
-fn group_brackets(tree: &mut Tree) {
-    bracket_matcher(&mut tree.children, &mut 0, None);
+fn group_brackets(root: &mut Tree) {
+    bracket_matcher(&mut root.children, &mut 0, None);
     fn bracket_matcher(trees: &mut Vec<Tree>, i: &mut usize, target: Option<&str>) {
         while *i < trees.len() {
             *i += 1;
@@ -290,8 +290,8 @@ const OPERATORS: &[(&[Operator], bool)] = &[
     (&[("+", "add", 1, 1, true)], false),
 ];
 
-fn group_operators(tree: &mut Tree) {
-    tree.postorder(|tree| {
+fn group_operators(root: &mut Tree) {
+    root.postorder(|tree| {
         for (ops, right) in OPERATORS {
             let mut i = if *right {
                 tree.children.len().wrapping_sub(1)
@@ -316,8 +316,8 @@ fn group_operators(tree: &mut Tree) {
     });
 }
 
-fn unroll_operators(tree: &mut Tree) {
-    tree.postorder(|tree| {
+fn unroll_operators(root: &mut Tree) {
+    root.postorder(|tree| {
         let mut i = 0;
         while i < tree.children.len() {
             let s = tree.children[i].data.as_string();
@@ -338,8 +338,8 @@ fn unroll_operators(tree: &mut Tree) {
     });
 }
 
-fn unroll_brackets(tree: &mut Tree) {
-    tree.postorder(|tree| {
+fn unroll_brackets(root: &mut Tree) {
+    root.postorder(|tree| {
         let mut i = 0;
         while i < tree.children.len() {
             if tree.children[i].data.as_string() == "(" {
@@ -351,8 +351,8 @@ fn unroll_brackets(tree: &mut Tree) {
     });
 }
 
-fn integer_literals(tree: &mut Tree) {
-    tree.postorder(|tree| match &tree.data {
+fn integer_literals(root: &mut Tree) {
+    root.postorder(|tree| match &tree.data {
         Data::Scope(_) => {}
         Data::String(s) => {
             if let Ok(int) = s.parse::<i64>() {
@@ -363,35 +363,34 @@ fn integer_literals(tree: &mut Tree) {
     });
 }
 
-fn add_labels_to_scope(tree: &mut Tree) {
+fn add_labels_to_scope(root: &mut Tree) {
     let mut i = 0;
-    while i < tree.children.len() {
-        if tree.children[i].data == Data::String(":".to_string()) {
-            let label = tree.children[i].children.remove(0).data.as_string().clone();
-            let old = tree.data.as_scope().labels.insert(label, i as i64);
+    while i < root.children.len() {
+        if root.children[i].data == Data::String(":".to_string()) {
+            let label = root.children[i].children.remove(0).data.as_string().clone();
+            let old = root.data.as_scope().labels.insert(label, i as i64);
             assert_eq!(old, None);
-            tree.children.remove(i);
+            root.children.remove(i);
             continue;
         }
         i += 1;
     }
 }
 
-fn convert_to_ops(tree: &mut Tree) {
-    let labels = &tree.data.as_scope().labels;
+fn convert_to_ops(root: &mut Tree) {
     let mut i = 0;
-    while i < tree.children.len() {
-        tree.children[i].data = Data::Op(match &tree.children[i].data {
+    while i < root.children.len() {
+        root.children[i].data = Data::Op(match &root.children[i].data {
             Data::Int(int) => Op::Push(*int),
             Data::String(s) => match s.as_str() {
-                "~" => Op::Move(tree.children[i].children.remove(0).data.as_int()),
-                "$" => Op::Copy(tree.children[i].children.remove(0).data.as_int()),
+                "~" => Op::Move(root.children[i].children.remove(0).data.as_int()),
+                "$" => Op::Copy(root.children[i].children.remove(0).data.as_int()),
                 "add" => Op::Add,
                 "neg" => Op::Neg,
                 "ltz" => Op::Ltz,
                 "?" => {
-                    let label = tree.children[i].children.remove(0).data.as_string().clone();
-                    Op::Jz(*labels.get(&label).unwrap())
+                    let label = root.children[i].children.remove(0).data.as_string().clone();
+                    Op::Jz(*root.data.as_scope().labels.get(&label).unwrap())
                 }
                 _ => panic!("expected an op, found {s}"),
             },
