@@ -2,12 +2,12 @@
 
 # here is a while loop
 1
-cond_start:
-$0 neg 5 add body_end?
-body_start:
+while_start:
+$0 neg 3 add while_end?
+# cond ends, body starts
 1 add
-0 cond_start?
-body_end:
+0 while_start?
+while_end:
 # stack should just be 5 here
 
 # here are some examples of stack memory management
@@ -16,12 +16,21 @@ $0 # $ copies the nth-from-top element
 ~2 # ~ moves the stack pointer
 # both $ and ~ can take negative arguments
 
-0 # 5 0
+0 # 3 0
 
 $0 # dup
 ~1 # drop
 $1 ~3 $-2 $-2 # swap
 
-# 0 5
+# 0 3
 
 -(1 + 2) # operators with precedence and associativity
+add add
+
+# here is an if else statement
+if_end?
+1234
+0 else_end?
+if_end:
+5678
+else_end:
