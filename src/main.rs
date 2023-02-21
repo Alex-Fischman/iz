@@ -118,21 +118,19 @@ fn main() {
 
     // compiler
     let passes = [
-        // tokenizer
+        // lexing
         remove_comments,
         group_characters,
         remove_whitespace,
-        // parser
+        // parsing
         group_brackets,
         group_operators,
         unroll_operators,
         unroll_brackets,
         integer_literals,
-        // analysis
-
         // transformation
-        add_labels_to_scope,
-        convert_to_ops,
+
+        // analysis
     ];
 
     for pass in passes {
@@ -140,13 +138,39 @@ fn main() {
     }
 
     // backend
-    let code: Vec<Op> = tree
-        .get_children(0)
-        .clone()
+    let mut labels = HashMap::new();
+    let mut children = tree.get_children(0).clone();
+    let mut i = 0;
+    while i < children.len() {
+        if tree.has::<String>(children[i]) && tree.get_mut::<String>(children[i]) == ":" {
+            let mut cs = tree.get_children(children[i]).clone();
+            let old = labels.insert(tree.remove::<String>(cs.remove(0)), i as i64);
+            assert_eq!(old, None);
+            children.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+
+    let code: Vec<Op> = children
         .into_iter()
         .map(|node| {
-            assert!(tree.get_children(node).is_empty());
-            tree.remove::<Op>(node)
+            if tree.has::<i64>(node) {
+                Op::Push(tree.remove(node))
+            } else if tree.has::<String>(node) {
+                let mut cs = tree.get_children(node).clone();
+                match tree.remove::<String>(node).as_str() {
+                    "~" => Op::Move(tree.remove(cs.remove(0))),
+                    "$" => Op::Copy(tree.remove(cs.remove(0))),
+                    "add" => Op::Add,
+                    "neg" => Op::Neg,
+                    "ltz" => Op::Ltz,
+                    "?" => Op::Jz(*labels.get(&tree.remove::<String>(cs.remove(0))).unwrap()),
+                    s => panic!("expected an op, found {s}"),
+                }
+            } else {
+                panic!("expected an int or a string, found neither")
+            }
         })
         .collect();
 
@@ -387,54 +411,4 @@ fn integer_literals(tree: &mut Tree) {
             }
         }
     });
-}
-
-type Labels = HashMap<String, i64>;
-fn add_labels_to_scope(tree: &mut Tree) {
-    let mut labels: Labels = HashMap::new();
-    let mut children = tree.get_children(0).clone();
-    let mut i = 0;
-    while i < children.len() {
-        if tree.has::<String>(children[i]) && tree.get_mut::<String>(children[i]) == ":" {
-            let grandchild = tree.get_children(children[i]).remove(0);
-            let old = labels.insert(tree.remove::<String>(grandchild), i as i64);
-            assert_eq!(old, None);
-            children.remove(i);
-            continue;
-        }
-        i += 1;
-    }
-    *tree.get_children(0) = children;
-    tree.new_storage::<Labels>();
-    tree.insert(0, labels);
-}
-
-fn convert_to_ops(tree: &mut Tree) {
-    tree.new_storage::<Op>();
-    let labels: HashMap<String, i64> = tree.remove(0);
-    let children = tree.get_children(0).clone();
-    let mut i = 0;
-    while i < children.len() {
-        let op = if tree.has::<i64>(children[i]) {
-            Op::Push(tree.remove(children[i]))
-        } else if tree.has::<String>(children[i]) {
-            let s = tree.remove::<String>(children[i]);
-            let mut cs = tree.get_children(children[i]).clone();
-            let op = match s.as_str() {
-                "~" => Op::Move(tree.remove(cs.remove(0))),
-                "$" => Op::Copy(tree.remove(cs.remove(0))),
-                "add" => Op::Add,
-                "neg" => Op::Neg,
-                "ltz" => Op::Ltz,
-                "?" => Op::Jz(*labels.get(&tree.remove::<String>(cs.remove(0))).unwrap()),
-                _ => panic!("expected an op, found {s}"),
-            };
-            *tree.get_children(children[i]) = cs;
-            op
-        } else {
-            panic!("expected an int or a string, found neither")
-        };
-        tree.insert(children[i], op);
-        i += 1;
-    }
 }
