@@ -118,19 +118,15 @@ fn main() {
 
     // compiler
     let passes = [
-        // lexing
         remove_comments,
         group_characters,
         remove_whitespace,
-        // parsing
         group_brackets,
         group_operators,
         unroll_operators,
+        inline_builtins,
         unroll_brackets,
         integer_literals,
-        // transformation
-
-        // analysis
     ];
 
     for pass in passes {
@@ -322,7 +318,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
     (&[("?", "?", 1, 0, false)], false),
     (&[("~", "~", 0, 1, false)], true),
     (&[("$", "$", 0, 1, false)], true),
-    (&[("-", "neg", 0, 1, true)], true),
+    (&[("-", "neg", 0, 1, true), ("!", "not", 0, 1, true)], true),
     (&[("+", "add", 1, 1, true)], false),
 ];
 
@@ -408,6 +404,23 @@ fn integer_literals(tree: &mut Tree) {
             if let Ok(int) = tree.get_mut::<String>(node).parse::<i64>() {
                 tree.remove::<String>(node);
                 tree.insert::<i64>(node, int);
+            }
+        }
+    });
+}
+
+const BUILTIN_INLINES: &[(&str, &[&str])] = &[("not", &["neg", "1", "add"])];
+
+fn inline_builtins(tree: &mut Tree) {
+    tree.postorder(|tree, node| {
+        if tree.has::<String>(node) {
+            let s = tree.get_mut::<String>(node);
+            if let Some((_, code)) = BUILTIN_INLINES.iter().find(|(name, _)| name == s) {
+                *s = "(".to_string();
+                for op in *code {
+                    let child = tree.add_child(node);
+                    tree.insert::<String>(child, (*op).to_owned());
+                }
             }
         }
     });
