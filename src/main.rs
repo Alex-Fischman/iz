@@ -28,12 +28,18 @@ impl Tree {
         node
     }
 
-    fn new_storage<Data: Any>(&mut self) {
+    fn insert_storage<Data: Any>(&mut self) {
         let old = self.storages.insert(
             std::any::TypeId::of::<Data>(),
             Box::<HashMap<Node, Data>>::default(),
         );
         assert!(old.is_none())
+    }
+
+    fn remove_storage<Data: Any>(&mut self) {
+        let old = self.storages.remove(&std::any::TypeId::of::<Data>());
+        let old = old.unwrap().downcast::<HashMap<Node, Data>>().unwrap();
+        assert!(old.is_empty())
     }
 
     fn get_storage<Data: Any>(&self) -> &HashMap<Node, Data> {
@@ -117,7 +123,7 @@ fn main() {
     let mut tree = Tree::new();
     let root = tree.new_node(None);
     assert_eq!(root, 0);
-    tree.new_storage::<char>();
+    tree.insert_storage::<char>();
     for c in text.chars() {
         let node = tree.new_node(Some(0));
         tree.insert::<char>(node, c);
@@ -125,15 +131,16 @@ fn main() {
 
     // compiler
     remove_comments(&mut tree);
-    tree.new_storage::<String>();
+    tree.insert_storage::<String>();
     group_characters(&mut tree);
+    tree.remove_storage::<char>();
     remove_whitespace(&mut tree);
     group_brackets(&mut tree);
     group_operators(&mut tree);
     unroll_operators(&mut tree);
     substitute_macros(&mut tree);
     unroll_brackets(&mut tree);
-    tree.new_storage::<i64>();
+    tree.insert_storage::<i64>();
     integer_literals(&mut tree);
     substitute_labels(&mut tree);
 
@@ -209,10 +216,12 @@ fn remove_comments(tree: &mut Tree) {
     while i < tree.children[0].len() {
         if tree.get::<char>(tree.children[0][i]) == Some(&'#') {
             let mut j = i;
-            while j < tree.children[0].len() && tree.get::<char>(tree.children[0][j]) != Some(&'\n')
+            while j < tree.children[0].len()
+                && tree.remove::<char>(tree.children[0][j]) != Some('\n')
             {
                 j += 1;
             }
+            tree.insert(tree.children[0][j], '\n');
             tree.children[0].drain(i..j);
         } else {
             i += 1;
