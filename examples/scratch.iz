@@ -23,6 +23,10 @@ macro dup $0
 macro drop ~1
 macro swap ($1 ~3 $-2 $-2)
 
+dup
+drop
+swap
+
 # 0 3
 
 -(1 + 2) # operators with precedence and associativity

@@ -1,78 +1,77 @@
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::collections::HashMap;
 
 type Node = usize;
-type Storage = HashMap<Node, Box<dyn Any>>;
 
 struct Tree {
     id: Node,
-    nodes: HashMap<Node, Vec<Node>>,
-    storages: HashMap<std::any::TypeId, Storage>,
+    children: Vec<Vec<Node>>,
+    storages: HashMap<std::any::TypeId, Box<dyn Any>>,
 }
 
 impl Tree {
     fn new() -> Tree {
         Tree {
             id: 0,
-            nodes: HashMap::new(),
+            children: vec![],
             storages: HashMap::new(),
         }
     }
 
-    fn node(&mut self, parent: Option<Node>) -> Node {
+    fn new_node(&mut self, parent: Option<Node>) -> Node {
         let node = self.id;
         self.id += 1;
-        self.nodes.insert(node, vec![]);
+        self.children.push(vec![]);
         if let Some(parent) = parent {
-            self.nodes.get_mut(&parent).unwrap().push(node);
+            self.children[parent].push(node);
         }
         node
     }
 
-    fn children(&mut self, parent: Node) -> &Vec<Node> {
-        self.nodes.get(&parent).unwrap()
-    }
-
-    fn children_mut(&mut self, parent: Node) -> &mut Vec<Node> {
-        self.nodes.get_mut(&parent).unwrap()
-    }
-
     fn new_storage<Data: Any>(&mut self) {
-        let old = self
-            .storages
-            .insert(std::any::TypeId::of::<Data>(), HashMap::new());
+        let old = self.storages.insert(
+            std::any::TypeId::of::<Data>(),
+            Box::<HashMap<Node, Data>>::default(),
+        );
         assert!(old.is_none())
     }
 
+    fn get_storage<Data: Any>(&self) -> &HashMap<Node, Data> {
+        self.storages
+            .get(&std::any::TypeId::of::<Data>())
+            .unwrap()
+            .downcast_ref()
+            .unwrap()
+    }
+
+    fn get_storage_mut<Data: Any>(&mut self) -> &mut HashMap<Node, Data> {
+        self.storages
+            .get_mut(&std::any::TypeId::of::<Data>())
+            .unwrap()
+            .downcast_mut()
+            .unwrap()
+    }
+
     fn insert<Data: Any>(&mut self, node: Node, data: Data) -> Option<Data> {
-        let storage = self.storages.get_mut(&TypeId::of::<Data>()).unwrap();
-        Some(
-            *storage
-                .insert(node, Box::new(data))?
-                .downcast::<Data>()
-                .unwrap(),
-        )
+        self.get_storage_mut::<Data>().insert(node, data)
     }
 
-    fn has<Data: Any>(&mut self, node: Node) -> bool {
-        let storage = self.storages.get_mut(&TypeId::of::<Data>()).unwrap();
-        storage.get(&node).is_some()
+    fn remove<Data: Any>(&mut self, node: Node) -> Option<Data> {
+        self.get_storage_mut::<Data>().remove(&node)
     }
 
-    fn get_mut<Data: Any>(&mut self, node: Node) -> &mut Data {
-        let storage = self.storages.get_mut(&TypeId::of::<Data>()).unwrap();
-        storage.get_mut(&node).unwrap().downcast_mut().unwrap()
+    fn get<Data: Any>(&self, node: Node) -> Option<&Data> {
+        self.get_storage::<Data>().get(&node)
     }
 
-    fn remove<Data: Any>(&mut self, node: Node) -> Data {
-        let storage = self.storages.get_mut(&TypeId::of::<Data>()).unwrap();
-        *storage.remove(&node).unwrap().downcast::<Data>().unwrap()
+    fn get_mut<Data: Any>(&mut self, node: Node) -> Option<&mut Data> {
+        self.get_storage_mut::<Data>().get_mut(&node)
     }
 
     fn postorder<F: FnMut(&mut Tree, Node)>(&mut self, mut f: F) {
         postorder(self, 0, &mut f);
         fn postorder<F: FnMut(&mut Tree, Node)>(tree: &mut Tree, node: Node, f: &mut F) {
-            for child in tree.children(node).clone() {
+            for child in tree.children[node].clone() {
                 postorder(tree, child, f)
             }
             f(tree, node)
@@ -116,11 +115,11 @@ fn main() {
     let file = args.get(1).expect("no file passed");
     let text = std::fs::read_to_string(file).expect("could not read file");
     let mut tree = Tree::new();
-    let root = tree.node(None);
+    let root = tree.new_node(None);
     assert_eq!(root, 0);
     tree.new_storage::<char>();
     for c in text.chars() {
-        let node = tree.node(Some(0));
+        let node = tree.new_node(Some(0));
         tree.insert::<char>(node, c);
     }
 
@@ -142,34 +141,37 @@ fn main() {
     }
 
     // backend
-    let mut labels = HashMap::new();
-    let mut children = tree.children(0).clone();
+    let mut labels: HashMap<String, i64> = HashMap::new();
     let mut i = 0;
-    while i < children.len() {
-        if tree.has::<String>(children[i]) && tree.get_mut::<String>(children[i]) == ":" {
-            let mut cs = tree.children_mut(children[i]).clone();
-            let old = labels.insert(tree.remove::<String>(cs.remove(0)), i as i64);
+    while i < tree.children[0].len() {
+        if tree.get::<String>(tree.children[0][i]) == Some(&":".to_owned()) {
+            let mut cs = tree.children[tree.children[0][i]].clone();
+            let old = labels.insert(tree.remove::<String>(cs.remove(0)).unwrap(), i as i64);
             assert_eq!(old, None);
-            children.remove(i);
+            tree.children[0].remove(i);
             continue;
         }
         i += 1;
     }
 
-    let code: Vec<Op> = children
-        .into_iter()
+    let code: Vec<Op> = tree.children[0]
+        .iter()
+        .cloned()
         .map(|node| {
-            if tree.has::<i64>(node) {
-                Op::Push(tree.remove(node))
-            } else if tree.has::<String>(node) {
-                let mut cs = tree.children_mut(node).clone();
-                match tree.remove::<String>(node).as_str() {
-                    "~" => Op::Move(tree.remove(cs.remove(0))),
-                    "$" => Op::Copy(tree.remove(cs.remove(0))),
+            if let Some(int) = tree.get::<i64>(node) {
+                Op::Push(*int)
+            } else if let Some(s) = tree.get::<String>(node) {
+                match s.as_str() {
+                    "~" => Op::Move(*tree.get(tree.children[node][0]).unwrap()),
+                    "$" => Op::Copy(*tree.get(tree.children[node][0]).unwrap()),
                     "add" => Op::Add,
                     "neg" => Op::Neg,
                     "ltz" => Op::Ltz,
-                    "?" => Op::Jz(*labels.get(&tree.remove::<String>(cs.remove(0))).unwrap()),
+                    "?" => Op::Jz(
+                        *labels
+                            .get(tree.get::<String>(tree.children[node][0]).unwrap())
+                            .unwrap(),
+                    ),
                     s => panic!("expected an op, found {s}"),
                 }
             } else {
@@ -223,20 +225,19 @@ fn main() {
 }
 
 fn remove_comments(tree: &mut Tree) {
-    let mut children = tree.children(0).clone();
     let mut i = 0;
-    while i < children.len() {
-        if *tree.get_mut::<char>(children[i]) == '#' {
+    while i < tree.children[0].len() {
+        if tree.get::<char>(tree.children[0][i]) == Some(&'#') {
             let mut j = i;
-            while j < children.len() && *tree.get_mut::<char>(children[j]) != '\n' {
+            while j < tree.children[0].len() && tree.get::<char>(tree.children[0][j]) != Some(&'\n')
+            {
                 j += 1;
             }
-            children.drain(i..j);
+            tree.children[0].drain(i..j);
         } else {
             i += 1;
         }
     }
-    *tree.children_mut(0) = children;
 }
 
 fn group_characters(tree: &mut Tree) {
@@ -250,57 +251,53 @@ fn group_characters(tree: &mut Tree) {
     }
 
     tree.new_storage::<String>();
-    let mut children = tree.children(0).clone();
     let mut i = 0;
-    while i < children.len() {
-        let c = tree.remove::<char>(children[i]);
+    while i < tree.children[0].len() {
+        let c = tree.remove::<char>(tree.children[0][i]).unwrap();
         if i == 0 {
-            tree.insert(children[i], c.to_string());
+            tree.insert(tree.children[0][i], c.to_string());
             i += 1;
         } else {
-            let s = tree.get_mut::<String>(children[i - 1]);
+            let s = tree.get_mut::<String>(tree.children[0][i - 1]).unwrap();
             if char_type(c) == char_type(s.chars().next().unwrap()) {
                 s.push(c);
-                children.remove(i);
+                tree.children[0].remove(i);
             } else {
-                tree.insert(children[i], c.to_string());
+                tree.insert(tree.children[0][i], c.to_string());
                 i += 1;
             }
         }
     }
-    *tree.children_mut(0) = children;
 }
 
 fn remove_whitespace(tree: &mut Tree) {
-    let mut children = tree.children(0).clone();
     let mut i = 0;
-    while i < children.len() {
-        let s = tree.get_mut::<String>(children[i]);
+    while i < tree.children[0].len() {
+        let s = tree.get::<String>(tree.children[0][i]).unwrap();
         if s.chars().next().unwrap().is_whitespace() {
-            children.remove(i);
+            tree.children[0].remove(i);
         } else {
             i += 1;
         }
     }
-    *tree.children_mut(0) = children;
 }
 
 fn group_brackets(tree: &mut Tree) {
     bracket_matcher(tree, &mut 0, None);
     fn bracket_matcher(tree: &mut Tree, i: &mut usize, target: Option<&str>) {
-        while *i < tree.children(0).len() {
+        while *i < tree.children[0].len() {
             *i += 1;
-            let n = tree.children(0)[*i - 1];
-            let s = tree.get_mut::<String>(n).clone();
+            let n = tree.children[0][*i - 1];
+            let s = tree.get::<String>(n).unwrap().clone();
             let mut handle_open_bracket = |t| {
                 let start = *i;
                 bracket_matcher(tree, i, Some(t));
-                let mut children: Vec<Node> = tree.children_mut(0).drain(start..*i).collect();
-                children.pop();
+                let mut cs: Vec<Node> = tree.children[0].drain(start..*i).collect();
+                cs.pop();
                 *i = start;
-                let n = tree.children(0)[*i - 1];
-                assert!(tree.children(n).is_empty());
-                *tree.children_mut(n) = children;
+                let n = tree.children[0][*i - 1];
+                assert!(tree.children[n].is_empty());
+                tree.children[n] = cs;
             };
             match s.as_str() {
                 "(" => handle_open_bracket(")"),
@@ -334,77 +331,71 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 
 fn group_operators(tree: &mut Tree) {
     tree.postorder(|tree, node| {
-        let mut children = tree.children(node).clone();
         for (ops, right) in OPERATORS {
             let mut i = if *right {
-                children.len().wrapping_sub(1)
+                tree.children[node].len().wrapping_sub(1)
             } else {
                 0
             };
-            while let Some(child) = children.get(i) {
-                let s = tree.get_mut::<String>(*child).clone();
+            while let Some(child) = tree.children[node].get(i).copied() {
+                let s = tree.get::<String>(child).unwrap().clone();
                 if let Some(op) = ops.iter().find(|op| op.0 == s) {
-                    if i < op.2 || i + op.3 >= children.len() {
+                    if i < op.2 || i + op.3 >= tree.children[node].len() {
                         panic!("not enough operator arguments for {s}");
                     }
-                    let node = children.remove(i);
-                    let cs: Vec<Node> = children.drain(i - op.2..i + op.3).collect();
+                    let mut cs: Vec<Node> = tree.children[node].drain(i + 1..=i + op.3).collect();
+                    cs.extend(tree.children[node].drain(i - op.2..i));
                     i -= op.2;
-                    children.insert(i, node);
-                    *tree.children_mut(node) = cs;
-                    tree.insert::<String>(node, s);
+                    tree.children[child] = cs;
                 }
                 i = if *right { i.wrapping_sub(1) } else { i + 1 }
             }
         }
-        *tree.children_mut(node) = children;
     });
 }
 
 fn unroll_operators(tree: &mut Tree) {
     tree.postorder(|tree, node| {
-        let mut children = tree.children(node).clone();
         let mut i = 0;
-        while i < children.len() {
-            let s = tree.get_mut::<String>(children[i]);
+        while i < tree.children[node].len() {
+            let child = tree.children[node][i];
+            let s = tree.get::<String>(child).unwrap();
             if let Some(op) = OPERATORS
                 .iter()
                 .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
             {
                 if op.4 {
-                    let cs: Vec<Node> = tree.children_mut(children[i]).drain(..).collect();
+                    let cs: Vec<Node> = tree.children[child].drain(..).collect();
                     let l = cs.len();
-                    children.splice(i..i, cs);
+                    tree.children[node].splice(i..i, cs);
                     i += l;
                 }
-                tree.insert::<String>(children[i], op.1.to_owned());
+                tree.insert::<String>(child, op.1.to_owned());
             }
             i += 1;
         }
-        *tree.children_mut(node) = children;
     });
 }
 
 fn unroll_brackets(tree: &mut Tree) {
     tree.postorder(|tree, node| {
-        let mut children = tree.children(node).clone();
         let mut i = 0;
-        while i < children.len() {
-            if tree.get_mut::<String>(children[i]) == "(" {
-                let cs: Vec<Node> = tree.children_mut(children[i]).drain(..).collect();
-                children.splice(i..=i, cs);
+        while i < tree.children[node].len() {
+            if tree.get::<String>(tree.children[node][i]) == Some(&"(".to_owned()) {
+                let bracket = tree.children[node][i];
+                let cs: Vec<Node> = tree.children[bracket].drain(..).collect();
+                tree.children[node].splice(i..=i, cs);
             }
             i += 1;
         }
-        *tree.children_mut(node) = children;
     });
 }
 
 fn integer_literals(tree: &mut Tree) {
     tree.new_storage::<i64>();
     tree.postorder(|tree, node| {
-        if tree.has::<String>(node) {
-            if let Ok(int) = tree.get_mut::<String>(node).parse::<i64>() {
+        if let Some(s) = tree.get::<String>(node) {
+            if let Ok(int) = s.parse::<i64>() {
                 tree.remove::<String>(node);
                 tree.insert::<i64>(node, int);
             }
@@ -413,32 +404,31 @@ fn integer_literals(tree: &mut Tree) {
 }
 
 fn substitute_macros(tree: &mut Tree) {
-    let mut macros: HashMap<String, Vec<Node>> = HashMap::new();
+    let mut macros: HashMap<String, Node> = HashMap::new();
     tree.postorder(|tree, node| {
-        let mut children = tree.children(node).clone();
         let mut i = 0;
-        while i < children.len() {
-            if tree.has::<String>(children[i]) && tree.get_mut::<String>(children[i]) == "macro" {
-                let key = tree.children(children[i])[0];
-                let value = tree.children(children[i])[1];
-                macros.insert(
-                    tree.get_mut::<String>(key).clone(),
-                    tree.children(value).clone(),
-                );
-                children.remove(i);
+        while i < tree.children[node].len() {
+            let child = tree.children[node][i];
+            if tree.get::<String>(child) == Some(&"macro".to_owned()) {
+                let key = tree.children[child][0];
+                let value = tree.children[child][1];
+                macros.insert(tree.get::<String>(key).unwrap().clone(), value);
+                tree.children[node].remove(i);
             } else {
                 i += 1;
             }
         }
-        *tree.children_mut(node) = children;
     });
     tree.postorder(|tree, node| {
-        if tree.has::<String>(node) {
-            let s = tree.get_mut::<String>(node);
-            if let Some(children) = macros.get(s) {
-                *s = "(".to_owned();
-                *tree.children_mut(node) = children.clone();
+        let mut i = 0;
+        while i < tree.children[node].len() {
+            let child = tree.children[node][i];
+            if let Some(s) = tree.get_mut::<String>(child) {
+                if let Some(replacement) = macros.get(s) {
+                    tree.children[node][i] = *replacement;
+                }
             }
+            i += 1;
         }
     });
 }
