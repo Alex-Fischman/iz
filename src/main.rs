@@ -130,19 +130,21 @@ fn main() {
     }
 
     // compiler
-    remove_comments(&mut tree);
-    tree.insert_storage::<String>();
-    group_characters(&mut tree);
-    tree.remove_storage::<char>();
-    remove_whitespace(&mut tree);
-    group_brackets(&mut tree);
-    group_operators(&mut tree);
-    unroll_operators(&mut tree);
-    substitute_macros(&mut tree);
-    unroll_brackets(&mut tree);
-    tree.insert_storage::<i64>();
-    integer_literals(&mut tree);
-    substitute_labels(&mut tree);
+    let passes = [
+        remove_comments,
+        chars_to_strings,
+        remove_whitespace,
+        group_brackets,
+        group_operators,
+        unroll_operators,
+        substitute_macros,
+        unroll_brackets,
+        integer_literals,
+        substitute_labels,
+    ];
+    for pass in passes {
+        pass(&mut tree)
+    }
 
     // backend
     let code: Vec<Op> = tree.children[0]
@@ -229,7 +231,7 @@ fn remove_comments(tree: &mut Tree) {
     }
 }
 
-fn group_characters(tree: &mut Tree) {
+fn chars_to_strings(tree: &mut Tree) {
     fn char_type(c: char) -> usize {
         match c {
             '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => 0,
@@ -238,6 +240,8 @@ fn group_characters(tree: &mut Tree) {
             _ => 3,
         }
     }
+
+    tree.insert_storage::<String>();
 
     let mut i = 0;
     while i < tree.children[0].len() {
@@ -256,6 +260,8 @@ fn group_characters(tree: &mut Tree) {
             }
         }
     }
+
+    tree.remove_storage::<char>();
 }
 
 fn remove_whitespace(tree: &mut Tree) {
@@ -302,6 +308,20 @@ fn group_brackets(tree: &mut Tree) {
             panic!("missing {s}");
         }
     }
+}
+
+fn unroll_brackets(tree: &mut Tree) {
+    tree.postorder(|tree, node| {
+        let mut i = 0;
+        while i < tree.children[node].len() {
+            let child = tree.children[node][i];
+            if tree.get::<String>(child) == Some(&"(".to_owned()) {
+                let cs: Vec<Node> = tree.children[child].drain(..).collect();
+                tree.children[node].splice(i..=i, cs);
+            }
+            i += 1;
+        }
+    });
 }
 
 //                   name     func     left   right  unroll
@@ -365,21 +385,8 @@ fn unroll_operators(tree: &mut Tree) {
     });
 }
 
-fn unroll_brackets(tree: &mut Tree) {
-    tree.postorder(|tree, node| {
-        let mut i = 0;
-        while i < tree.children[node].len() {
-            let child = tree.children[node][i];
-            if tree.get::<String>(child) == Some(&"(".to_owned()) {
-                let cs: Vec<Node> = tree.children[child].drain(..).collect();
-                tree.children[node].splice(i..=i, cs);
-            }
-            i += 1;
-        }
-    });
-}
-
 fn integer_literals(tree: &mut Tree) {
+    tree.insert_storage::<i64>();
     tree.postorder(|tree, node| {
         if let Some(s) = tree.get::<String>(node) {
             if let Ok(int) = s.parse::<i64>() {
