@@ -124,7 +124,7 @@ fn main() {
         group_brackets,
         group_operators,
         unroll_operators,
-        inline_builtins,
+        substitute_macros,
         unroll_brackets,
         integer_literals,
     ];
@@ -277,36 +277,37 @@ fn remove_whitespace(tree: &mut Tree) {
     *tree.get_children(0) = children;
 }
 
-const BRACKETS: &[(&str, &str)] = &[("(", ")"), ("{", "}"), ("[", "]")];
-
 fn group_brackets(tree: &mut Tree) {
     bracket_matcher(tree, &mut 0, None);
     fn bracket_matcher(tree: &mut Tree, i: &mut usize, target: Option<&str>) {
-        let mut nodes = tree.get_children(0).clone();
-        while *i < nodes.len() {
+        while *i < tree.get_children(0).len() {
             *i += 1;
-            let s = tree.get_mut::<String>(nodes[*i - 1]).as_str();
-            match (s, BRACKETS.iter().find(|(b, _)| *b == s)) {
-                (")" | "}" | "]", _) => match target {
+            let n = tree.get_children(0)[*i - 1];
+            let s = tree.get_mut::<String>(n).clone();
+            let mut handle_open_bracket = |t| {
+                let start = *i;
+                bracket_matcher(tree, i, Some(t));
+                let mut children: Vec<Node> = tree.get_children(0).drain(start..*i).collect();
+                children.pop();
+                *i = start;
+                let n = tree.get_children(0)[*i - 1];
+                assert!(tree.get_children(n).is_empty());
+                *tree.get_children(n) = children;
+            };
+            match s.as_str() {
+                "(" => handle_open_bracket(")"),
+                "{" => handle_open_bracket("}"),
+                "[" => handle_open_bracket("]"),
+                ")" | "}" | "]" => match target {
                     Some(t) if s == t => return,
                     _ => panic!("extra {s}"),
                 },
-                (_, Some((_, t))) => {
-                    let start = *i;
-                    bracket_matcher(tree, i, Some(t));
-                    let mut children: Vec<Node> = nodes.drain(start..*i).collect();
-                    children.pop();
-                    *i = start;
-                    assert!(tree.get_children(nodes[*i - 1]).is_empty());
-                    *tree.get_children(nodes[*i - 1]) = children;
-                }
                 _ => {}
             }
         }
         if let Some(s) = target {
             panic!("missing {s}");
         }
-        *tree.get_children(0) = nodes;
     }
 }
 
@@ -320,6 +321,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
     (&[("$", "$", 0, 1, false)], true),
     (&[("-", "neg", 0, 1, true), ("!", "not", 0, 1, true)], true),
     (&[("+", "add", 1, 1, true)], false),
+    (&[("macro", "macro", 0, 2, false)], true),
 ];
 
 fn group_operators(tree: &mut Tree) {
@@ -335,13 +337,6 @@ fn group_operators(tree: &mut Tree) {
                 let s = tree.get_mut::<String>(*child).clone();
                 if let Some(op) = ops.iter().find(|op| op.0 == s) {
                     if i < op.2 || i + op.3 >= children.len() {
-                        println!(
-                            "{:?}",
-                            children
-                                .iter()
-                                .map(|child| tree.get_mut::<String>(*child).clone())
-                                .collect::<Vec<String>>()
-                        );
                         panic!("not enough operator arguments for {s}");
                     }
                     let node = children.remove(i);
@@ -409,19 +404,11 @@ fn integer_literals(tree: &mut Tree) {
     });
 }
 
-const BUILTIN_INLINES: &[(&str, &[&str])] = &[("not", &["neg", "1", "add"])];
-
-fn inline_builtins(tree: &mut Tree) {
+fn substitute_macros(tree: &mut Tree) {
+    let _macros: HashMap<String, Node> = HashMap::new();
     tree.postorder(|tree, node| {
-        if tree.has::<String>(node) {
-            let s = tree.get_mut::<String>(node);
-            if let Some((_, code)) = BUILTIN_INLINES.iter().find(|(name, _)| name == s) {
-                *s = "(".to_string();
-                for op in *code {
-                    let child = tree.add_child(node);
-                    tree.insert::<String>(child, (*op).to_owned());
-                }
-            }
+        if tree.has::<String>(node) && tree.get_mut::<String>(node) == "macro" {
+            panic!("macros aren't implemented");
         }
     });
 }
