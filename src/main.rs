@@ -63,11 +63,11 @@ impl Tree {
         *storage.remove(&node).unwrap().downcast::<Data>().unwrap()
     }
 
-    fn postorder<F: Fn(&mut Tree, Node) + Clone>(&mut self, f: F) {
-        postorder(self, 0, f);
-        fn postorder<F: Fn(&mut Tree, Node) + Clone>(tree: &mut Tree, node: Node, f: F) {
+    fn postorder<F: FnMut(&mut Tree, Node)>(&mut self, mut f: F) {
+        postorder(self, 0, &mut f);
+        fn postorder<F: FnMut(&mut Tree, Node)>(tree: &mut Tree, node: Node, f: &mut F) {
             for child in tree.get_children(node).clone() {
-                postorder(tree, child, f.clone())
+                postorder(tree, child, f)
             }
             f(tree, node)
         }
@@ -405,10 +405,32 @@ fn integer_literals(tree: &mut Tree) {
 }
 
 fn substitute_macros(tree: &mut Tree) {
-    let _macros: HashMap<String, Node> = HashMap::new();
+    let mut macros: HashMap<String, Vec<Node>> = HashMap::new();
     tree.postorder(|tree, node| {
-        if tree.has::<String>(node) && tree.get_mut::<String>(node) == "macro" {
-            panic!("macros aren't implemented");
+        let mut children = tree.get_children(node).clone();
+        let mut i = 0;
+        while i < children.len() {
+            if tree.has::<String>(children[i]) && tree.get_mut::<String>(children[i]) == "macro" {
+                let key = tree.get_children(children[i])[0];
+                let value = tree.get_children(children[i])[1];
+                macros.insert(
+                    tree.get_mut::<String>(key).clone(),
+                    tree.get_children(value).clone(),
+                );
+                children.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        *tree.get_children(node) = children;
+    });
+    tree.postorder(|tree, node| {
+        if tree.has::<String>(node) {
+            let s = tree.get_mut::<String>(node);
+            if let Some(children) = macros.get(s) {
+                *s = "(".to_owned();
+                *tree.get_children(node) = children.clone();
+            }
         }
     });
 }
