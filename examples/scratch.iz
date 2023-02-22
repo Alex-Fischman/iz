@@ -3,7 +3,7 @@
 # here is a while loop
 1
 while_start:
-$0 neg 3 add while_end?
+dup neg 3 add while_end?
 # cond ends, body starts
 1 add
 0 while_start?
@@ -16,17 +16,11 @@ $0 # $ copies the nth-from-top element
 ~2 # ~ moves the stack pointer
 # both $ and ~ can take negative arguments
 
-0 # 3 0
-
-macro not (neg 1 add)
-macro dup $0
-macro drop ~1
-macro swap ($1 ~3 $-2 $-2)
-
+0
+# 3 0
 dup
 drop
 swap
-
 # 0 3
 
 -(1 + 2) # operators with precedence and associativity
@@ -41,3 +35,10 @@ if_end:
 else_end:
 
 !0
+
+# these are macros
+# they can be used before they're defined
+macro not (neg 1 add)
+macro dup $0
+macro drop ~1
+macro swap ($1 ~3 $-2 $-2)

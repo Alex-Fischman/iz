@@ -135,21 +135,9 @@ fn main() {
     unroll_brackets(&mut tree);
     tree.new_storage::<i64>();
     integer_literals(&mut tree);
+    substitute_labels(&mut tree);
 
     // backend
-    let mut labels: HashMap<String, i64> = HashMap::new();
-    let mut i = 0;
-    while i < tree.children[0].len() {
-        if tree.get::<String>(tree.children[0][i]) == Some(&":".to_owned()) {
-            let mut cs = tree.children[tree.children[0][i]].clone();
-            let old = labels.insert(tree.remove::<String>(cs.remove(0)).unwrap(), i as i64);
-            assert_eq!(old, None);
-            tree.children[0].remove(i);
-        } else {
-            i += 1;
-        }
-    }
-
     let code: Vec<Op> = tree.children[0]
         .iter()
         .cloned()
@@ -163,11 +151,7 @@ fn main() {
                     "add" => Op::Add,
                     "neg" => Op::Neg,
                     "ltz" => Op::Ltz,
-                    "?" => Op::Jz(
-                        *labels
-                            .get(tree.get::<String>(tree.children[node][0]).unwrap())
-                            .unwrap(),
-                    ),
+                    "?" => Op::Jz(*tree.get(tree.children[node][0]).unwrap()),
                     s => panic!("expected an op, found {s}"),
                 }
             } else {
@@ -406,7 +390,37 @@ fn substitute_macros(tree: &mut Tree) {
             if tree.get::<String>(child) == Some(&"macro".to_owned()) {
                 let key = tree.children[child][0];
                 let value = tree.children[child][1];
-                macros.insert(tree.get::<String>(key).unwrap().clone(), value);
+                let old = macros.insert(tree.get::<String>(key).unwrap().clone(), value);
+                assert_eq!(old, None);
+                tree.children[node].remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    });
+    tree.postorder(|tree, node| {
+        let mut i = 0;
+        while i < tree.children[node].len() {
+            if let Some(s) = tree.get_mut::<String>(tree.children[node][i]) {
+                if let Some(replacement) = macros.get(s) {
+                    tree.children[node][i] = *replacement;
+                }
+            }
+            i += 1;
+        }
+    });
+}
+
+fn substitute_labels(tree: &mut Tree) {
+    let mut labels: HashMap<String, i64> = HashMap::new();
+    tree.postorder(|tree, node| {
+        let mut i = 0;
+        while i < tree.children[node].len() {
+            let child = tree.children[node][i];
+            if tree.get::<String>(child) == Some(&":".to_owned()) {
+                let key = tree.children[child].remove(0);
+                let old = labels.insert(tree.remove::<String>(key).unwrap(), i as i64);
+                assert_eq!(old, None);
                 tree.children[node].remove(i);
             } else {
                 i += 1;
@@ -418,8 +432,9 @@ fn substitute_macros(tree: &mut Tree) {
         while i < tree.children[node].len() {
             let child = tree.children[node][i];
             if let Some(s) = tree.get_mut::<String>(child) {
-                if let Some(replacement) = macros.get(s) {
-                    tree.children[node][i] = *replacement;
+                if let Some(int) = labels.get(s) {
+                    tree.insert::<i64>(child, *int);
+                    tree.remove::<String>(child);
                 }
             }
             i += 1;
