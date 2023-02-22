@@ -19,8 +19,8 @@ $0 # $ copies the nth-from-top element
 0 # 3 0
 
 macro not (neg 1 add)
-macro dup ($0)
-macro drop (~1)
+macro dup $0
+macro drop ~1
 macro swap ($1 ~3 $-2 $-2)
 
 # 0 3
