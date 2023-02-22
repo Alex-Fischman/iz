@@ -124,21 +124,17 @@ fn main() {
     }
 
     // compiler
-    let passes = [
-        remove_comments,
-        group_characters,
-        remove_whitespace,
-        group_brackets,
-        group_operators,
-        unroll_operators,
-        substitute_macros,
-        unroll_brackets,
-        integer_literals,
-    ];
-
-    for pass in passes {
-        pass(&mut tree);
-    }
+    remove_comments(&mut tree);
+    tree.new_storage::<String>();
+    group_characters(&mut tree);
+    remove_whitespace(&mut tree);
+    group_brackets(&mut tree);
+    group_operators(&mut tree);
+    unroll_operators(&mut tree);
+    substitute_macros(&mut tree);
+    unroll_brackets(&mut tree);
+    tree.new_storage::<i64>();
+    integer_literals(&mut tree);
 
     // backend
     let mut labels: HashMap<String, i64> = HashMap::new();
@@ -149,9 +145,9 @@ fn main() {
             let old = labels.insert(tree.remove::<String>(cs.remove(0)).unwrap(), i as i64);
             assert_eq!(old, None);
             tree.children[0].remove(i);
-            continue;
+        } else {
+            i += 1;
         }
-        i += 1;
     }
 
     let code: Vec<Op> = tree.children[0]
@@ -250,7 +246,6 @@ fn group_characters(tree: &mut Tree) {
         }
     }
 
-    tree.new_storage::<String>();
     let mut i = 0;
     while i < tree.children[0].len() {
         let c = tree.remove::<char>(tree.children[0][i]).unwrap();
@@ -286,9 +281,9 @@ fn group_brackets(tree: &mut Tree) {
     bracket_matcher(tree, &mut 0, None);
     fn bracket_matcher(tree: &mut Tree, i: &mut usize, target: Option<&str>) {
         while *i < tree.children[0].len() {
+            let child = tree.children[0][*i];
             *i += 1;
-            let n = tree.children[0][*i - 1];
-            let s = tree.get::<String>(n).unwrap().clone();
+            let s = tree.get::<String>(child).unwrap().clone();
             let mut handle_open_bracket = |t| {
                 let start = *i;
                 bracket_matcher(tree, i, Some(t));
@@ -297,7 +292,7 @@ fn group_brackets(tree: &mut Tree) {
                 *i = start;
                 let n = tree.children[0][*i - 1];
                 assert!(tree.children[n].is_empty());
-                tree.children[n] = cs;
+                tree.children[child] = cs;
             };
             match s.as_str() {
                 "(" => handle_open_bracket(")"),
@@ -381,9 +376,9 @@ fn unroll_brackets(tree: &mut Tree) {
     tree.postorder(|tree, node| {
         let mut i = 0;
         while i < tree.children[node].len() {
-            if tree.get::<String>(tree.children[node][i]) == Some(&"(".to_owned()) {
-                let bracket = tree.children[node][i];
-                let cs: Vec<Node> = tree.children[bracket].drain(..).collect();
+            let child = tree.children[node][i];
+            if tree.get::<String>(child) == Some(&"(".to_owned()) {
+                let cs: Vec<Node> = tree.children[child].drain(..).collect();
                 tree.children[node].splice(i..=i, cs);
             }
             i += 1;
@@ -392,7 +387,6 @@ fn unroll_brackets(tree: &mut Tree) {
 }
 
 fn integer_literals(tree: &mut Tree) {
-    tree.new_storage::<i64>();
     tree.postorder(|tree, node| {
         if let Some(s) = tree.get::<String>(node) {
             if let Ok(int) = s.parse::<i64>() {
