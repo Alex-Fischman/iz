@@ -232,12 +232,20 @@ fn remove_comments(tree: &mut Tree) {
 }
 
 fn chars_to_strings(tree: &mut Tree) {
+    fn is_bracket(c: char) -> bool {
+        matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
+    }
+
+    fn is_identifier(c: char) -> bool {
+        matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9')
+    }
+
     fn char_type(c: char) -> usize {
         match c {
-            '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9' => 0,
+            _ if is_identifier(c) => 0,
             _ if c.is_whitespace() => 1,
-            '(' | ')' | '{' | '}' | '[' | ']' => 2,
-            _ => 3,
+            _ if is_bracket(c) => 2,
+            _ => 3, // operators
         }
     }
 
@@ -251,7 +259,7 @@ fn chars_to_strings(tree: &mut Tree) {
             i += 1;
         } else {
             let s = tree.get_mut::<String>(tree.children[0][i - 1]).unwrap();
-            if char_type(c) == char_type(s.chars().next().unwrap()) {
+            if !is_bracket(c) && char_type(c) == char_type(s.chars().next().unwrap()) {
                 s.push(c);
                 tree.children[0].remove(i);
             } else {
