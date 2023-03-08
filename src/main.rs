@@ -1,12 +1,9 @@
 #![no_implicit_prelude]
 extern crate std;
 
-use std::any::{Any, TypeId};
 use std::borrow::ToOwned;
-use std::boxed::Box;
 use std::clone::Clone;
 use std::collections::HashMap;
-use std::default::Default;
 use std::iter::{Extend, Iterator};
 use std::ops::{FnMut, Index, IndexMut};
 use std::option::{Option, Option::None, Option::Some};
@@ -17,83 +14,44 @@ use std::{assert_eq, matches, panic, print, println, todo};
 
 type Node = usize;
 
-struct Tree {
-    id: Node,
-    children: Vec<Vec<Node>>,
-    storages: HashMap<TypeId, Box<dyn Any>>,
+struct Context {
+    id: usize,
+    edges: Map<Vec<Node>>,
+    chars: Map<char>,
+    strings: Map<String>,
+    ints: Map<i64>,
 }
 
-impl Tree {
-    fn new() -> Tree {
-        Tree {
+type Map<T> = HashMap<Node, T>;
+
+impl Context {
+    fn new() -> Context {
+        Context {
             id: 0,
-            children: Vec::new(),
-            storages: HashMap::new(),
+            edges: HashMap::new(),
+            chars: HashMap::new(),
+            strings: HashMap::new(),
+            ints: HashMap::new(),
         }
     }
 
     fn new_node(&mut self, parent: Option<Node>) -> Node {
         let node = self.id;
         self.id += 1;
-        self.children.push(Vec::new());
         if let Some(parent) = parent {
-            self.children[parent].push(node);
+            self.edges.get_mut(&parent).unwrap().push(node);
         }
+        self.edges.insert(node, Vec::new());
         node
     }
 
-    fn insert_storage<Data: Any>(&mut self) {
-        let old = self
-            .storages
-            .insert(TypeId::of::<Data>(), Box::<HashMap<Node, Data>>::default());
-        assert!(old.is_none())
-    }
-
-    fn remove_storage<Data: Any>(&mut self) {
-        let old = self.storages.remove(&TypeId::of::<Data>());
-        let old = old.unwrap().downcast::<HashMap<Node, Data>>().unwrap();
-        assert!(old.is_empty())
-    }
-
-    fn get_storage<Data: Any>(&self) -> &HashMap<Node, Data> {
-        self.storages
-            .get(&TypeId::of::<Data>())
-            .unwrap()
-            .downcast_ref()
-            .unwrap()
-    }
-
-    fn get_storage_mut<Data: Any>(&mut self) -> &mut HashMap<Node, Data> {
-        self.storages
-            .get_mut(&TypeId::of::<Data>())
-            .unwrap()
-            .downcast_mut()
-            .unwrap()
-    }
-
-    fn insert<Data: Any>(&mut self, node: Node, data: Data) -> Option<Data> {
-        self.get_storage_mut::<Data>().insert(node, data)
-    }
-
-    fn remove<Data: Any>(&mut self, node: Node) -> Option<Data> {
-        self.get_storage_mut::<Data>().remove(&node)
-    }
-
-    fn get<Data: Any>(&self, node: Node) -> Option<&Data> {
-        self.get_storage::<Data>().get(&node)
-    }
-
-    fn get_mut<Data: Any>(&mut self, node: Node) -> Option<&mut Data> {
-        self.get_storage_mut::<Data>().get_mut(&node)
-    }
-
-    fn postorder<F: FnMut(&mut Tree, Node)>(&mut self, mut f: F) {
+    fn postorder<F: FnMut(&mut Context, Node)>(&mut self, mut f: F) {
         postorder(self, 0, &mut f);
-        fn postorder<F: FnMut(&mut Tree, Node)>(tree: &mut Tree, node: Node, f: &mut F) {
-            for child in tree.children[node].clone() {
-                postorder(tree, child, f)
+        fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
+            for child in context.edges[&node].clone() {
+                postorder(context, child, f)
             }
-            f(tree, node)
+            f(context, node)
         }
     }
 }
@@ -133,13 +91,14 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let file = args.get(1).expect("no file passed");
     let text = std::fs::read_to_string(file).expect("could not read file");
-    let mut tree = Tree::new();
-    let root = tree.new_node(None);
+    let mut context = Context::new();
+
+    let root = context.new_node(None);
     assert_eq!(root, 0);
-    tree.insert_storage::<char>();
+
     for c in text.chars() {
-        let node = tree.new_node(Some(0));
-        tree.insert::<char>(node, c);
+        let node = context.new_node(Some(0));
+        context.chars.insert(node, c);
     }
 
     // compiler
@@ -156,24 +115,24 @@ fn main() {
         substitute_labels,
     ];
     for pass in passes {
-        pass(&mut tree)
+        pass(&mut context)
     }
 
     // backend
-    let code: Vec<Op> = tree.children[0]
+    let code: Vec<Op> = context.edges[&0]
         .iter()
         .cloned()
         .map(|node| {
-            if let Some(int) = tree.get::<i64>(node) {
+            if let Some(int) = context.ints.get(&node) {
                 Op::Push(*int)
-            } else if let Some(s) = tree.get::<String>(node) {
+            } else if let Some(s) = context.strings.get(&node) {
                 match s.as_str() {
-                    "~" => Op::Move(*tree.get(tree.children[node][0]).unwrap()),
-                    "$" => Op::Copy(*tree.get(tree.children[node][0]).unwrap()),
+                    "~" => Op::Move(*context.ints.get(&context.edges[&node][0]).unwrap()),
+                    "$" => Op::Copy(*context.ints.get(&context.edges[&node][0]).unwrap()),
                     "add" => Op::Add,
                     "neg" => Op::Neg,
                     "ltz" => Op::Ltz,
-                    "?" => Op::Jz(*tree.get(tree.children[node][0]).unwrap()),
+                    "?" => Op::Jz(*context.ints.get(&context.edges[&node][0]).unwrap()),
                     s => panic!("expected an op, found {s}"),
                 }
             } else {
@@ -226,25 +185,25 @@ fn main() {
     }
 }
 
-fn remove_comments(tree: &mut Tree) {
+fn remove_comments(context: &mut Context) {
     let mut i = 0;
-    while i < tree.children[0].len() {
-        if tree.get::<char>(tree.children[0][i]) == Some(&'#') {
+    while i < context.edges[&0].len() {
+        if context.chars.get(&context.edges[&0][i]) == Some(&'#') {
             let mut j = i;
-            while j < tree.children[0].len()
-                && tree.remove::<char>(tree.children[0][j]) != Some('\n')
+            while j < context.edges[&0].len()
+                && context.chars.remove(&context.edges[&0][j]) != Some('\n')
             {
                 j += 1;
             }
-            tree.insert(tree.children[0][j], '\n');
-            tree.children[0].drain(i..j);
+            context.chars.insert(context.edges[&0][j], '\n');
+            context.edges.get_mut(&0).unwrap().drain(i..j);
         } else {
             i += 1;
         }
     }
 }
 
-fn chars_to_strings(tree: &mut Tree) {
+fn chars_to_strings(context: &mut Context) {
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
@@ -262,57 +221,61 @@ fn chars_to_strings(tree: &mut Tree) {
         }
     }
 
-    tree.insert_storage::<String>();
-
+    assert!(context.strings.is_empty());
     let mut i = 0;
-    while i < tree.children[0].len() {
-        let c = tree.remove::<char>(tree.children[0][i]).unwrap();
+    while i < context.edges[&0].len() {
+        let c = context.chars.remove(&context.edges[&0][i]).unwrap();
         if i == 0 {
-            tree.insert(tree.children[0][i], c.to_string());
+            context.strings.insert(context.edges[&0][i], c.to_string());
             i += 1;
         } else {
-            let s = tree.get_mut::<String>(tree.children[0][i - 1]).unwrap();
+            let s = context.strings.get_mut(&context.edges[&0][i - 1]).unwrap();
             if !is_bracket(c) && char_type(c) == char_type(s.chars().next().unwrap()) {
                 s.push(c);
-                tree.children[0].remove(i);
+                context.edges.get_mut(&0).unwrap().remove(i);
             } else {
-                tree.insert(tree.children[0][i], c.to_string());
+                context.strings.insert(context.edges[&0][i], c.to_string());
                 i += 1;
             }
         }
     }
 
-    tree.remove_storage::<char>();
+    assert!(context.chars.is_empty());
 }
 
-fn remove_whitespace(tree: &mut Tree) {
+fn remove_whitespace(context: &mut Context) {
     let mut i = 0;
-    while i < tree.children[0].len() {
-        let s = tree.get::<String>(tree.children[0][i]).unwrap();
+    while i < context.edges[&0].len() {
+        let s = context.strings.get(&context.edges[&0][i]).unwrap();
         if s.chars().next().unwrap().is_whitespace() {
-            tree.children[0].remove(i);
+            context.edges.get_mut(&0).unwrap().remove(i);
         } else {
             i += 1;
         }
     }
 }
 
-fn group_brackets(tree: &mut Tree) {
-    bracket_matcher(tree, &mut 0, None);
-    fn bracket_matcher(tree: &mut Tree, i: &mut usize, target: Option<&str>) {
-        while *i < tree.children[0].len() {
-            let child = tree.children[0][*i];
+fn group_brackets(context: &mut Context) {
+    bracket_matcher(context, &mut 0, None);
+    fn bracket_matcher(context: &mut Context, i: &mut usize, target: Option<&str>) {
+        while *i < context.edges[&0].len() {
+            let child = context.edges[&0][*i];
             *i += 1;
-            let s = tree.get::<String>(child).unwrap().clone();
+            let s = context.strings.get(&child).unwrap().clone();
             let mut handle_open_bracket = |t| {
                 let start = *i;
-                bracket_matcher(tree, i, Some(t));
-                let mut cs: Vec<Node> = tree.children[0].drain(start..*i).collect();
+                bracket_matcher(context, i, Some(t));
+                let mut cs: Vec<Node> = context
+                    .edges
+                    .get_mut(&0)
+                    .unwrap()
+                    .drain(start..*i)
+                    .collect();
                 cs.pop();
                 *i = start;
-                let n = tree.children[0][*i - 1];
-                assert!(tree.children[n].is_empty());
-                tree.children[child] = cs;
+                let n = context.edges[&0][*i - 1];
+                assert!(context.edges[&n].is_empty());
+                *context.edges.get_mut(&child).unwrap() = cs;
             };
             match s.as_str() {
                 "(" => handle_open_bracket(")"),
@@ -331,14 +294,14 @@ fn group_brackets(tree: &mut Tree) {
     }
 }
 
-fn unroll_brackets(tree: &mut Tree) {
-    tree.postorder(|tree, node| {
+fn unroll_brackets(context: &mut Context) {
+    context.postorder(|context, node| {
         let mut i = 0;
-        while i < tree.children[node].len() {
-            let child = tree.children[node][i];
-            if tree.get::<String>(child) == Some(&"(".to_owned()) {
-                let cs: Vec<Node> = tree.children[child].drain(..).collect();
-                tree.children[node].splice(i..=i, cs);
+        while i < context.edges[&node].len() {
+            let child = context.edges[&node][i];
+            if context.strings.get(&child) == Some(&"(".to_owned()) {
+                let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
+                context.edges.get_mut(&node).unwrap().splice(i..=i, cs);
             }
             i += 1;
         }
@@ -358,24 +321,29 @@ const OPERATORS: &[(&[Operator], bool)] = &[
     (&[("macro", "macro", 0, 2, false)], true),
 ];
 
-fn group_operators(tree: &mut Tree) {
-    tree.postorder(|tree, node| {
+fn group_operators(context: &mut Context) {
+    context.postorder(|context, node| {
         for (ops, right) in OPERATORS {
             let mut i = if *right {
-                tree.children[node].len().wrapping_sub(1)
+                context.edges[&node].len().wrapping_sub(1)
             } else {
                 0
             };
-            while let Some(child) = tree.children[node].get(i).copied() {
-                let s = tree.get::<String>(child).unwrap().clone();
+            while let Some(child) = context.edges[&node].get(i).copied() {
+                let s = context.strings.get(&child).unwrap().clone();
                 if let Some(op) = ops.iter().find(|op| op.0 == s) {
-                    if i < op.2 || i + op.3 >= tree.children[node].len() {
+                    if i < op.2 || i + op.3 >= context.edges[&node].len() {
                         panic!("not enough operator arguments for {s}");
                     }
-                    let mut cs: Vec<Node> = tree.children[node].drain(i + 1..=i + op.3).collect();
-                    cs.extend(tree.children[node].drain(i - op.2..i));
+                    let mut cs: Vec<Node> = context
+                        .edges
+                        .get_mut(&node)
+                        .unwrap()
+                        .drain(i + 1..=i + op.3)
+                        .collect();
+                    cs.extend(context.edges.get_mut(&node).unwrap().drain(i - op.2..i));
                     i -= op.2;
-                    tree.children[child] = cs;
+                    *context.edges.get_mut(&child).unwrap() = cs;
                 }
                 i = if *right { i.wrapping_sub(1) } else { i + 1 }
             }
@@ -383,64 +351,64 @@ fn group_operators(tree: &mut Tree) {
     });
 }
 
-fn unroll_operators(tree: &mut Tree) {
-    tree.postorder(|tree, node| {
+fn unroll_operators(context: &mut Context) {
+    context.postorder(|context, node| {
         let mut i = 0;
-        while i < tree.children[node].len() {
-            let child = tree.children[node][i];
-            let s = tree.get::<String>(child).unwrap();
+        while i < context.edges[&node].len() {
+            let child = context.edges[&node][i];
+            let s = context.strings.get(&child).unwrap();
             if let Some(op) = OPERATORS
                 .iter()
                 .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
             {
                 if op.4 {
-                    let cs: Vec<Node> = tree.children[child].drain(..).collect();
+                    let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
                     let l = cs.len();
-                    tree.children[node].splice(i..i, cs);
+                    context.edges.get_mut(&node).unwrap().splice(i..i, cs);
                     i += l;
                 }
-                tree.insert::<String>(child, op.1.to_owned());
+                context.strings.insert(child, op.1.to_owned());
             }
             i += 1;
         }
     });
 }
 
-fn integer_literals(tree: &mut Tree) {
-    tree.insert_storage::<i64>();
-    tree.postorder(|tree, node| {
-        if let Some(s) = tree.get::<String>(node) {
+fn integer_literals(context: &mut Context) {
+    assert!(context.ints.is_empty());
+    context.postorder(|context, node| {
+        if let Some(s) = context.strings.get(&node) {
             if let Ok(int) = s.parse::<i64>() {
-                tree.remove::<String>(node);
-                tree.insert::<i64>(node, int);
+                context.strings.remove(&node);
+                context.ints.insert(node, int);
             }
         }
     });
 }
 
-fn substitute_macros(tree: &mut Tree) {
+fn substitute_macros(context: &mut Context) {
     let mut macros: HashMap<String, Node> = HashMap::new();
-    tree.postorder(|tree, node| {
+    context.postorder(|context, node| {
         let mut i = 0;
-        while i < tree.children[node].len() {
-            let child = tree.children[node][i];
-            if tree.get::<String>(child) == Some(&"macro".to_owned()) {
-                let key = tree.children[child][0];
-                let value = tree.children[child][1];
-                let old = macros.insert(tree.get::<String>(key).unwrap().clone(), value);
+        while i < context.edges[&node].len() {
+            let child = context.edges[&node][i];
+            if context.strings.get(&child) == Some(&"macro".to_owned()) {
+                let key = context.edges[&child][0];
+                let value = context.edges[&child][1];
+                let old = macros.insert(context.strings.get(&key).unwrap().clone(), value);
                 assert_eq!(old, None);
-                tree.children[node].remove(i);
+                context.edges.get_mut(&node).unwrap().remove(i);
             } else {
                 i += 1;
             }
         }
     });
-    tree.postorder(|tree, node| {
+    context.postorder(|context, node| {
         let mut i = 0;
-        while i < tree.children[node].len() {
-            if let Some(s) = tree.get_mut::<String>(tree.children[node][i]) {
+        while i < context.edges[&node].len() {
+            if let Some(s) = context.strings.get(&context.edges[&node][i]) {
                 if let Some(replacement) = macros.get(s) {
-                    tree.children[node][i] = *replacement;
+                    context.edges.get_mut(&node).unwrap()[i] = *replacement;
                 }
             }
             i += 1;
@@ -448,30 +416,30 @@ fn substitute_macros(tree: &mut Tree) {
     });
 }
 
-fn substitute_labels(tree: &mut Tree) {
+fn substitute_labels(context: &mut Context) {
     let mut labels: HashMap<String, i64> = HashMap::new();
-    tree.postorder(|tree, node| {
+    context.postorder(|context, node| {
         let mut i = 0;
-        while i < tree.children[node].len() {
-            let child = tree.children[node][i];
-            if tree.get::<String>(child) == Some(&":".to_owned()) {
-                let key = tree.children[child].remove(0);
-                let old = labels.insert(tree.remove::<String>(key).unwrap(), i as i64);
+        while i < context.edges[&node].len() {
+            let child = context.edges[&node][i];
+            if context.strings.get(&child) == Some(&":".to_owned()) {
+                let key = context.edges.get_mut(&child).unwrap().remove(0);
+                let old = labels.insert(context.strings.remove(&key).unwrap(), i as i64);
                 assert_eq!(old, None);
-                tree.children[node].remove(i);
+                context.edges.get_mut(&node).unwrap().remove(i);
             } else {
                 i += 1;
             }
         }
     });
-    tree.postorder(|tree, node| {
+    context.postorder(|context, node| {
         let mut i = 0;
-        while i < tree.children[node].len() {
-            let child = tree.children[node][i];
-            if let Some(s) = tree.get_mut::<String>(child) {
+        while i < context.edges[&node].len() {
+            let child = context.edges[&node][i];
+            if let Some(s) = context.strings.get_mut(&child) {
                 if let Some(int) = labels.get(s) {
-                    tree.insert::<i64>(child, *int);
-                    tree.remove::<String>(child);
+                    context.ints.insert(child, *int);
+                    context.strings.remove(&child);
                 }
             }
             i += 1;
