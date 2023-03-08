@@ -143,24 +143,34 @@ fn main() {
         pass(&mut context)
     }
 
-    println!("{:#?}", context);
-
     // backend
     let code: Vec<Op> = context.edges[&0]
         .iter()
         .cloned()
         .map(|node| {
-            if let Some(int) = context.ints.remove(&node) {
-                Op::Push(int)
-            } else if let Some(s) = context.strings.remove(&node) {
+            if let Some(int) = context.ints.get(&node) {
+                Op::Push(*int)
+            } else if let Some(s) = context.strings.get(&node) {
                 match s.as_str() {
-                    "~" => Op::Move(context.ints.remove(&context.edges[&node][0]).unwrap()),
-                    "$" => Op::Copy(context.ints.remove(&context.edges[&node][0]).unwrap()),
+                    "~" => Op::Move(*context.ints.get(&context.edges[&node][0]).unwrap()),
+                    "$" => Op::Copy(*context.ints.get(&context.edges[&node][0]).unwrap()),
                     "add" => Op::Add,
                     "neg" => Op::Neg,
                     "ltz" => Op::Ltz,
-                    "?" => Op::Jumpz(context.strings.remove(&context.edges[&node][0]).unwrap()),
-                    ":" => Op::Label(context.strings.remove(&context.edges[&node][0]).unwrap()),
+                    "?" => Op::Jumpz(
+                        context
+                            .strings
+                            .get(&context.edges[&node][0])
+                            .unwrap()
+                            .clone(),
+                    ),
+                    ":" => Op::Label(
+                        context
+                            .strings
+                            .get(&context.edges[&node][0])
+                            .unwrap()
+                            .clone(),
+                    ),
                     s => panic!("expected an op, found {s}"),
                 }
             } else {
@@ -169,9 +179,6 @@ fn main() {
             }
         })
         .collect();
-
-    assert!(context.ints.is_empty());
-    assert!(context.strings.is_empty());
 
     let mut labels = HashMap::new();
     for (pc, op) in code.iter().enumerate() {
