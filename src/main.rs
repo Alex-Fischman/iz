@@ -1,19 +1,33 @@
-use std::any::Any;
+#![no_implicit_prelude]
+extern crate std;
+
+use std::any::{Any, TypeId};
+use std::borrow::ToOwned;
+use std::boxed::Box;
+use std::clone::Clone;
 use std::collections::HashMap;
+use std::default::Default;
+use std::iter::{Extend, Iterator};
+use std::ops::{FnMut, Index, IndexMut};
+use std::option::{Option, Option::None, Option::Some};
+use std::result::Result::Ok;
+use std::string::{String, ToString};
+use std::vec::Vec;
+use std::{assert_eq, matches, panic, print, println, todo};
 
 type Node = usize;
 
 struct Tree {
     id: Node,
     children: Vec<Vec<Node>>,
-    storages: HashMap<std::any::TypeId, Box<dyn Any>>,
+    storages: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Tree {
     fn new() -> Tree {
         Tree {
             id: 0,
-            children: vec![],
+            children: Vec::new(),
             storages: HashMap::new(),
         }
     }
@@ -21,7 +35,7 @@ impl Tree {
     fn new_node(&mut self, parent: Option<Node>) -> Node {
         let node = self.id;
         self.id += 1;
-        self.children.push(vec![]);
+        self.children.push(Vec::new());
         if let Some(parent) = parent {
             self.children[parent].push(node);
         }
@@ -29,22 +43,21 @@ impl Tree {
     }
 
     fn insert_storage<Data: Any>(&mut self) {
-        let old = self.storages.insert(
-            std::any::TypeId::of::<Data>(),
-            Box::<HashMap<Node, Data>>::default(),
-        );
+        let old = self
+            .storages
+            .insert(TypeId::of::<Data>(), Box::<HashMap<Node, Data>>::default());
         assert!(old.is_none())
     }
 
     fn remove_storage<Data: Any>(&mut self) {
-        let old = self.storages.remove(&std::any::TypeId::of::<Data>());
+        let old = self.storages.remove(&TypeId::of::<Data>());
         let old = old.unwrap().downcast::<HashMap<Node, Data>>().unwrap();
         assert!(old.is_empty())
     }
 
     fn get_storage<Data: Any>(&self) -> &HashMap<Node, Data> {
         self.storages
-            .get(&std::any::TypeId::of::<Data>())
+            .get(&TypeId::of::<Data>())
             .unwrap()
             .downcast_ref()
             .unwrap()
@@ -52,7 +65,7 @@ impl Tree {
 
     fn get_storage_mut<Data: Any>(&mut self) -> &mut HashMap<Node, Data> {
         self.storages
-            .get_mut(&std::any::TypeId::of::<Data>())
+            .get_mut(&TypeId::of::<Data>())
             .unwrap()
             .downcast_mut()
             .unwrap()
@@ -98,14 +111,14 @@ enum Op {
 
 struct Memory(Vec<i64>);
 
-impl std::ops::Index<i64> for Memory {
+impl Index<i64> for Memory {
     type Output = i64;
     fn index(&self, i: i64) -> &i64 {
         &self.0[i as usize]
     }
 }
 
-impl std::ops::IndexMut<i64> for Memory {
+impl IndexMut<i64> for Memory {
     fn index_mut(&mut self, i: i64) -> &mut i64 {
         let i = i as usize;
         if self.0.len() <= i {
@@ -170,7 +183,7 @@ fn main() {
         .collect();
 
     let mut pc = 0;
-    let mut data = Memory(vec![]);
+    let mut data = Memory(Vec::new());
     let mut sp = -1;
 
     while (pc as usize) < code.len() {
