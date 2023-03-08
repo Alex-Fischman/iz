@@ -4,15 +4,19 @@ extern crate std;
 use std::borrow::ToOwned;
 use std::clone::Clone;
 use std::collections::HashMap;
+use std::env::args;
+use std::fmt::{Debug, Formatter, Result};
+use std::fs::read_to_string;
 use std::iter::{Extend, Iterator};
 use std::ops::{FnMut, Index, IndexMut};
 use std::option::{Option, Option::None, Option::Some};
 use std::result::Result::Ok;
 use std::string::{String, ToString};
 use std::vec::Vec;
-use std::{assert_eq, matches, panic, print, println, todo};
+use std::{assert_eq, matches, panic, print, println, write, writeln};
 
 type Node = usize;
+type Map<T> = HashMap<Node, T>;
 
 struct Context {
     id: usize,
@@ -22,7 +26,28 @@ struct Context {
     ints: Map<i64>,
 }
 
-type Map<T> = HashMap<Node, T>;
+impl Debug for Context {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> Result {
+            write!(f, "{} {}:", "----".repeat(depth), node)?;
+            if let Some(x) = context.chars.get(&node) {
+                write!(f, " {}", x)?;
+            }
+            if let Some(x) = context.strings.get(&node) {
+                write!(f, " {}", x)?;
+            }
+            if let Some(x) = context.ints.get(&node) {
+                write!(f, " {}", x)?;
+            }
+            writeln!(f)?;
+            for child in &context.edges[&node] {
+                print_tree(context, f, *child, depth + 1)?;
+            }
+            Ok(())
+        }
+        print_tree(self, f, 0, 0)
+    }
+}
 
 impl Context {
     fn new() -> Context {
@@ -64,7 +89,8 @@ enum Op {
     Add,
     Neg,
     Ltz,
-    Jz(i64),
+    Jumpz(String),
+    Label(String),
 }
 
 struct Memory(Vec<i64>);
@@ -88,9 +114,9 @@ impl IndexMut<i64> for Memory {
 
 fn main() {
     // frontend
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = args().collect();
     let file = args.get(1).expect("no file passed");
-    let text = std::fs::read_to_string(file).expect("could not read file");
+    let text = read_to_string(file).expect("could not read file");
     let mut context = Context::new();
 
     let root = context.new_node(None);
@@ -112,34 +138,48 @@ fn main() {
         substitute_macros,
         unroll_brackets,
         integer_literals,
-        substitute_labels,
     ];
     for pass in passes {
         pass(&mut context)
     }
+
+    println!("{:#?}", context);
 
     // backend
     let code: Vec<Op> = context.edges[&0]
         .iter()
         .cloned()
         .map(|node| {
-            if let Some(int) = context.ints.get(&node) {
-                Op::Push(*int)
-            } else if let Some(s) = context.strings.get(&node) {
+            if let Some(int) = context.ints.remove(&node) {
+                Op::Push(int)
+            } else if let Some(s) = context.strings.remove(&node) {
                 match s.as_str() {
-                    "~" => Op::Move(*context.ints.get(&context.edges[&node][0]).unwrap()),
-                    "$" => Op::Copy(*context.ints.get(&context.edges[&node][0]).unwrap()),
+                    "~" => Op::Move(context.ints.remove(&context.edges[&node][0]).unwrap()),
+                    "$" => Op::Copy(context.ints.remove(&context.edges[&node][0]).unwrap()),
                     "add" => Op::Add,
                     "neg" => Op::Neg,
                     "ltz" => Op::Ltz,
-                    "?" => Op::Jz(*context.ints.get(&context.edges[&node][0]).unwrap()),
+                    "?" => Op::Jumpz(context.strings.remove(&context.edges[&node][0]).unwrap()),
+                    ":" => Op::Label(context.strings.remove(&context.edges[&node][0]).unwrap()),
                     s => panic!("expected an op, found {s}"),
                 }
             } else {
+                println!("{:?}", node);
                 panic!("expected an int or a string, found neither")
             }
         })
         .collect();
+
+    assert!(context.ints.is_empty());
+    assert!(context.strings.is_empty());
+
+    let mut labels = HashMap::new();
+    for (pc, op) in code.iter().enumerate() {
+        if let Op::Label(label) = op {
+            let old = labels.insert(label.clone(), pc as i64);
+            assert!(old.is_none());
+        }
+    }
 
     let mut pc = 0;
     let mut data = Memory(Vec::new());
@@ -164,16 +204,13 @@ fn main() {
             }
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Jz(i) => {
+            Op::Jumpz(label) => {
                 if data[sp] == 0 {
-                    if *i < 0 {
-                        todo!("syscalls?")
-                    } else {
-                        pc = i - 1;
-                    }
+                    pc = *labels.get(label).unwrap();
                 }
                 sp -= 1;
             }
+            Op::Label(_) => {}
         }
 
         match sp {
@@ -409,37 +446,6 @@ fn substitute_macros(context: &mut Context) {
             if let Some(s) = context.strings.get(&context.edges[&node][i]) {
                 if let Some(replacement) = macros.get(s) {
                     context.edges.get_mut(&node).unwrap()[i] = *replacement;
-                }
-            }
-            i += 1;
-        }
-    });
-}
-
-fn substitute_labels(context: &mut Context) {
-    let mut labels: HashMap<String, i64> = HashMap::new();
-    context.postorder(|context, node| {
-        let mut i = 0;
-        while i < context.edges[&node].len() {
-            let child = context.edges[&node][i];
-            if context.strings.get(&child) == Some(&":".to_owned()) {
-                let key = context.edges.get_mut(&child).unwrap().remove(0);
-                let old = labels.insert(context.strings.remove(&key).unwrap(), i as i64);
-                assert_eq!(old, None);
-                context.edges.get_mut(&node).unwrap().remove(i);
-            } else {
-                i += 1;
-            }
-        }
-    });
-    context.postorder(|context, node| {
-        let mut i = 0;
-        while i < context.edges[&node].len() {
-            let child = context.edges[&node][i];
-            if let Some(s) = context.strings.get_mut(&child) {
-                if let Some(int) = labels.get(s) {
-                    context.ints.insert(child, *int);
-                    context.strings.remove(&child);
                 }
             }
             i += 1;
