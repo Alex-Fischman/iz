@@ -13,31 +13,30 @@ use std::option::{Option, Option::None, Option::Some};
 use std::result::Result::Ok;
 use std::string::{String, ToString};
 use std::vec::Vec;
-use std::{assert_eq, matches, panic, print, println, write, writeln};
+use std::{matches, panic, print, println, write, writeln};
 
 type Node = usize;
-type Map<T> = HashMap<Node, T>;
 
 struct Context {
     id: usize,
-    edges: Map<Vec<Node>>,
-    chars: Map<char>,
-    strings: Map<String>,
-    ints: Map<i64>,
+    edges: HashMap<Node, Vec<Node>>,
+    chars: HashMap<Node, char>,
+    strings: HashMap<Node, String>,
+    ints: HashMap<Node, i64>,
 }
 
 impl Debug for Context {
     fn fmt(&self, f: &mut Formatter) -> Result {
         fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> Result {
             write!(f, "{} {}:", "----".repeat(depth), node)?;
-            if let Some(x) = context.chars.get(&node) {
-                write!(f, " {}", x)?;
+            if let Some(c) = context.chars.get(&node) {
+                write!(f, " {}", c)?;
             }
-            if let Some(x) = context.strings.get(&node) {
-                write!(f, " {}", x)?;
+            if let Some(s) = context.strings.get(&node) {
+                write!(f, " {}", s)?;
             }
-            if let Some(x) = context.ints.get(&node) {
-                write!(f, " {}", x)?;
+            if let Some(i) = context.ints.get(&node) {
+                write!(f, " {}", i)?;
             }
             writeln!(f)?;
             for child in &context.edges[&node] {
@@ -116,7 +115,7 @@ fn main() {
 
     let root = context.id();
     context.edges.insert(root, Vec::new());
-    assert_eq!(root, 0);
+    assert!(root == 0);
 
     for c in text.chars() {
         let node = context.id();
@@ -172,7 +171,6 @@ fn main() {
                     s => panic!("expected an op, found {s}"),
                 }
             } else {
-                println!("{:?}", node);
                 panic!("expected an int or a string, found neither")
             }
         })
@@ -209,12 +207,13 @@ fn main() {
             }
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Jumpz(label) => {
+            Op::Jumpz(label) if labels.contains_key(label) => {
                 if data[sp] == 0 {
-                    pc = *labels.get(label).unwrap();
+                    pc = labels[label];
                 }
                 sp -= 1;
             }
+            Op::Jumpz(label) => panic!("unknown label {}", label),
             Op::Label(_) => {}
         }
 
@@ -438,7 +437,7 @@ fn substitute_macros(context: &mut Context) {
                 let key = context.edges[&child][0];
                 let value = context.edges[&child][1];
                 let old = macros.insert(context.strings.get(&key).unwrap().clone(), value);
-                assert_eq!(old, None);
+                assert!(old.is_none());
                 context.edges.get_mut(&node).unwrap().remove(i);
             } else {
                 i += 1;
