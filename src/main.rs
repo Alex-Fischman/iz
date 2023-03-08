@@ -60,14 +60,9 @@ impl Context {
         }
     }
 
-    fn new_node(&mut self, parent: Option<Node>) -> Node {
-        let node = self.id;
+    fn id(&mut self) -> usize {
         self.id += 1;
-        if let Some(parent) = parent {
-            self.edges.get_mut(&parent).unwrap().push(node);
-        }
-        self.edges.insert(node, Vec::new());
-        node
+        self.id - 1
     }
 
     fn postorder<F: FnMut(&mut Context, Node)>(&mut self, mut f: F) {
@@ -119,11 +114,14 @@ fn main() {
     let text = read_to_string(file).expect("could not read file");
     let mut context = Context::new();
 
-    let root = context.new_node(None);
+    let root = context.id();
+    context.edges.insert(root, Vec::new());
     assert_eq!(root, 0);
 
     for c in text.chars() {
-        let node = context.new_node(Some(0));
+        let node = context.id();
+        context.edges.insert(node, Vec::new());
+        context.edges.get_mut(&0).unwrap().push(node);
         context.chars.insert(node, c);
     }
 
