@@ -242,16 +242,15 @@ fn main() {
 
 fn remove_comments(context: &mut Context) {
     let mut i = 0;
-    while i < context.edges[&0].len() {
-        if context.chars.get(&context.edges[&0][i]) == Some(&'#') {
+    let children = &mut context.edges.get_mut(&0).unwrap();
+    while i < children.len() {
+        if context.chars.get(&children[i]) == Some(&'#') {
             let mut j = i;
-            while j < context.edges[&0].len()
-                && context.chars.remove(&context.edges[&0][j]) != Some('\n')
-            {
+            while j < children.len() && context.chars.remove(&children[j]) != Some('\n') {
                 j += 1;
             }
-            context.chars.insert(context.edges[&0][j], '\n');
-            context.edges.get_mut(&0).unwrap().drain(i..j);
+            context.chars.insert(children[j], '\n');
+            children.drain(i..j);
         } else {
             i += 1;
         }
@@ -262,11 +261,9 @@ fn chars_to_strings(context: &mut Context) {
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
-
     fn is_identifier(c: char) -> bool {
         matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9')
     }
-
     fn char_type(c: char) -> usize {
         match c {
             _ if is_identifier(c) => 0,
@@ -278,32 +275,33 @@ fn chars_to_strings(context: &mut Context) {
 
     assert!(context.strings.is_empty());
     let mut i = 0;
-    while i < context.edges[&0].len() {
-        let c = context.chars.remove(&context.edges[&0][i]).unwrap();
+    let children = &mut context.edges.get_mut(&0).unwrap();
+    while i < children.len() {
+        let c = context.chars.remove(&children[i]).unwrap();
         if i == 0 {
-            context.strings.insert(context.edges[&0][i], c.to_string());
+            context.strings.insert(children[i], c.to_string());
             i += 1;
         } else {
-            let s = context.strings.get_mut(&context.edges[&0][i - 1]).unwrap();
+            let s = context.strings.get_mut(&children[i - 1]).unwrap();
             if !is_bracket(c) && char_type(c) == char_type(s.chars().next().unwrap()) {
                 s.push(c);
-                context.edges.get_mut(&0).unwrap().remove(i);
+                children.remove(i);
             } else {
-                context.strings.insert(context.edges[&0][i], c.to_string());
+                context.strings.insert(children[i], c.to_string());
                 i += 1;
             }
         }
     }
-
     assert!(context.chars.is_empty());
 }
 
 fn remove_whitespace(context: &mut Context) {
     let mut i = 0;
-    while i < context.edges[&0].len() {
-        let s = context.strings.get(&context.edges[&0][i]).unwrap();
+    let children = &mut context.edges.get_mut(&0).unwrap();
+    while i < children.len() {
+        let s = context.strings.get(&children[i]).unwrap();
         if s.chars().next().unwrap().is_whitespace() {
-            context.edges.get_mut(&0).unwrap().remove(i);
+            children.remove(i);
         } else {
             i += 1;
         }
