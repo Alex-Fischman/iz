@@ -65,11 +65,11 @@ impl Context {
     }
 
     fn preorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
-        postorder(self, root, &mut f);
-        fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
+        preorder(self, root, &mut f);
+        fn preorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
             f(context, node);
             for child in context.edges[&node].clone() {
-                postorder(context, child, f)
+                preorder(context, child, f)
             }
         }
     }
@@ -80,7 +80,7 @@ impl Context {
             for child in context.edges[&node].clone() {
                 postorder(context, child, f)
             }
-            f(context, node)
+            f(context, node);
         }
     }
 }
@@ -136,20 +136,22 @@ fn main() {
 
     // compiler
     let passes = [
+        // here context is flat
         remove_comments,
         chars_to_strings,
         remove_whitespace,
+        // here context is a tree
         group_brackets,
         group_operators,
         unroll_operators,
         substitute_macros,
+        // here context is a DAG
         unroll_brackets,
         integer_literals,
     ];
     for pass in passes {
         pass(&mut context)
     }
-    println!("{:?}", context);
 
     // backend
     let code: Vec<Op> = context.edges[&0]
@@ -352,10 +354,11 @@ fn unroll_brackets(context: &mut Context) {
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
             if context.strings.get(&child) == Some(&"(".to_owned()) {
-                let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
+                let cs = context.edges[&child].clone().to_vec();
                 context.edges.get_mut(&node).unwrap().splice(i..=i, cs);
+            } else {
+                i += 1;
             }
-            i += 1;
         }
     });
 }
@@ -457,10 +460,10 @@ fn substitute_macros(context: &mut Context) {
     });
 
     // replace bodies of recursive macros
-    // doesn't clone edges; links are dynamic
-    let lookup = macros.clone();
-    let replace_node = |strings: &HashMap<Node, String>, node: &mut Node| {
-        if let Some(s) = strings.get(node) {
+    // doesn't clone nodes; links are dynamic
+    let lookup = macros.clone(); // borrow checker
+    let replace_node = |string: Option<&String>, node: &mut Node| {
+        if let Some(s) = string {
             if let Some(replacement) = lookup.get(s) {
                 *node = *replacement;
             }
@@ -469,14 +472,15 @@ fn substitute_macros(context: &mut Context) {
     for node in macros.values_mut() {
         context.postorder(*node, |context, node| {
             for child in context.edges.get_mut(&node).unwrap() {
-                replace_node(&context.strings, child)
+                replace_node(context.strings.get(child), child)
             }
         });
-        replace_node(&context.strings, node);
+        replace_node(context.strings.get(node), node);
     }
+
     context.postorder(0, |context, node| {
         for child in context.edges.get_mut(&node).unwrap() {
-            replace_node(&context.strings, child)
+            replace_node(context.strings.get(child), child)
         }
     });
 
