@@ -315,20 +315,18 @@ fn group_brackets(context: &mut Context) {
             let child = context.edges[&0][*i];
             *i += 1;
             let s = context.strings.get(&child).unwrap().clone();
-            let mut handle_open_bracket = |t| {
+            let mut handle_open_bracket = |close| {
                 let start = *i;
-                bracket_matcher(context, i, Some(t));
+                bracket_matcher(context, i, Some(close));
                 let mut cs: Vec<Node> = context
                     .edges
                     .get_mut(&0)
                     .unwrap()
                     .drain(start..*i)
                     .collect();
-                cs.pop();
-                *i = start;
-                let n = context.edges[&0][*i - 1];
-                assert!(context.edges[&n].is_empty());
+                cs.pop(); // remove the closing bracket
                 *context.edges.get_mut(&child).unwrap() = cs;
+                *i = start;
             };
             match s.as_str() {
                 "(" => handle_open_bracket(")"),
@@ -354,7 +352,9 @@ fn unroll_brackets(context: &mut Context) {
             let child = context.edges[&node][i];
             if context.strings.get(&child) == Some(&"(".to_owned()) {
                 let cs = context.edges[&child].clone().to_vec();
+                let l = cs.len();
                 context.edges.get_mut(&node).unwrap().splice(i..=i, cs);
+                i += l;
             } else {
                 i += 1;
             }
