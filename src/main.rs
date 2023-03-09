@@ -64,8 +64,8 @@ impl Context {
         self.id - 1
     }
 
-    fn postorder<F: FnMut(&mut Context, Node)>(&mut self, mut f: F) {
-        postorder(self, 0, &mut f);
+    fn postorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
+        postorder(self, root, &mut f);
         fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
             for child in context.edges[&node].clone() {
                 postorder(context, child, f)
@@ -336,7 +336,7 @@ fn group_brackets(context: &mut Context) {
 }
 
 fn unroll_brackets(context: &mut Context) {
-    context.postorder(|context, node| {
+    context.postorder(0, |context, node| {
         let mut i = 0;
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
@@ -363,7 +363,7 @@ const OPERATORS: &[(&[Operator], bool)] = &[
 ];
 
 fn group_operators(context: &mut Context) {
-    context.postorder(|context, node| {
+    context.postorder(0, |context, node| {
         for (ops, right) in OPERATORS {
             let mut i = if *right {
                 context.edges[&node].len().wrapping_sub(1)
@@ -393,7 +393,7 @@ fn group_operators(context: &mut Context) {
 }
 
 fn unroll_operators(context: &mut Context) {
-    context.postorder(|context, node| {
+    context.postorder(0, |context, node| {
         let mut i = 0;
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
@@ -417,7 +417,7 @@ fn unroll_operators(context: &mut Context) {
 
 fn integer_literals(context: &mut Context) {
     assert!(context.ints.is_empty());
-    context.postorder(|context, node| {
+    context.postorder(0, |context, node| {
         if let Some(s) = context.strings.get(&node) {
             if let Ok(int) = s.parse::<i64>() {
                 context.strings.remove(&node);
@@ -429,7 +429,7 @@ fn integer_literals(context: &mut Context) {
 
 fn substitute_macros(context: &mut Context) {
     let mut macros: HashMap<String, Node> = HashMap::new();
-    context.postorder(|context, node| {
+    context.postorder(0, |context, node| {
         let mut i = 0;
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
@@ -444,15 +444,20 @@ fn substitute_macros(context: &mut Context) {
             }
         }
     });
-    context.postorder(|context, node| {
+    let replace_children = |context: &mut Context, parent: Node| {
         let mut i = 0;
-        while i < context.edges[&node].len() {
-            if let Some(s) = context.strings.get(&context.edges[&node][i]) {
+        while i < context.edges[&parent].len() {
+            if let Some(s) = context.strings.get(&context.edges[&parent][i]) {
                 if let Some(replacement) = macros.get(s) {
-                    context.edges.get_mut(&node).unwrap()[i] = *replacement;
+                    context.edges.get_mut(&parent).unwrap()[i] = *replacement;
                 }
             }
             i += 1;
         }
-    });
+    };
+    for node in macros.values() {
+        context.postorder(*node, replace_children);
+    }
+    // TODO: check for cycles
+    context.postorder(0, replace_children);
 }
