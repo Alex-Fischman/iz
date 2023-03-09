@@ -17,9 +17,10 @@ use std::{matches, panic, print, println, write, writeln};
 
 type Node = usize;
 
+// holds all the information given to different passes
 struct Context {
     id: usize,
-    edges: HashMap<Node, Vec<Node>>,
+    edges: HashMap<Node, Vec<Node>>, // adjency list from nodes to children
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
     ints: HashMap<Node, i64>,
@@ -85,6 +86,7 @@ impl Context {
     }
 }
 
+// should be extensible
 #[derive(Clone, Debug, PartialEq)]
 enum Op {
     Push(i64),
@@ -97,6 +99,7 @@ enum Op {
     Label(String),
 }
 
+// for the bytecode interpreter
 struct Memory(Vec<i64>);
 
 impl Index<i64> for Memory {
@@ -136,16 +139,14 @@ fn main() {
 
     // compiler
     let passes = [
-        // here context is flat
+        // context starts out flat
         remove_comments,
         chars_to_strings,
         remove_whitespace,
-        // here context is a tree
-        group_brackets,
+        group_brackets, // changes context to a tree
         group_operators,
         unroll_operators,
-        substitute_macros,
-        // here context is a DAG
+        substitute_macros, // changes context to a DAG
         unroll_brackets,
         integer_literals,
     ];
