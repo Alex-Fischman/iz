@@ -487,7 +487,7 @@ fn substitute_macros(context: &mut Context) {
         }
     });
 
-    // cycle checking
+    // cycle checking; we expect a DAG, not a general graph
     for root in macros.values() {
         for child in context.edges[root].clone() {
             context.preorder(child, |_context, node| {
