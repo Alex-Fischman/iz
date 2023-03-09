@@ -44,9 +44,8 @@ macro drop ~1
 macro swap ($1 ~3 $-2 $-2)
 # macros can be nested
 macro dup2 (dup dup)
-
-macro recursive1 (recursive2 recursive2)
-macro recursive2 (recursive1 recursive1)
-recursive2
-
 7 dup2
+
+# macro loops are detected
+# macro recursive1 (recursive2)
+# macro recursive2 (recursive1)

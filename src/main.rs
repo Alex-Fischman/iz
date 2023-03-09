@@ -64,6 +64,16 @@ impl Context {
         self.id - 1
     }
 
+    fn preorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
+        postorder(self, root, &mut f);
+        fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
+            f(context, node);
+            for child in context.edges[&node].clone() {
+                postorder(context, child, f)
+            }
+        }
+    }
+
     fn postorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
         postorder(self, root, &mut f);
         fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
@@ -139,6 +149,7 @@ fn main() {
     for pass in passes {
         pass(&mut context)
     }
+    println!("{:?}", context);
 
     // backend
     let code: Vec<Op> = context.edges[&0]
@@ -444,29 +455,39 @@ fn substitute_macros(context: &mut Context) {
             }
         }
     });
-    let replace_children = |context: &mut Context, parent: Node| {
-        let mut i = 0;
-        while i < context.edges[&parent].len() {
-            if let Some(s) = context.strings.get(&context.edges[&parent][i]) {
-                if let Some(replacement) = macros.get(s) {
-                    context.edges.get_mut(&parent).unwrap()[i] = *replacement;
-                }
+
+    // replace bodies of recursive macros
+    // doesn't clone edges; links are dynamic
+    let lookup = macros.clone();
+    let replace_node = |strings: &HashMap<Node, String>, node: &mut Node| {
+        if let Some(s) = strings.get(node) {
+            if let Some(replacement) = lookup.get(s) {
+                *node = *replacement;
             }
-            i += 1;
         }
     };
-    for node in macros.values() {
-        context.postorder(*node, replace_children);
-    }
-    
-    let mut found: HashMap<Node, ()> = HashMap::new();
-    for node in macros.values() {
-        context.postorder(*node, |_context, node| {
-            if found.insert(node, ()).is_some() {
-                panic!("macro loop detected");
+    for node in macros.values_mut() {
+        context.postorder(*node, |context, node| {
+            for child in context.edges.get_mut(&node).unwrap() {
+                replace_node(&context.strings, child)
             }
         });
+        replace_node(&context.strings, node);
     }
+    context.postorder(0, |context, node| {
+        for child in context.edges.get_mut(&node).unwrap() {
+            replace_node(&context.strings, child)
+        }
+    });
 
-    context.postorder(0, replace_children);
+    // cycle checking
+    for root in macros.values() {
+        for child in context.edges[root].clone() {
+            context.preorder(child, |_context, node| {
+                if node == *root {
+                    panic!("macro loop detected");
+                }
+            });
+        }
+    }
 }
