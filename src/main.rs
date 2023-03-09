@@ -458,6 +458,15 @@ fn substitute_macros(context: &mut Context) {
     for node in macros.values() {
         context.postorder(*node, replace_children);
     }
-    // TODO: check for cycles
+    
+    let mut found: HashMap<Node, ()> = HashMap::new();
+    for node in macros.values() {
+        context.postorder(*node, |_context, node| {
+            if found.insert(node, ()).is_some() {
+                panic!("macro loop detected");
+            }
+        });
+    }
+
     context.postorder(0, replace_children);
 }
