@@ -4,6 +4,7 @@ extern crate std;
 use std::borrow::ToOwned;
 use std::clone::Clone;
 use std::collections::HashMap;
+use std::convert::From;
 use std::env::args;
 use std::fmt::{Debug, Formatter, Result};
 use std::fs::read_to_string;
@@ -13,7 +14,7 @@ use std::option::{Option, Option::None, Option::Some};
 use std::result::Result::Ok;
 use std::string::{String, ToString};
 use std::vec::Vec;
-use std::{matches, panic, print, println, write, writeln};
+use std::{matches, panic, print, println, vec, write, writeln};
 
 type Node = usize;
 
@@ -144,8 +145,7 @@ fn main() {
         chars_to_strings,
         remove_whitespace,
         group_brackets, // changes context to a tree
-        group_operators,
-        unroll_operators,
+        group_and_unroll_operators,
         substitute_macros, // changes context to a DAG
         unroll_brackets,
         integer_literals,
@@ -362,66 +362,70 @@ fn unroll_brackets(context: &mut Context) {
     });
 }
 
-//                   name     func     left   right  unroll
-type Operator<'a> = (&'a str, &'a str, usize, usize, bool);
-//                               right associativity
-const OPERATORS: &[(&[Operator], bool)] = &[
-    (&[(":", ":", 1, 0, false)], false),
-    (&[("?", "?", 1, 0, false)], false),
-    (&[("~", "~", 0, 1, false)], true),
-    (&[("$", "$", 0, 1, false)], true),
-    (&[("-", "neg", 0, 1, true), ("!", "not", 0, 1, true)], true),
-    (&[("+", "add", 1, 1, true)], false),
-    (&[("macro", "macro", 0, 2, false)], true),
-];
+fn group_and_unroll_operators(context: &mut Context) {
+    //                   func     left   right  unroll
+    type Operator<'a> = (&'a str, usize, usize, bool);
+    //                                           right associativity
+    let operators: Vec<(HashMap<&str, Operator>, bool)> = vec![
+        (HashMap::from([(":", (":", 1, 0, false))]), false),
+        (HashMap::from([("?", ("?", 1, 0, false))]), false),
+        (HashMap::from([("~", ("~", 0, 1, false))]), true),
+        (HashMap::from([("$", ("$", 0, 1, false))]), true),
+        (
+            HashMap::from([("-", ("neg", 0, 1, true)), ("!", ("not", 0, 1, true))]),
+            true,
+        ),
+        (HashMap::from([("+", ("add", 1, 1, true))]), false),
+        (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
+    ];
 
-fn group_operators(context: &mut Context) {
     context.postorder(0, |context, node| {
-        for (ops, right) in OPERATORS {
-            let mut i = if *right {
+        for (ops, right_assoc) in &operators {
+            let mut i = if *right_assoc {
                 context.edges[&node].len().wrapping_sub(1)
             } else {
                 0
             };
             while let Some(child) = context.edges[&node].get(i).copied() {
                 let s = context.strings.get(&child).unwrap().clone();
-                if let Some(op) = ops.iter().find(|op| op.0 == s) {
-                    if i < op.2 || i + op.3 >= context.edges[&node].len() {
+                if let Some((_func, left, right, _unroll)) = ops.get(&*s) {
+                    if i < *left || i + right >= context.edges[&node].len() {
                         panic!("not enough operator arguments for {s}");
                     }
                     let mut cs: Vec<Node> = context
                         .edges
                         .get_mut(&node)
                         .unwrap()
-                        .drain(i + 1..=i + op.3)
+                        .drain(i + 1..=i + right)
                         .collect();
-                    cs.extend(context.edges.get_mut(&node).unwrap().drain(i - op.2..i));
-                    i -= op.2;
+                    cs.extend(context.edges.get_mut(&node).unwrap().drain(i - left..i));
+                    i -= left;
                     *context.edges.get_mut(&child).unwrap() = cs;
                 }
-                i = if *right { i.wrapping_sub(1) } else { i + 1 }
+                i = if *right_assoc {
+                    i.wrapping_sub(1)
+                } else {
+                    i + 1
+                }
             }
         }
     });
-}
 
-fn unroll_operators(context: &mut Context) {
     context.postorder(0, |context, node| {
         let mut i = 0;
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
             let s = context.strings.get(&child).unwrap();
-            if let Some(op) = OPERATORS
-                .iter()
-                .find_map(|(ops, _)| ops.iter().find(|op| op.0 == s))
+            if let Some((func, _left, _right, unroll)) =
+                operators.iter().find_map(|(ops, _)| ops.get(&**s))
             {
-                if op.4 {
+                if *unroll {
                     let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
                     let l = cs.len();
                     context.edges.get_mut(&node).unwrap().splice(i..i, cs);
                     i += l;
                 }
-                context.strings.insert(child, op.1.to_owned());
+                context.strings.insert(child, (*func).to_owned());
             }
             i += 1;
         }
