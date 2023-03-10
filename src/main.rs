@@ -440,7 +440,7 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
     fn bracket_matcher(
         context: &mut Context,
         i: &mut usize,
-        target: Option<&str>,
+        target: Option<(&str, Location<&str>)>,
     ) -> Result<(), E> {
         while *i < context.edges[&0].len() {
             let child = context.edges[&0][*i];
@@ -448,7 +448,7 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
             let s = context.strings.get(&child).unwrap().clone();
             let mut handle_open_bracket = |close| -> Result<(), E> {
                 let start = *i;
-                bracket_matcher(context, i, Some(close))?;
+                bracket_matcher(context, i, Some((close, context.locs[&child].clone())))?;
                 let mut cs: Vec<Node> = context
                     .edges
                     .get_mut(&0)
@@ -465,7 +465,7 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
                 "{" => handle_open_bracket("}"),
                 "[" => handle_open_bracket("]"),
                 ")" | "}" | "]" => match target {
-                    Some(t) if s == t => return Ok(()),
+                    Some((t, _)) if s == t => return Ok(()),
                     _ => Err(E(
                         ExtraCloseBracket(s),
                         Some(context.locs[&child].unborrow_string()),
@@ -474,8 +474,11 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
                 _ => Ok(()),
             }?
         }
-        if let Some(s) = target {
-            Err(E(MissingCloseBracket(s.to_owned()), None))
+        if let Some((s, l)) = target {
+            Err(E(
+                MissingCloseBracket(s.to_owned()),
+                Some(l.unborrow_string()),
+            ))
         } else {
             Ok(())
         }
