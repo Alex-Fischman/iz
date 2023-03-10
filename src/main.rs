@@ -66,16 +66,6 @@ impl Context {
         self.id - 1
     }
 
-    fn preorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
-        preorder(self, root, &mut f);
-        fn preorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
-            f(context, node);
-            for child in context.edges[&node].clone() {
-                preorder(context, child, f)
-            }
-        }
-    }
-
     fn postorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
         postorder(self, root, &mut f);
         fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
@@ -445,56 +435,48 @@ fn integer_literals(context: &mut Context) {
 }
 
 fn substitute_macros(context: &mut Context) {
-    let mut macros: HashMap<String, Node> = HashMap::new();
     context.postorder(0, |context, node| {
         let mut i = 0;
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
             if context.strings.get(&child) == Some(&"macro".to_owned()) {
-                let key = context.edges[&child][0];
-                let value = context.edges[&child][1];
-                let old = macros.insert(context.strings.get(&key).unwrap().clone(), value);
-                assert!(old.is_none());
+                let name = context
+                    .strings
+                    .get(&context.edges[&child][0])
+                    .unwrap()
+                    .clone();
+                let replacement = context.edges[&child][1];
                 context.edges.get_mut(&node).unwrap().remove(i);
+                // doesn't clone the replacement node, which could cause cycles
+                context.postorder(0, |context, node| {
+                    for child in context.edges.get_mut(&node).unwrap() {
+                        if context.strings.get(child) == Some(&name) {
+                            *child = replacement;
+                        }
+                    }
+                });
+                // we need to check for cycles before moving on
+                // or else the previous postorder will infinite loop on the next macro
+                fn has_cycle(context: &Context, node: Node, visited: &HashMap<Node, ()>) -> bool {
+                    let mut next = visited.clone();
+                    match next.insert(node, ()) {
+                        Some(()) => true,
+                        None => {
+                            for child in &context.edges[&node] {
+                                if has_cycle(context, *child, &next) {
+                                    return true;
+                                }
+                            }
+                            false
+                        }
+                    }
+                }
+                if has_cycle(context, 0, &HashMap::new()) {
+                    panic!("macro cycle detected");
+                }
             } else {
                 i += 1;
             }
         }
     });
-
-    // replace bodies of recursive macros
-    // doesn't clone nodes; links are dynamic
-    let lookup = macros.clone(); // borrow checker
-    let replace_node = |string: Option<&String>, node: &mut Node| {
-        if let Some(s) = string {
-            if let Some(replacement) = lookup.get(s) {
-                *node = *replacement;
-            }
-        }
-    };
-    for node in macros.values_mut() {
-        context.postorder(*node, |context, node| {
-            for child in context.edges.get_mut(&node).unwrap() {
-                replace_node(context.strings.get(child), child)
-            }
-        });
-        replace_node(context.strings.get(node), node);
-    }
-
-    context.postorder(0, |context, node| {
-        for child in context.edges.get_mut(&node).unwrap() {
-            replace_node(context.strings.get(child), child)
-        }
-    });
-
-    // cycle checking; we expect a DAG, not a general graph
-    for root in macros.values() {
-        for child in context.edges[root].clone() {
-            context.preorder(child, |_context, node| {
-                if node == *root {
-                    panic!("macro loop detected");
-                }
-            });
-        }
-    }
 }

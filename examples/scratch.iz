@@ -46,6 +46,13 @@ macro swap ($1 ~3 $-2 $-2)
 macro dup2 (dup dup)
 7 dup2
 
-# macro loops are detected
-# macro recursive1 (recursive2)
-# macro recursive2 (recursive1)
+# macros can be aliases for other macros
+macro level1 6
+macro level3 level2
+macro level2 level1
+level3
+
+# macro loops are detected only if used
+# macro recursive1 recursive2
+# macro recursive2 recursive1
+# recursive1
