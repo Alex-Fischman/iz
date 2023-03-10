@@ -69,16 +69,19 @@ impl Context {
 
     fn replace_children_postorder<F>(&mut self, node: Node, f: &mut F)
     where
-        F: FnMut(&mut Context, Node) -> Vec<Node>,
+        F: FnMut(&mut Context, Node) -> Option<Vec<Node>>,
     {
         let mut i = 0;
         while i < self.edges[&node].len() {
             let child = self.edges[&node][i];
             self.replace_children_postorder(child, f);
-            let nodes = f(self, child);
-            let l = nodes.len();
-            self.edges.get_mut(&node).unwrap().splice(i..=i, nodes);
-            i += l;
+            if let Some(nodes) = f(self, child) {
+                let l = nodes.len();
+                self.edges.get_mut(&node).unwrap().splice(i..=i, nodes);
+                i += l;
+            } else {
+                i += 1;
+            }
         }
     }
 }
@@ -344,9 +347,9 @@ fn group_brackets(context: &mut Context) {
 fn unroll_brackets(context: &mut Context) {
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"(".to_owned()) {
-            context.edges.get_mut(&node).unwrap().drain(..).collect()
+            Some(context.edges.get_mut(&node).unwrap().drain(..).collect())
         } else {
-            vec![node]
+            None
         }
     });
 }
@@ -415,27 +418,30 @@ fn group_and_unroll_operators(context: &mut Context) {
             if *unroll {
                 let mut cs: Vec<Node> = context.edges.get_mut(&node).unwrap().drain(..).collect();
                 cs.push(node);
-                cs
+                Some(cs)
             } else {
-                vec![node]
+                None
             }
         } else {
-            vec![node]
+            None
         }
     });
 }
 
 fn integer_literals(context: &mut Context) {
     assert!(context.ints.is_empty());
-    context.replace_children_postorder(0, &mut |context, node| {
+    integer_literals(context, 0);
+    fn integer_literals(context: &mut Context, node: Node) {
+        for child in context.edges[&node].clone() {
+            integer_literals(context, child)
+        }
         if let Some(s) = context.strings.get(&node) {
             if let Ok(int) = s.parse::<i64>() {
                 context.strings.remove(&node);
                 context.ints.insert(node, int);
             }
         }
-        vec![node]
-    });
+    }
 }
 
 fn substitute_macros(context: &mut Context) {
@@ -445,9 +451,9 @@ fn substitute_macros(context: &mut Context) {
             let key = context.strings.remove(&context.edges[&node][0]).unwrap();
             let value = context.edges[&node][1..].to_vec();
             macros.push((key, value));
-            vec![]
+            Some(vec![])
         } else {
-            vec![node]
+            None
         }
     });
 
@@ -481,9 +487,9 @@ fn substitute_macros(context: &mut Context) {
         let (key, value) = &macros[i];
         context.replace_children_postorder(0, &mut |context, node| {
             if context.strings.get(&node) == Some(key) {
-                value.clone()
+                Some(value.clone())
             } else {
-                vec![node]
+                None
             }
         });
     }
