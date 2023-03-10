@@ -118,12 +118,12 @@ fn main() {
     let mut context = Context::new();
 
     let root = context.id();
-    context.edges.insert(root, Vec::new());
+    context.edges.insert(root, vec![]);
     assert!(root == 0);
 
     for c in text.chars() {
         let node = context.id();
-        context.edges.insert(node, Vec::new());
+        context.edges.insert(node, vec![]);
         context.edges.get_mut(&0).unwrap().push(node);
         context.chars.insert(node, c);
     }
@@ -136,13 +136,15 @@ fn main() {
         remove_whitespace,
         group_brackets, // changes context to a tree
         group_and_unroll_operators,
-        substitute_macros, // changes context to a DAG
         unroll_brackets,
         integer_literals,
+        substitute_macros, // changes context to a DAG
     ];
     for pass in passes {
         pass(&mut context)
     }
+
+    println!("{:?}", context);
 
     // backend
     let code: Vec<Op> = context.edges[&0]
@@ -189,7 +191,7 @@ fn main() {
     }
 
     let mut pc = 0;
-    let mut data = Memory(Vec::new());
+    let mut data = Memory(vec![]);
     let mut sp = -1;
 
     while (pc as usize) < code.len() {
@@ -341,7 +343,7 @@ fn unroll_brackets(context: &mut Context) {
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
             if context.strings.get(&child) == Some(&"(".to_owned()) {
-                let cs = context.edges[&child].clone().to_vec();
+                let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
                 let l = cs.len();
                 context.edges.get_mut(&node).unwrap().splice(i..=i, cs);
                 i += l;
@@ -440,23 +442,25 @@ fn substitute_macros(context: &mut Context) {
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
             if context.strings.get(&child) == Some(&"macro".to_owned()) {
-                let name = context
-                    .strings
-                    .get(&context.edges[&child][0])
-                    .unwrap()
-                    .clone();
-                let replacement = context.edges[&child][1];
+                let name = context.edges[&child][0];
+                let name = context.strings.get(&name).unwrap().clone();
+                let replacement = context.edges[&child][1..].to_vec();
                 context.edges.get_mut(&node).unwrap().remove(i);
-                // doesn't clone the replacement node, which could cause cycles
+                // doesn't clone the replacement nodes, which could cause cycles
                 context.postorder(0, |context, node| {
-                    for child in context.edges.get_mut(&node).unwrap() {
-                        if context.strings.get(child) == Some(&name) {
-                            *child = replacement;
+                    let mut i = 0;
+                    let children = &mut context.edges.get_mut(&node).unwrap();
+                    while i < children.len() {
+                        if context.strings.get(&children[i]) == Some(&name) {
+                            children.splice(i..=i, replacement.clone());
+                            i += replacement.len() - 1;
+                        } else {
+                            i += 1;
                         }
                     }
                 });
                 // we need to check for cycles before moving on
-                // or else the previous postorder will infinite loop on the next macro
+                // or else the previous postorder will run forever in the next iteration
                 fn has_cycle(context: &Context, node: Node, visited: &HashMap<Node, ()>) -> bool {
                     let mut next = visited.clone();
                     match next.insert(node, ()) {
