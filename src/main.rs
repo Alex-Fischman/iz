@@ -139,7 +139,9 @@ fn main() -> Result<(), String> {
     };
     let root = context.id();
     context.edges.insert(root, vec![]);
-    assert!(root == 0);
+    if root != 0 {
+        return Err(format!("expected root to be 0 but it was {}", root));
+    }
 
     let mut row = 1;
     let mut col = 1;
@@ -224,7 +226,9 @@ fn main() -> Result<(), String> {
     for (pc, op) in code.iter().enumerate() {
         if let Op::Label(label) = op {
             let old = labels.insert(label.clone(), pc as i64);
-            assert!(old.is_none());
+            if old.is_some() {
+                return Err(format!("label {} is declared twice", label));
+            }
         }
     }
 
@@ -308,7 +312,12 @@ fn chars_to_strings(context: &mut Context) -> Result<(), String> {
         }
     }
 
-    assert!(context.strings.is_empty());
+    if !context.strings.is_empty() {
+        return Err(format!(
+            "expected context.strings to be empty but it was {:?}",
+            context.strings
+        ));
+    }
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -327,7 +336,12 @@ fn chars_to_strings(context: &mut Context) -> Result<(), String> {
             }
         }
     }
-    assert!(context.chars.is_empty());
+    if !context.chars.is_empty() {
+        return Err(format!(
+            "expected context.chars to be empty but it was {:?}",
+            context.strings
+        ));
+    }
 
     Ok(())
 }
@@ -483,7 +497,6 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), String> {
 }
 
 fn integer_literals(context: &mut Context) -> Result<(), String> {
-    assert!(context.ints.is_empty());
     integer_literals(context, 0);
     fn integer_literals(context: &mut Context, node: Node) {
         for child in context.edges[&node].clone() {
