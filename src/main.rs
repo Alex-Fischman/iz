@@ -144,8 +144,6 @@ fn main() {
         pass(&mut context)
     }
 
-    println!("{:?}", context);
-
     // backend
     let code: Vec<Op> = context.edges[&0]
         .iter()
@@ -437,50 +435,99 @@ fn integer_literals(context: &mut Context) {
 }
 
 fn substitute_macros(context: &mut Context) {
+    let mut macros = vec![];
     context.postorder(0, |context, node| {
         let mut i = 0;
         while i < context.edges[&node].len() {
             let child = context.edges[&node][i];
             if context.strings.get(&child) == Some(&"macro".to_owned()) {
-                let name = context.edges[&child][0];
-                let name = context.strings.get(&name).unwrap().clone();
-                let replacement = context.edges[&child][1..].to_vec();
+                let key = context.strings.remove(&context.edges[&child][0]).unwrap();
+                let value = context.edges[&child][1..].to_vec();
+                macros.push((key, value));
                 context.edges.get_mut(&node).unwrap().remove(i);
-                // doesn't clone the replacement nodes, which could cause cycles
-                context.postorder(0, |context, node| {
-                    let mut i = 0;
-                    let children = &mut context.edges.get_mut(&node).unwrap();
-                    while i < children.len() {
-                        if context.strings.get(&children[i]) == Some(&name) {
-                            children.splice(i..=i, replacement.clone());
-                            i += replacement.len() - 1;
-                        } else {
-                            i += 1;
-                        }
-                    }
-                });
-                // we need to check for cycles before moving on
-                // or else the previous postorder will run forever in the next iteration
-                fn has_cycle(context: &Context, node: Node, visited: &HashMap<Node, ()>) -> bool {
-                    let mut next = visited.clone();
-                    match next.insert(node, ()) {
-                        Some(()) => true,
-                        None => {
-                            for child in &context.edges[&node] {
-                                if has_cycle(context, *child, &next) {
-                                    return true;
-                                }
-                            }
-                            false
-                        }
-                    }
-                }
-                if has_cycle(context, 0, &HashMap::new()) {
-                    panic!("macro cycle detected");
-                }
             } else {
                 i += 1;
             }
         }
     });
+
+    // adjancency list for macro dependency graph
+    type Macro = usize;
+    type Edges = HashMap<Macro, HashMap<Macro, ()>>;
+    let mut edges: Edges = HashMap::new();
+    for (i, (_, nodes)) in macros.iter().enumerate() {
+        for (j, (key, _)) in macros.iter().enumerate() {
+            let mut dependency = false;
+            for node in nodes {
+                context.postorder(*node, |context, node| {
+                    if context.strings.get(&node) == Some(key) {
+                        dependency = true;
+                    }
+                });
+            }
+            if dependency {
+                edges.entry(i).or_default().insert(j, ());
+            }
+        }
+    }
+
+    fn has_incoming(edges: &Edges, i: Macro) -> bool {
+        for ws in edges.values() {
+            for (w, ()) in ws {
+                if i == *w {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // topological sort using Kahn's algorithm
+    let mut sorted = vec![];
+    let mut no_incoming: Vec<Macro> = macros
+        .iter()
+        .enumerate()
+        .map(|(i, _)| i)
+        .filter(|i| !has_incoming(&edges, *i))
+        .collect();
+
+    while let Some(v) = no_incoming.pop() {
+        sorted.push(v);
+        if let Some(ws) = edges.remove(&v) {
+            for (w, ()) in ws {
+                if !has_incoming(&edges, w) {
+                    no_incoming.push(w)
+                }
+            }
+        }
+    }
+
+    if !edges.is_empty() {
+        for (v, ws) in edges {
+            for (w, ()) in ws {
+                println!("{:?} -> {:?}", macros[v].0, macros[w].0);
+            }
+        }
+        panic!("macro dependency cycle detected")
+    }
+
+    for i in sorted {
+        let (key, value) = &macros[i];
+        context.postorder(0, |context, node| {
+            let mut i = 0;
+            while i < context.edges[&node].len() {
+                let child = context.edges[&node][i];
+                if context.strings.get(&child) == Some(key) {
+                    context
+                        .edges
+                        .get_mut(&node)
+                        .unwrap()
+                        .splice(i..=i, value.clone());
+                    i += value.len();
+                } else {
+                    i += 1;
+                }
+            }
+        });
+    }
 }

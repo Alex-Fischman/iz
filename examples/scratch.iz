@@ -52,7 +52,7 @@ macro level3 level2
 macro level2 level1
 level3
 
-# macro loops are detected only if used
+# macro loops are detected
 # macro recursive1 recursive2
 # macro recursive2 recursive1
-# recursive1
+# macro recursive recursive
