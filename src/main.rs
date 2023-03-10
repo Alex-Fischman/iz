@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     convert::From,
     env::args,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
+    fmt::{Debug, Formatter, Result as FmtResult},
     fs::read_to_string,
     iter::{Extend, Iterator},
     ops::{FnMut, Index, IndexMut},
@@ -35,8 +35,8 @@ impl Debug for Context<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> FmtResult {
             write!(f, "{} {}", "----".repeat(depth), node)?;
-            if let Some(l) = context.locs.get(&node) {
-                write!(f, "@{}", l)?;
+            if let Some(Location { row, col, src }) = context.locs.get(&node) {
+                write!(f, "@{}:{}:{}", src, row, col)?;
             }
             write!(f, ":")?;
             if let Some(c) = context.chars.get(&node) {
@@ -133,26 +133,11 @@ impl<Src: ToString> Location<Src> {
     }
 }
 
-impl<Src: ToString> Display for Location<Src> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "{}:{}:{}", self.src.to_string(), self.row, self.col)
-    }
-}
-
 #[derive(Clone)]
 struct E(Error, Option<Location<String>>);
 
-impl Debug for E {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match &self.1 {
-            None => write!(f, "{}", self.0),
-            Some(loc) => write!(f, "{} at {}", self.0, loc),
-        }
-    }
-}
-
 use Error::*;
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Error {
     NoFilePassed,
     CouldNotRead(String),
@@ -171,9 +156,9 @@ enum Error {
     ExpectedEmptyData(String),
 }
 
-impl Display for Error {
+impl Debug for E {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
+        match &self.0 {
             Error::NoFilePassed => write!(f, "pass a .iz file as a command line argument"),
             Error::CouldNotRead(file) => write!(f, "could not read from file {}", file),
 
@@ -203,7 +188,11 @@ impl Display for Error {
                     data
                 )
             }
+        }?;
+        if let Some(Location { row, col, src }) = &self.1 {
+            write!(f, " at {}:{}:{}", src, row, col)?;
         }
+        Ok(())
     }
 }
 
