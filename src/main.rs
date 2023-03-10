@@ -123,9 +123,8 @@ struct Location<Src> {
     src: Src,
 }
 
-// TODO: generify this to use one of the std traits
 impl Location<&str> {
-    fn unborrow_string(&self) -> Location<String> {
+    fn cloned(&self) -> Location<String> {
         Location {
             row: self.row,
             col: self.col,
@@ -297,14 +296,11 @@ fn main() -> Result<(), E> {
                     )),
                     _ => Err(E(
                         UnknownOpCode(s.clone()),
-                        Some(context.locs[&node].unborrow_string()),
+                        Some(context.locs[&node].cloned()),
                     )),
                 }
             } else {
-                Err(E(
-                    MissingOpCode,
-                    Some(context.locs[&node].unborrow_string()),
-                ))
+                Err(E(MissingOpCode, Some(context.locs[&node].cloned())))
             }
         })
         .collect::<Result<Vec<Op>, _>>()?;
@@ -471,19 +467,13 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
                 "[" => handle_open_bracket("]"),
                 ")" | "}" | "]" => match target {
                     Some((t, _)) if s == t => return Ok(()),
-                    _ => Err(E(
-                        ExtraCloseBracket(s),
-                        Some(context.locs[&child].unborrow_string()),
-                    )),
+                    _ => Err(E(ExtraCloseBracket(s), Some(context.locs[&child].cloned()))),
                 },
                 _ => Ok(()),
             }?
         }
         if let Some((s, l)) = target {
-            Err(E(
-                MissingCloseBracket(s.to_owned()),
-                Some(l.unborrow_string()),
-            ))
+            Err(E(MissingCloseBracket(s.to_owned()), Some(l.cloned())))
         } else {
             Ok(())
         }
@@ -538,7 +528,7 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), E> {
                     if i < *left || i + right >= context.edges[&node].len() {
                         return Err(E(
                             MissingOperatorArgs(s),
-                            Some(context.locs[&child].unborrow_string()),
+                            Some(context.locs[&child].cloned()),
                         ));
                     }
                     let mut cs: Vec<Node> = context
