@@ -67,13 +67,18 @@ impl Context {
         self.id - 1
     }
 
-    fn postorder<F: FnMut(&mut Context, Node)>(&mut self, root: Node, mut f: F) {
-        postorder(self, root, &mut f);
-        fn postorder<F: FnMut(&mut Context, Node)>(context: &mut Context, node: Node, f: &mut F) {
-            for child in context.edges[&node].clone() {
-                postorder(context, child, f)
-            }
-            f(context, node);
+    fn replace_children_postorder<F>(&mut self, node: Node, f: &mut F)
+    where
+        F: FnMut(&mut Context, Node) -> Vec<Node>,
+    {
+        let mut i = 0;
+        while i < self.edges[&node].len() {
+            let child = self.edges[&node][i];
+            self.replace_children_postorder(child, f);
+            let nodes = f(self, child);
+            let l = nodes.len();
+            self.edges.get_mut(&node).unwrap().splice(i..=i, nodes);
+            i += l;
         }
     }
 }
@@ -337,18 +342,11 @@ fn group_brackets(context: &mut Context) {
 }
 
 fn unroll_brackets(context: &mut Context) {
-    context.postorder(0, |context, node| {
-        let mut i = 0;
-        while i < context.edges[&node].len() {
-            let child = context.edges[&node][i];
-            if context.strings.get(&child) == Some(&"(".to_owned()) {
-                let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
-                let l = cs.len();
-                context.edges.get_mut(&node).unwrap().splice(i..=i, cs);
-                i += l;
-            } else {
-                i += 1;
-            }
+    context.replace_children_postorder(0, &mut |context, node| {
+        if context.strings.get(&node) == Some(&"(".to_owned()) {
+            context.edges.get_mut(&node).unwrap().drain(..).collect()
+        } else {
+            vec![node]
         }
     });
 }
@@ -356,8 +354,9 @@ fn unroll_brackets(context: &mut Context) {
 fn group_and_unroll_operators(context: &mut Context) {
     //                   func     left   right  unroll
     type Operator<'a> = (&'a str, usize, usize, bool);
-    //                                           right associativity
-    let operators: Vec<(HashMap<&str, Operator>, bool)> = vec![
+    //                                                        right associativity
+    type Operators<'a> = Vec<(HashMap<&'a str, Operator<'a>>, bool)>;
+    let operators = vec![
         (HashMap::from([(":", (":", 1, 0, false))]), false),
         (HashMap::from([("?", ("?", 1, 0, false))]), false),
         (HashMap::from([("~", ("~", 0, 1, false))]), true),
@@ -370,8 +369,13 @@ fn group_and_unroll_operators(context: &mut Context) {
         (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
     ];
 
-    context.postorder(0, |context, node| {
-        for (ops, right_assoc) in &operators {
+    group_operators(context, 0, &operators);
+    fn group_operators(context: &mut Context, node: Node, operators: &Operators) {
+        for child in context.edges[&node].clone() {
+            group_operators(context, child, operators)
+        }
+
+        for (ops, right_assoc) in operators {
             let mut i = if *right_assoc {
                 context.edges[&node].len().wrapping_sub(1)
             } else {
@@ -400,68 +404,65 @@ fn group_and_unroll_operators(context: &mut Context) {
                 }
             }
         }
-    });
+    }
 
-    context.postorder(0, |context, node| {
-        let mut i = 0;
-        while i < context.edges[&node].len() {
-            let child = context.edges[&node][i];
-            let s = context.strings.get(&child).unwrap();
-            if let Some((func, _left, _right, unroll)) =
-                operators.iter().find_map(|(ops, _)| ops.get(&**s))
-            {
-                if *unroll {
-                    let cs: Vec<Node> = context.edges.get_mut(&child).unwrap().drain(..).collect();
-                    let l = cs.len();
-                    context.edges.get_mut(&node).unwrap().splice(i..i, cs);
-                    i += l;
-                }
-                context.strings.insert(child, (*func).to_owned());
+    context.replace_children_postorder(0, &mut |context, node| {
+        let s = context.strings.get(&node).unwrap();
+        if let Some((func, _left, _right, unroll)) =
+            operators.iter().find_map(|(ops, _)| ops.get(&**s))
+        {
+            context.strings.insert(node, (*func).to_owned());
+            if *unroll {
+                let mut cs: Vec<Node> = context.edges.get_mut(&node).unwrap().drain(..).collect();
+                cs.push(node);
+                cs
+            } else {
+                vec![node]
             }
-            i += 1;
+        } else {
+            vec![node]
         }
     });
 }
 
 fn integer_literals(context: &mut Context) {
     assert!(context.ints.is_empty());
-    context.postorder(0, |context, node| {
+    context.replace_children_postorder(0, &mut |context, node| {
         if let Some(s) = context.strings.get(&node) {
             if let Ok(int) = s.parse::<i64>() {
                 context.strings.remove(&node);
                 context.ints.insert(node, int);
             }
         }
+        vec![node]
     });
 }
 
 fn substitute_macros(context: &mut Context) {
     let mut macros = vec![];
-    context.postorder(0, |context, node| {
-        let mut i = 0;
-        while i < context.edges[&node].len() {
-            let child = context.edges[&node][i];
-            if context.strings.get(&child) == Some(&"macro".to_owned()) {
-                let key = context.strings.remove(&context.edges[&child][0]).unwrap();
-                let value = context.edges[&child][1..].to_vec();
-                macros.push((key, value));
-                context.edges.get_mut(&node).unwrap().remove(i);
-            } else {
-                i += 1;
-            }
+    context.replace_children_postorder(0, &mut |context, node| {
+        if context.strings.get(&node) == Some(&"macro".to_owned()) {
+            let key = context.strings.remove(&context.edges[&node][0]).unwrap();
+            let value = context.edges[&node][1..].to_vec();
+            macros.push((key, value));
+            vec![]
+        } else {
+            vec![node]
         }
     });
 
     let sorted = topological_sort(&macros, |(_, nodes), (key, _)| -> bool {
-        let mut out = false;
-        for node in nodes {
-            context.postorder(*node, |context, node| {
-                if context.strings.get(&node) == Some(key) {
-                    out = true
+        fn depends(context: &mut Context, nodes: &[Node], key: &String) -> bool {
+            for node in nodes {
+                if depends(context, &context.edges[node].clone(), key)
+                    || context.strings.get(node) == Some(key)
+                {
+                    return true;
                 }
-            });
+            }
+            false
         }
-        out
+        depends(context, nodes, key)
     });
 
     let sorted = match sorted {
@@ -478,20 +479,11 @@ fn substitute_macros(context: &mut Context) {
 
     for i in sorted {
         let (key, value) = &macros[i];
-        context.postorder(0, |context, node| {
-            let mut i = 0;
-            while i < context.edges[&node].len() {
-                let child = context.edges[&node][i];
-                if context.strings.get(&child) == Some(key) {
-                    context
-                        .edges
-                        .get_mut(&node)
-                        .unwrap()
-                        .splice(i..=i, value.clone());
-                    i += value.len();
-                } else {
-                    i += 1;
-                }
+        context.replace_children_postorder(0, &mut |context, node| {
+            if context.strings.get(&node) == Some(key) {
+                value.clone()
+            } else {
+                vec![node]
             }
         });
     }
