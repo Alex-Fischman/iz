@@ -6,7 +6,7 @@ use std::clone::Clone;
 use std::collections::HashMap;
 use std::convert::From;
 use std::env::args;
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::fs::read_to_string;
 use std::iter::{Extend, Iterator};
 use std::ops::{FnMut, Index, IndexMut};
@@ -20,15 +20,16 @@ type Node = usize;
 type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
 
 // holds all the information given to different passes
-struct Context {
+struct Context<'a> {
     id: usize,
     edges: Edges,
+    locs: HashMap<Node, Location<'a>>,
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
     ints: HashMap<Node, i64>,
 }
 
-impl Debug for Context {
+impl Debug for Context<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> FmtResult {
             write!(f, "{} {}:", "----".repeat(depth), node)?;
@@ -51,17 +52,7 @@ impl Debug for Context {
     }
 }
 
-impl Context {
-    fn new() -> Context {
-        Context {
-            id: 0,
-            edges: HashMap::new(),
-            chars: HashMap::new(),
-            strings: HashMap::new(),
-            ints: HashMap::new(),
-        }
-    }
-
+impl Context<'_> {
     fn id(&mut self) -> usize {
         self.id += 1;
         self.id - 1
@@ -83,6 +74,19 @@ impl Context {
                 i += 1;
             }
         }
+    }
+}
+
+#[derive(Debug)]
+struct Location<'a> {
+    src: &'a str,
+    row: usize,
+    col: usize,
+}
+
+impl Display for Location<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        write!(f, "{}:{}:{}", self.src, self.row, self.col)
     }
 }
 
@@ -124,17 +128,40 @@ fn main() {
     let args: Vec<String> = args().collect();
     let file = args.get(1).expect("no file passed");
     let text = read_to_string(file).expect("could not read file");
-    let mut context = Context::new();
 
+    let mut context = Context {
+        id: 0,
+        locs: HashMap::new(),
+        edges: HashMap::new(),
+        chars: HashMap::new(),
+        strings: HashMap::new(),
+        ints: HashMap::new(),
+    };
     let root = context.id();
     context.edges.insert(root, vec![]);
     assert!(root == 0);
 
+    let mut row = 1;
+    let mut col = 1;
     for c in text.chars() {
         let node = context.id();
         context.edges.insert(node, vec![]);
         context.edges.get_mut(&0).unwrap().push(node);
         context.chars.insert(node, c);
+        context.locs.insert(
+            node,
+            Location {
+                src: file,
+                row,
+                col,
+            },
+        );
+        if c == '\n' {
+            row += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
     }
 
     // compiler
