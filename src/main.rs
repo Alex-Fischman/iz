@@ -6,30 +6,31 @@ use std::clone::Clone;
 use std::collections::HashMap;
 use std::convert::From;
 use std::env::args;
-use std::fmt::{Debug, Formatter, Result};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::read_to_string;
 use std::iter::{Extend, Iterator};
 use std::ops::{FnMut, Index, IndexMut};
 use std::option::{Option, Option::None, Option::Some};
-use std::result::Result::Ok;
+use std::result::{Result, Result::Err, Result::Ok};
 use std::string::{String, ToString};
 use std::vec::Vec;
 use std::{matches, panic, print, println, vec, write, writeln};
 
 type Node = usize;
+type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
 
 // holds all the information given to different passes
 struct Context {
     id: usize,
-    edges: HashMap<Node, Vec<Node>>, // adjency list from nodes to children
+    edges: Edges,
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
     ints: HashMap<Node, i64>,
 }
 
 impl Debug for Context {
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> Result {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> FmtResult {
             write!(f, "{} {}:", "----".repeat(depth), node)?;
             if let Some(c) = context.chars.get(&node) {
                 write!(f, " {}", c)?;
@@ -451,65 +452,29 @@ fn substitute_macros(context: &mut Context) {
         }
     });
 
-    // adjancency list for macro dependency graph
-    type Macro = usize;
-    type Edges = HashMap<Macro, HashMap<Macro, ()>>;
-    let mut edges: Edges = HashMap::new();
-    for (i, (_, nodes)) in macros.iter().enumerate() {
-        for (j, (key, _)) in macros.iter().enumerate() {
-            let mut dependency = false;
-            for node in nodes {
-                context.postorder(*node, |context, node| {
-                    if context.strings.get(&node) == Some(key) {
-                        dependency = true;
-                    }
-                });
-            }
-            if dependency {
-                edges.entry(i).or_default().insert(j, ());
-            }
+    let sorted = topological_sort(&macros, |(_, nodes), (key, _)| -> bool {
+        let mut out = false;
+        for node in nodes {
+            context.postorder(*node, |context, node| {
+                if context.strings.get(&node) == Some(key) {
+                    out = true
+                }
+            });
         }
-    }
+        out
+    });
 
-    fn has_incoming(edges: &Edges, i: Macro) -> bool {
-        for ws in edges.values() {
-            for (w, ()) in ws {
-                if i == *w {
-                    return true;
+    let sorted = match sorted {
+        Ok(sorted) => sorted,
+        Err(edges) => {
+            for (v, ws) in edges {
+                for w in ws {
+                    println!("{:?} -> {:?}", macros[v].0, macros[w].0);
                 }
             }
+            panic!("macro dependency cycle detected")
         }
-        false
-    }
-
-    // topological sort using Kahn's algorithm
-    let mut sorted = vec![];
-    let mut no_incoming: Vec<Macro> = macros
-        .iter()
-        .enumerate()
-        .map(|(i, _)| i)
-        .filter(|i| !has_incoming(&edges, *i))
-        .collect();
-
-    while let Some(v) = no_incoming.pop() {
-        sorted.push(v);
-        if let Some(ws) = edges.remove(&v) {
-            for (w, ()) in ws {
-                if !has_incoming(&edges, w) {
-                    no_incoming.push(w)
-                }
-            }
-        }
-    }
-
-    if !edges.is_empty() {
-        for (v, ws) in edges {
-            for (w, ()) in ws {
-                println!("{:?} -> {:?}", macros[v].0, macros[w].0);
-            }
-        }
-        panic!("macro dependency cycle detected")
-    }
+    };
 
     for i in sorted {
         let (key, value) = &macros[i];
@@ -529,5 +494,55 @@ fn substitute_macros(context: &mut Context) {
                 }
             }
         });
+    }
+}
+
+// topological sort using Kahn's algorithm on an adjacency list
+// returns either a sorted list of indices into nodes
+// or an adjacency list of the remaining edges if there are cycles
+fn topological_sort<N, F>(nodes: &[N], mut has_edge: F) -> Result<Vec<usize>, Edges>
+where
+    F: FnMut(&N, &N) -> bool,
+{
+    let mut edges: Edges = HashMap::new();
+    for (i, a) in nodes.iter().enumerate() {
+        for (j, b) in nodes.iter().enumerate() {
+            if has_edge(a, b) {
+                edges.entry(i).or_default().push(j);
+            }
+        }
+    }
+
+    fn has_incoming(edges: &Edges, i: usize) -> bool {
+        for ws in edges.values() {
+            for w in ws {
+                if i == *w {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    let mut sorted = vec![];
+    let mut no_incoming: Vec<usize> = (0..nodes.len())
+        .filter(|i| !has_incoming(&edges, *i))
+        .collect();
+
+    while let Some(v) = no_incoming.pop() {
+        sorted.push(v);
+        if let Some(ws) = edges.remove(&v) {
+            for w in ws {
+                if !has_incoming(&edges, w) {
+                    no_incoming.push(w)
+                }
+            }
+        }
+    }
+
+    if edges.is_empty() {
+        Ok(sorted)
+    } else {
+        Err(edges)
     }
 }
