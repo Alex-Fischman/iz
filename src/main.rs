@@ -34,7 +34,11 @@ struct Context<'a> {
 impl Debug for Context<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         fn print_tree(context: &Context, f: &mut Formatter, node: Node, depth: usize) -> FmtResult {
-            write!(f, "{} {}:", "----".repeat(depth), node)?;
+            write!(f, "{} {}", "----".repeat(depth), node)?;
+            if let Some(l) = context.locs.get(&node) {
+                write!(f, "@{}", l)?;
+            }
+            write!(f, ":")?;
             if let Some(c) = context.chars.get(&node) {
                 write!(f, " {}", c)?;
             }
