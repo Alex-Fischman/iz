@@ -14,7 +14,7 @@ use std::option::{Option, Option::None, Option::Some};
 use std::result::{Result, Result::Err, Result::Ok};
 use std::string::{String, ToString};
 use std::vec::Vec;
-use std::{format, matches, print, println, vec, write, writeln};
+use std::{matches, print, println, vec, write, writeln};
 
 type Node = usize;
 type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
@@ -123,25 +123,72 @@ impl IndexMut<i64> for Memory {
     }
 }
 
-fn main() -> Result<(), String> {
+#[derive(Debug)]
+enum E {
+    NoFilePassed,
+    CouldNotRead(String),
+
+    ExtraCloseBracket(String),
+    MissingCloseBracket(String),
+    MissingOperatorArgs(String),
+
+    MacroDependencyCycle { names: Vec<String>, edges: Edges },
+
+    UnknownOpCode(String),
+    MissingOpCode,
+    UnknownLabel(String),
+    RedeclaredLabel(String),
+
+    ExpectedEmptyData(String),
+}
+
+impl Display for E {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            E::NoFilePassed => write!(f, "pass a .iz file as a command line argument"),
+            E::CouldNotRead(file) => write!(f, "could not read from file {}", file),
+
+            E::ExtraCloseBracket(bracket) => write!(f, "extra {}", bracket),
+            E::MissingCloseBracket(bracket) => write!(f, "missing {}", bracket),
+            E::MissingOperatorArgs(op) => write!(f, "missing args for {}", op),
+
+            E::MacroDependencyCycle { names, edges } => {
+                writeln!(f, "macro dependency cycle detected")?;
+                for (v, ws) in edges {
+                    for w in ws {
+                        writeln!(f, "{} -> {}", names[*v], names[*w])?
+                    }
+                }
+                Ok(())
+            }
+
+            E::UnknownOpCode(op) => write!(f, "unknown op code {}", op),
+            E::MissingOpCode => write!(f, "expected string or int for op, found neither"),
+            E::UnknownLabel(label) => write!(f, "unknown label {}", label),
+            E::RedeclaredLabel(label) => write!(f, "label {} is declared twice", label),
+
+            E::ExpectedEmptyData(data) => {
+                write!(f, "expected context.{} to be empty but it wasn't", data)
+            }
+        }
+    }
+}
+
+fn main() -> Result<(), E> {
     // frontend
     let args: Vec<String> = args().collect();
-    let file = args.get(1).ok_or("no file passed")?;
-    let text = read_to_string(file).map_err(|_| format!("could not read from {}", file))?;
+    let file = args.get(1).ok_or(E::NoFilePassed)?;
+    let text = read_to_string(file).map_err(|_| E::CouldNotRead(file.clone()))?;
 
     let mut context = Context {
-        id: 0,
+        id: 1, // 0 is the root
         locs: HashMap::new(),
         edges: HashMap::new(),
         chars: HashMap::new(),
         strings: HashMap::new(),
         ints: HashMap::new(),
     };
-    let root = context.id();
-    context.edges.insert(root, vec![]);
-    if root != 0 {
-        return Err(format!("expected root to be 0 but it was {}", root));
-    }
+    context.edges.insert(0, vec![]);
 
     let mut row = 1;
     let mut col = 1;
@@ -214,20 +261,20 @@ fn main() -> Result<(), String> {
                             .unwrap()
                             .clone(),
                     )),
-                    s => Err(format!("expected an op, found {s}")),
+                    _ => Err(E::UnknownOpCode(s.clone())),
                 }
             } else {
-                Err("expected an int or a string, found neither".to_owned())
+                Err(E::MissingOpCode)
             }
         })
-        .collect::<Result<Vec<Op>, String>>()?;
+        .collect::<Result<Vec<Op>, E>>()?;
 
     let mut labels = HashMap::new();
     for (pc, op) in code.iter().enumerate() {
         if let Op::Label(label) = op {
             let old = labels.insert(label.clone(), pc as i64);
             if old.is_some() {
-                return Err(format!("label {} is declared twice", label));
+                return Err(E::RedeclaredLabel(label.clone()));
             }
         }
     }
@@ -256,7 +303,7 @@ fn main() -> Result<(), String> {
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
             Op::Jumpz(label) if !labels.contains_key(label) => {
-                return Err(format!("unknown label {}", label))
+                return Err(E::UnknownLabel(label.clone()))
             }
             Op::Jumpz(label) => {
                 if data[sp] == 0 {
@@ -278,7 +325,7 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn remove_comments(context: &mut Context) -> Result<(), String> {
+fn remove_comments(context: &mut Context) -> Result<(), E> {
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -296,7 +343,7 @@ fn remove_comments(context: &mut Context) -> Result<(), String> {
     Ok(())
 }
 
-fn chars_to_strings(context: &mut Context) -> Result<(), String> {
+fn chars_to_strings(context: &mut Context) -> Result<(), E> {
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
@@ -313,10 +360,7 @@ fn chars_to_strings(context: &mut Context) -> Result<(), String> {
     }
 
     if !context.strings.is_empty() {
-        return Err(format!(
-            "expected context.strings to be empty but it was {:?}",
-            context.strings
-        ));
+        return Err(E::ExpectedEmptyData("strings".to_owned()));
     }
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
@@ -337,16 +381,13 @@ fn chars_to_strings(context: &mut Context) -> Result<(), String> {
         }
     }
     if !context.chars.is_empty() {
-        return Err(format!(
-            "expected context.chars to be empty but it was {:?}",
-            context.strings
-        ));
+        return Err(E::ExpectedEmptyData("chars".to_owned()));
     }
 
     Ok(())
 }
 
-fn remove_whitespace(context: &mut Context) -> Result<(), String> {
+fn remove_whitespace(context: &mut Context) -> Result<(), E> {
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -360,17 +401,17 @@ fn remove_whitespace(context: &mut Context) -> Result<(), String> {
     Ok(())
 }
 
-fn group_brackets(context: &mut Context) -> Result<(), String> {
+fn group_brackets(context: &mut Context) -> Result<(), E> {
     fn bracket_matcher(
         context: &mut Context,
         i: &mut usize,
         target: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<(), E> {
         while *i < context.edges[&0].len() {
             let child = context.edges[&0][*i];
             *i += 1;
             let s = context.strings.get(&child).unwrap().clone();
-            let mut handle_open_bracket = |close| -> Result<(), String> {
+            let mut handle_open_bracket = |close| -> Result<(), E> {
                 let start = *i;
                 bracket_matcher(context, i, Some(close))?;
                 let mut cs: Vec<Node> = context
@@ -390,13 +431,13 @@ fn group_brackets(context: &mut Context) -> Result<(), String> {
                 "[" => handle_open_bracket("]"),
                 ")" | "}" | "]" => match target {
                     Some(t) if s == t => return Ok(()),
-                    _ => Err(format!("extra {s}")),
+                    _ => Err(E::ExtraCloseBracket(s)),
                 },
                 _ => Ok(()),
             }?
         }
         if let Some(s) = target {
-            Err(format!("missing {s}"))
+            Err(E::MissingCloseBracket(s.to_owned()))
         } else {
             Ok(())
         }
@@ -404,7 +445,7 @@ fn group_brackets(context: &mut Context) -> Result<(), String> {
     bracket_matcher(context, &mut 0, None)
 }
 
-fn unroll_brackets(context: &mut Context) -> Result<(), String> {
+fn unroll_brackets(context: &mut Context) -> Result<(), E> {
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"(".to_owned()) {
             Some(context.edges.get_mut(&node).unwrap().drain(..).collect())
@@ -415,7 +456,7 @@ fn unroll_brackets(context: &mut Context) -> Result<(), String> {
     Ok(())
 }
 
-fn group_and_unroll_operators(context: &mut Context) -> Result<(), String> {
+fn group_and_unroll_operators(context: &mut Context) -> Result<(), E> {
     //                   func     left   right  unroll
     type Operator<'a> = (&'a str, usize, usize, bool);
     //                                                        right associativity
@@ -434,11 +475,7 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), String> {
     ];
 
     group_operators(context, 0, &operators)?;
-    fn group_operators(
-        context: &mut Context,
-        node: Node,
-        operators: &Operators,
-    ) -> Result<(), String> {
+    fn group_operators(context: &mut Context, node: Node, operators: &Operators) -> Result<(), E> {
         for child in context.edges[&node].clone() {
             group_operators(context, child, operators)?
         }
@@ -453,7 +490,7 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), String> {
                 let s = context.strings.get(&child).unwrap().clone();
                 if let Some((_func, left, right, _unroll)) = ops.get(&*s) {
                     if i < *left || i + right >= context.edges[&node].len() {
-                        return Err(format!("not enough operator arguments for {s}"));
+                        return Err(E::MissingOperatorArgs(s));
                     }
                     let mut cs: Vec<Node> = context
                         .edges
@@ -496,7 +533,7 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), String> {
     Ok(())
 }
 
-fn integer_literals(context: &mut Context) -> Result<(), String> {
+fn integer_literals(context: &mut Context) -> Result<(), E> {
     integer_literals(context, 0);
     fn integer_literals(context: &mut Context, node: Node) {
         for child in context.edges[&node].clone() {
@@ -513,7 +550,7 @@ fn integer_literals(context: &mut Context) -> Result<(), String> {
     Ok(())
 }
 
-fn substitute_macros(context: &mut Context) -> Result<(), String> {
+fn substitute_macros(context: &mut Context) -> Result<(), E> {
     let mut macros = vec![];
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"macro".to_owned()) {
@@ -540,20 +577,10 @@ fn substitute_macros(context: &mut Context) -> Result<(), String> {
         depends(context, nodes, key)
     });
 
-    let sorted = match sorted {
-        Ok(sorted) => sorted,
-        Err(edges) => {
-            let mut s: String = edges
-                .iter()
-                .flat_map(|(v, ws)| {
-                    ws.iter()
-                        .map(|w| format!("{} -> {}\n", macros[*v].0, macros[*w].0))
-                })
-                .collect();
-            s.push_str("macro dependency cycle detected");
-            return Err(s);
-        }
-    };
+    let sorted = sorted.map_err(|edges| E::MacroDependencyCycle {
+        names: macros.iter().map(|(name, _)| name.clone()).collect(),
+        edges,
+    })?;
 
     for i in sorted {
         let (key, value) = &macros[i];
