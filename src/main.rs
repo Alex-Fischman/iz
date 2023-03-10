@@ -1,21 +1,22 @@
 #![no_implicit_prelude]
 extern crate std;
 
-// TODO: combine into one use statement
-use std::borrow::ToOwned;
-use std::clone::Clone;
-use std::collections::HashMap;
-use std::convert::From;
-use std::env::args;
-use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::fs::read_to_string;
-use std::iter::{Extend, Iterator};
-use std::ops::{FnMut, Index, IndexMut};
-use std::option::{Option, Option::None, Option::Some};
-use std::result::{Result, Result::Err, Result::Ok};
-use std::string::{String, ToString};
-use std::vec::Vec;
-use std::{matches, print, println, vec, write, writeln};
+use std::{
+    borrow::ToOwned,
+    clone::Clone,
+    collections::HashMap,
+    convert::From,
+    env::args,
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
+    fs::read_to_string,
+    iter::{Extend, Iterator},
+    ops::{FnMut, Index, IndexMut},
+    option::{Option, Option::None, Option::Some},
+    result::{Result, Result::Err, Result::Ok},
+    string::{String, ToString},
+    vec::Vec,
+    {matches, print, println, vec, write, writeln},
+};
 
 type Node = usize;
 type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
