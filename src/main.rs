@@ -14,7 +14,7 @@ use std::option::{Option, Option::None, Option::Some};
 use std::result::{Result, Result::Err, Result::Ok};
 use std::string::{String, ToString};
 use std::vec::Vec;
-use std::{matches, panic, print, println, vec, write, writeln};
+use std::{format, matches, print, println, vec, write, writeln};
 
 type Node = usize;
 type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
@@ -123,11 +123,11 @@ impl IndexMut<i64> for Memory {
     }
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     // frontend
     let args: Vec<String> = args().collect();
-    let file = args.get(1).expect("no file passed");
-    let text = read_to_string(file).expect("could not read file");
+    let file = args.get(1).ok_or("no file passed")?;
+    let text = read_to_string(file).map_err(|_| format!("could not read from {}", file))?;
 
     let mut context = Context {
         id: 0,
@@ -177,44 +177,48 @@ fn main() {
         substitute_macros, // changes context to a DAG
     ];
     for pass in passes {
-        pass(&mut context)
+        pass(&mut context)?
     }
 
     // backend
-    let code: Vec<Op> = context.edges[&0]
+    let code = context.edges[&0]
         .iter()
         .cloned()
         .map(|node| {
             if let Some(int) = context.ints.get(&node) {
-                Op::Push(*int)
+                Ok(Op::Push(*int))
             } else if let Some(s) = context.strings.get(&node) {
                 match s.as_str() {
-                    "~" => Op::Move(*context.ints.get(&context.edges[&node][0]).unwrap()),
-                    "$" => Op::Copy(*context.ints.get(&context.edges[&node][0]).unwrap()),
-                    "add" => Op::Add,
-                    "neg" => Op::Neg,
-                    "ltz" => Op::Ltz,
-                    "?" => Op::Jumpz(
+                    "~" => Ok(Op::Move(
+                        *context.ints.get(&context.edges[&node][0]).unwrap(),
+                    )),
+                    "$" => Ok(Op::Copy(
+                        *context.ints.get(&context.edges[&node][0]).unwrap(),
+                    )),
+                    "add" => Ok(Op::Add),
+                    "neg" => Ok(Op::Neg),
+                    "ltz" => Ok(Op::Ltz),
+                    "?" => Ok(Op::Jumpz(
                         context
                             .strings
                             .get(&context.edges[&node][0])
                             .unwrap()
                             .clone(),
-                    ),
-                    ":" => Op::Label(
+                    )),
+                    ":" => Ok(Op::Label(
                         context
                             .strings
                             .get(&context.edges[&node][0])
                             .unwrap()
                             .clone(),
-                    ),
-                    s => panic!("expected an op, found {s}"),
+                    )),
+                    s => Err(format!("expected an op, found {s}")),
                 }
             } else {
-                panic!("expected an int or a string, found neither")
+                Err("expected an int or a string, found neither".to_owned())
             }
         })
-        .collect();
+        .collect::<Result<Vec<Op>, String>>()?;
 
     let mut labels = HashMap::new();
     for (pc, op) in code.iter().enumerate() {
@@ -247,13 +251,15 @@ fn main() {
             }
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Jumpz(label) if labels.contains_key(label) => {
+            Op::Jumpz(label) if !labels.contains_key(label) => {
+                return Err(format!("unknown label {}", label))
+            }
+            Op::Jumpz(label) => {
                 if data[sp] == 0 {
                     pc = labels[label];
                 }
                 sp -= 1;
             }
-            Op::Jumpz(label) => panic!("unknown label {}", label),
             Op::Label(_) => {}
         }
 
@@ -264,9 +270,11 @@ fn main() {
 
         pc += 1;
     }
+
+    Ok(())
 }
 
-fn remove_comments(context: &mut Context) {
+fn remove_comments(context: &mut Context) -> Result<(), String> {
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -281,9 +289,10 @@ fn remove_comments(context: &mut Context) {
             i += 1;
         }
     }
+    Ok(())
 }
 
-fn chars_to_strings(context: &mut Context) {
+fn chars_to_strings(context: &mut Context) -> Result<(), String> {
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
@@ -319,9 +328,11 @@ fn chars_to_strings(context: &mut Context) {
         }
     }
     assert!(context.chars.is_empty());
+
+    Ok(())
 }
 
-fn remove_whitespace(context: &mut Context) {
+fn remove_whitespace(context: &mut Context) -> Result<(), String> {
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -332,18 +343,22 @@ fn remove_whitespace(context: &mut Context) {
             i += 1;
         }
     }
+    Ok(())
 }
 
-fn group_brackets(context: &mut Context) {
-    bracket_matcher(context, &mut 0, None);
-    fn bracket_matcher(context: &mut Context, i: &mut usize, target: Option<&str>) {
+fn group_brackets(context: &mut Context) -> Result<(), String> {
+    fn bracket_matcher(
+        context: &mut Context,
+        i: &mut usize,
+        target: Option<&str>,
+    ) -> Result<(), String> {
         while *i < context.edges[&0].len() {
             let child = context.edges[&0][*i];
             *i += 1;
             let s = context.strings.get(&child).unwrap().clone();
-            let mut handle_open_bracket = |close| {
+            let mut handle_open_bracket = |close| -> Result<(), String> {
                 let start = *i;
-                bracket_matcher(context, i, Some(close));
+                bracket_matcher(context, i, Some(close))?;
                 let mut cs: Vec<Node> = context
                     .edges
                     .get_mut(&0)
@@ -353,25 +368,29 @@ fn group_brackets(context: &mut Context) {
                 cs.pop(); // remove the closing bracket
                 *context.edges.get_mut(&child).unwrap() = cs;
                 *i = start;
+                Ok(())
             };
             match s.as_str() {
                 "(" => handle_open_bracket(")"),
                 "{" => handle_open_bracket("}"),
                 "[" => handle_open_bracket("]"),
                 ")" | "}" | "]" => match target {
-                    Some(t) if s == t => return,
-                    _ => panic!("extra {s}"),
+                    Some(t) if s == t => return Ok(()),
+                    _ => Err(format!("extra {s}")),
                 },
-                _ => {}
-            }
+                _ => Ok(()),
+            }?
         }
         if let Some(s) = target {
-            panic!("missing {s}");
+            Err(format!("missing {s}"))
+        } else {
+            Ok(())
         }
     }
+    bracket_matcher(context, &mut 0, None)
 }
 
-fn unroll_brackets(context: &mut Context) {
+fn unroll_brackets(context: &mut Context) -> Result<(), String> {
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"(".to_owned()) {
             Some(context.edges.get_mut(&node).unwrap().drain(..).collect())
@@ -379,9 +398,10 @@ fn unroll_brackets(context: &mut Context) {
             None
         }
     });
+    Ok(())
 }
 
-fn group_and_unroll_operators(context: &mut Context) {
+fn group_and_unroll_operators(context: &mut Context) -> Result<(), String> {
     //                   func     left   right  unroll
     type Operator<'a> = (&'a str, usize, usize, bool);
     //                                                        right associativity
@@ -399,10 +419,14 @@ fn group_and_unroll_operators(context: &mut Context) {
         (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
     ];
 
-    group_operators(context, 0, &operators);
-    fn group_operators(context: &mut Context, node: Node, operators: &Operators) {
+    group_operators(context, 0, &operators)?;
+    fn group_operators(
+        context: &mut Context,
+        node: Node,
+        operators: &Operators,
+    ) -> Result<(), String> {
         for child in context.edges[&node].clone() {
-            group_operators(context, child, operators)
+            group_operators(context, child, operators)?
         }
 
         for (ops, right_assoc) in operators {
@@ -415,7 +439,7 @@ fn group_and_unroll_operators(context: &mut Context) {
                 let s = context.strings.get(&child).unwrap().clone();
                 if let Some((_func, left, right, _unroll)) = ops.get(&*s) {
                     if i < *left || i + right >= context.edges[&node].len() {
-                        panic!("not enough operator arguments for {s}");
+                        return Err(format!("not enough operator arguments for {s}"));
                     }
                     let mut cs: Vec<Node> = context
                         .edges
@@ -434,6 +458,7 @@ fn group_and_unroll_operators(context: &mut Context) {
                 }
             }
         }
+        Ok(())
     }
 
     context.replace_children_postorder(0, &mut |context, node| {
@@ -453,9 +478,11 @@ fn group_and_unroll_operators(context: &mut Context) {
             None
         }
     });
+
+    Ok(())
 }
 
-fn integer_literals(context: &mut Context) {
+fn integer_literals(context: &mut Context) -> Result<(), String> {
     assert!(context.ints.is_empty());
     integer_literals(context, 0);
     fn integer_literals(context: &mut Context, node: Node) {
@@ -469,9 +496,11 @@ fn integer_literals(context: &mut Context) {
             }
         }
     }
+
+    Ok(())
 }
 
-fn substitute_macros(context: &mut Context) {
+fn substitute_macros(context: &mut Context) -> Result<(), String> {
     let mut macros = vec![];
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"macro".to_owned()) {
@@ -501,12 +530,15 @@ fn substitute_macros(context: &mut Context) {
     let sorted = match sorted {
         Ok(sorted) => sorted,
         Err(edges) => {
-            for (v, ws) in edges {
-                for w in ws {
-                    println!("{:?} -> {:?}", macros[v].0, macros[w].0);
-                }
-            }
-            panic!("macro dependency cycle detected")
+            let mut s: String = edges
+                .iter()
+                .flat_map(|(v, ws)| {
+                    ws.iter()
+                        .map(|w| format!("{} -> {}\n", macros[*v].0, macros[*w].0))
+                })
+                .collect();
+            s.push_str("macro dependency cycle detected");
+            return Err(s);
         }
     };
 
@@ -520,11 +552,13 @@ fn substitute_macros(context: &mut Context) {
             }
         });
     }
+
+    Ok(())
 }
 
 // topological sort using Kahn's algorithm on an adjacency list
 // returns either a sorted list of indices into nodes
-// or an adjacency list of the remaining edges if there are cycles
+// or an adjacency list of the cycles if they exist
 fn topological_sort<N, F>(nodes: &[N], mut has_edge: F) -> Result<Vec<usize>, Edges>
 where
     F: FnMut(&N, &N) -> bool,
