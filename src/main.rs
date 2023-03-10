@@ -1,6 +1,7 @@
 #![no_implicit_prelude]
 extern crate std;
 
+// TODO: combine into one use statement
 use std::borrow::ToOwned;
 use std::clone::Clone;
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
 struct Context<'a> {
     id: usize,
     edges: Edges,
-    locs: HashMap<Node, Location<'a>>,
+    locs: HashMap<Node, Location<&'a str>>,
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
     ints: HashMap<Node, i64>,
@@ -77,19 +78,6 @@ impl Context<'_> {
     }
 }
 
-#[derive(Debug)]
-struct Location<'a> {
-    src: &'a str,
-    row: usize,
-    col: usize,
-}
-
-impl Display for Location<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "{}:{}:{}", self.src, self.row, self.col)
-    }
-}
-
 // should be extensible
 #[derive(Clone, Debug, PartialEq)]
 enum Op {
@@ -123,8 +111,45 @@ impl IndexMut<i64> for Memory {
     }
 }
 
-#[derive(Debug)]
-enum E {
+#[derive(Clone, Debug)]
+struct Location<Src> {
+    row: usize,
+    col: usize,
+    src: Src,
+}
+
+// TODO: generify this to use one of the std traits
+impl Location<&str> {
+    fn unborrow_string(&self) -> Location<String> {
+        Location {
+            row: self.row,
+            col: self.col,
+            src: self.src.to_owned(),
+        }
+    }
+}
+
+impl<Src: Display> Display for Location<Src> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        write!(f, "{}:{}:{}", self.src, self.row, self.col)
+    }
+}
+
+#[derive(Clone)]
+struct E(Error, Option<Location<String>>);
+
+impl Debug for E {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match &self.1 {
+            None => write!(f, "{}", self.0),
+            Some(loc) => write!(f, "{} at {}", self.0, loc),
+        }
+    }
+}
+
+use Error::*;
+#[derive(Clone, Debug)]
+enum Error {
     NoFilePassed,
     CouldNotRead(String),
 
@@ -142,17 +167,17 @@ enum E {
     ExpectedEmptyData(String),
 }
 
-impl Display for E {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            E::NoFilePassed => write!(f, "pass a .iz file as a command line argument"),
-            E::CouldNotRead(file) => write!(f, "could not read from file {}", file),
+            Error::NoFilePassed => write!(f, "pass a .iz file as a command line argument"),
+            Error::CouldNotRead(file) => write!(f, "could not read from file {}", file),
 
-            E::ExtraCloseBracket(bracket) => write!(f, "extra {}", bracket),
-            E::MissingCloseBracket(bracket) => write!(f, "missing {}", bracket),
-            E::MissingOperatorArgs(op) => write!(f, "missing args for {}", op),
+            Error::ExtraCloseBracket(bracket) => write!(f, "extra {}", bracket),
+            Error::MissingCloseBracket(bracket) => write!(f, "missing {}", bracket),
+            Error::MissingOperatorArgs(op) => write!(f, "missing args for {}", op),
 
-            E::MacroDependencyCycle { names, edges } => {
+            Error::MacroDependencyCycle { names, edges } => {
                 writeln!(f, "macro dependency cycle detected")?;
                 for (v, ws) in edges {
                     for w in ws {
@@ -162,13 +187,17 @@ impl Display for E {
                 Ok(())
             }
 
-            E::UnknownOpCode(op) => write!(f, "unknown op code {}", op),
-            E::MissingOpCode => write!(f, "expected string or int for op, found neither"),
-            E::UnknownLabel(label) => write!(f, "unknown label {}", label),
-            E::RedeclaredLabel(label) => write!(f, "label {} is declared twice", label),
+            Error::UnknownOpCode(op) => write!(f, "unknown op code {}", op),
+            Error::MissingOpCode => write!(f, "expected string or int for op, found neither"),
+            Error::UnknownLabel(label) => write!(f, "unknown label {}", label),
+            Error::RedeclaredLabel(label) => write!(f, "label {} is declared twice", label),
 
-            E::ExpectedEmptyData(data) => {
-                write!(f, "expected context.{} to be empty but it wasn't", data)
+            Error::ExpectedEmptyData(data) => {
+                write!(
+                    f,
+                    "[debug] expected context.{} to be empty but it wasn't",
+                    data
+                )
             }
         }
     }
@@ -177,8 +206,8 @@ impl Display for E {
 fn main() -> Result<(), E> {
     // frontend
     let args: Vec<String> = args().collect();
-    let file = args.get(1).ok_or(E::NoFilePassed)?;
-    let text = read_to_string(file).map_err(|_| E::CouldNotRead(file.clone()))?;
+    let file = args.get(1).ok_or(E(NoFilePassed, None))?;
+    let text = read_to_string(file).map_err(|_| E(CouldNotRead(file.clone()), None))?;
 
     let mut context = Context {
         id: 1, // 0 is the root
@@ -261,20 +290,26 @@ fn main() -> Result<(), E> {
                             .unwrap()
                             .clone(),
                     )),
-                    _ => Err(E::UnknownOpCode(s.clone())),
+                    _ => Err(E(
+                        UnknownOpCode(s.clone()),
+                        Some(context.locs[&node].unborrow_string()),
+                    )),
                 }
             } else {
-                Err(E::MissingOpCode)
+                Err(E(
+                    MissingOpCode,
+                    Some(context.locs[&node].unborrow_string()),
+                ))
             }
         })
-        .collect::<Result<Vec<Op>, E>>()?;
+        .collect::<Result<Vec<Op>, _>>()?;
 
     let mut labels = HashMap::new();
     for (pc, op) in code.iter().enumerate() {
         if let Op::Label(label) = op {
             let old = labels.insert(label.clone(), pc as i64);
             if old.is_some() {
-                return Err(E::RedeclaredLabel(label.clone()));
+                return Err(E(RedeclaredLabel(label.clone()), None));
             }
         }
     }
@@ -303,7 +338,7 @@ fn main() -> Result<(), E> {
             Op::Neg => data[sp] = -data[sp],
             Op::Ltz => data[sp] = (data[sp] < 0) as i64,
             Op::Jumpz(label) if !labels.contains_key(label) => {
-                return Err(E::UnknownLabel(label.clone()))
+                return Err(E(UnknownLabel(label.clone()), None))
             }
             Op::Jumpz(label) => {
                 if data[sp] == 0 {
@@ -360,7 +395,7 @@ fn chars_to_strings(context: &mut Context) -> Result<(), E> {
     }
 
     if !context.strings.is_empty() {
-        return Err(E::ExpectedEmptyData("strings".to_owned()));
+        return Err(E(ExpectedEmptyData("strings".to_owned()), None));
     }
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
@@ -381,7 +416,7 @@ fn chars_to_strings(context: &mut Context) -> Result<(), E> {
         }
     }
     if !context.chars.is_empty() {
-        return Err(E::ExpectedEmptyData("chars".to_owned()));
+        return Err(E(ExpectedEmptyData("chars".to_owned()), None));
     }
 
     Ok(())
@@ -431,13 +466,16 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
                 "[" => handle_open_bracket("]"),
                 ")" | "}" | "]" => match target {
                     Some(t) if s == t => return Ok(()),
-                    _ => Err(E::ExtraCloseBracket(s)),
+                    _ => Err(E(
+                        ExtraCloseBracket(s),
+                        Some(context.locs[&child].unborrow_string()),
+                    )),
                 },
                 _ => Ok(()),
             }?
         }
         if let Some(s) = target {
-            Err(E::MissingCloseBracket(s.to_owned()))
+            Err(E(MissingCloseBracket(s.to_owned()), None))
         } else {
             Ok(())
         }
@@ -490,7 +528,10 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), E> {
                 let s = context.strings.get(&child).unwrap().clone();
                 if let Some((_func, left, right, _unroll)) = ops.get(&*s) {
                     if i < *left || i + right >= context.edges[&node].len() {
-                        return Err(E::MissingOperatorArgs(s));
+                        return Err(E(
+                            MissingOperatorArgs(s),
+                            Some(context.locs[&child].unborrow_string()),
+                        ));
                     }
                     let mut cs: Vec<Node> = context
                         .edges
@@ -577,10 +618,12 @@ fn substitute_macros(context: &mut Context) -> Result<(), E> {
         depends(context, nodes, key)
     });
 
-    let sorted = sorted.map_err(|edges| E::MacroDependencyCycle {
-        names: macros.iter().map(|(name, _)| name.clone()).collect(),
-        edges,
-    })?;
+    let sorted = sorted
+        .map_err(|edges| MacroDependencyCycle {
+            names: macros.iter().map(|(name, _)| name.clone()).collect(),
+            edges,
+        })
+        .map_err(|e| E(e, None))?;
 
     for i in sorted {
         let (key, value) = &macros[i];
