@@ -117,25 +117,25 @@ impl IndexMut<i64> for Memory {
 }
 
 #[derive(Clone, Debug)]
-struct Location<Src> {
+struct Location<Src: ToString> {
     row: usize,
     col: usize,
     src: Src,
 }
 
-impl Location<&str> {
+impl<Src: ToString> Location<Src> {
     fn cloned(&self) -> Location<String> {
         Location {
             row: self.row,
             col: self.col,
-            src: self.src.to_owned(),
+            src: self.src.to_string(),
         }
     }
 }
 
-impl<Src: Display> Display for Location<Src> {
+impl<Src: ToString> Display for Location<Src> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "{}:{}:{}", self.src, self.row, self.col)
+        write!(f, "{}:{}:{}", self.src.to_string(), self.row, self.col)
     }
 }
 
