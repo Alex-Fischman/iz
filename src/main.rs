@@ -237,15 +237,10 @@ fn main() -> Result<(), E> {
 
     // compiler
     let passes = [
-        // context starts out flat
-        remove_comments,
-        chars_to_strings,
-        remove_whitespace,
-        group_brackets, // changes context to a tree
-        group_and_unroll_operators,
-        unroll_brackets,
-        integer_literals,
-        substitute_macros, // changes context to a DAG
+        tokenize, // list of strings
+        parse,    // tree of strings
+        literals, // tree of strings and ints
+        macros,   // DAG of strings and ints
     ];
     for pass in passes {
         pass(&mut context)?
@@ -350,7 +345,8 @@ fn main() -> Result<(), E> {
     Ok(())
 }
 
-fn remove_comments(context: &mut Context) -> Result<(), E> {
+fn tokenize(context: &mut Context) -> Result<(), E> {
+    // remove comments
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -365,10 +361,8 @@ fn remove_comments(context: &mut Context) -> Result<(), E> {
             i += 1;
         }
     }
-    Ok(())
-}
 
-fn chars_to_strings(context: &mut Context) -> Result<(), E> {
+    // group tokens
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
@@ -409,10 +403,7 @@ fn chars_to_strings(context: &mut Context) -> Result<(), E> {
         return Err(E(ExpectedEmptyData("chars".to_owned()), None));
     }
 
-    Ok(())
-}
-
-fn remove_whitespace(context: &mut Context) -> Result<(), E> {
+    // remove whitespace
     let mut i = 0;
     let children = &mut context.edges.get_mut(&0).unwrap();
     while i < children.len() {
@@ -426,7 +417,9 @@ fn remove_whitespace(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn group_brackets(context: &mut Context) -> Result<(), E> {
+fn parse(context: &mut Context) -> Result<(), E> {
+    // group brackets
+    bracket_matcher(context, &mut 0, None)?;
     fn bracket_matcher(
         context: &mut Context,
         i: &mut usize,
@@ -467,21 +460,9 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
             Ok(())
         }
     }
-    bracket_matcher(context, &mut 0, None)
-}
 
-fn unroll_brackets(context: &mut Context) -> Result<(), E> {
-    context.replace_children_postorder(0, &mut |context, node| {
-        if context.strings.get(&node) == Some(&"(".to_owned()) {
-            Some(context.edges.get_mut(&node).unwrap().drain(..).collect())
-        } else {
-            None
-        }
-    });
-    Ok(())
-}
+    // group operators
 
-fn group_and_unroll_operators(context: &mut Context) -> Result<(), E> {
     //                   func     left   right  unroll
     type Operator<'a> = (&'a str, usize, usize, bool);
     //                                                        right associativity
@@ -540,6 +521,7 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), E> {
         Ok(())
     }
 
+    // unroll operators
     context.replace_children_postorder(0, &mut |context, node| {
         let s = context.strings.get(&node).unwrap();
         if let Some((func, _left, _right, unroll)) =
@@ -558,10 +540,19 @@ fn group_and_unroll_operators(context: &mut Context) -> Result<(), E> {
         }
     });
 
+    // unroll brackets
+    context.replace_children_postorder(0, &mut |context, node| {
+        if context.strings.get(&node) == Some(&"(".to_owned()) {
+            Some(context.edges.get_mut(&node).unwrap().drain(..).collect())
+        } else {
+            None
+        }
+    });
+
     Ok(())
 }
 
-fn integer_literals(context: &mut Context) -> Result<(), E> {
+fn literals(context: &mut Context) -> Result<(), E> {
     integer_literals(context, 0);
     fn integer_literals(context: &mut Context, node: Node) {
         for child in context.edges[&node].clone() {
@@ -578,7 +569,7 @@ fn integer_literals(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn substitute_macros(context: &mut Context) -> Result<(), E> {
+fn macros(context: &mut Context) -> Result<(), E> {
     let mut macros = vec![];
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"macro".to_owned()) {
