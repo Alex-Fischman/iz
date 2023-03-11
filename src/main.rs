@@ -32,16 +32,16 @@ impl Edges {
 
     const EMPTY: &[Node] = &[];
     fn children(&self, parent: Node) -> &[Node] {
-        self.0
-            .get(&parent)
-            .map(Vec::as_slice)
-            .unwrap_or(Edges::EMPTY)
+        self.0.get(&parent).map_or(Edges::EMPTY, Vec::as_slice)
     }
 
     fn children_mut(&mut self, parent: Node) -> &mut Vec<Node> {
         self.0.entry(parent).or_default()
     }
 
+    // guarantees that all nodes are present
+    // this doesn't matter for add_edge, children, or children_mut
+    // this does matter for topological sort
     fn from_fn<N, F>(nodes: N, mut has_edge: F) -> Edges
     where
         N: IntoIterator<Item = Node> + Clone,
@@ -100,6 +100,7 @@ struct Context<'a> {
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
     ops: HashMap<Node, Op>,
+    operators: Operators<'a>,
 }
 
 impl Debug for Context<'_> {
@@ -153,6 +154,11 @@ impl Context<'_> {
         }
     }
 }
+
+//                   func     left   right  unroll
+type Operator<'a> = (&'a str, usize, usize, bool);
+//                                                        right associativity
+type Operators<'a> = Vec<(HashMap<&'a str, Operator<'a>>, bool)>;
 
 #[derive(Clone, Debug)]
 struct Location<Src: ToString> {
@@ -249,32 +255,53 @@ fn main() -> Result<(), E> {
         chars: HashMap::new(),
         strings: HashMap::new(),
         ops: HashMap::new(),
+        operators: vec![
+            (HashMap::from([(":", (":", 1, 0, false))]), false),
+            (HashMap::from([("?", ("?", 1, 0, false))]), false),
+            (HashMap::from([("~", ("~", 0, 1, false))]), true),
+            (HashMap::from([("$", ("$", 0, 1, false))]), true),
+            (
+                HashMap::from([("-", ("neg", 0, 1, true)), ("!", ("not", 0, 1, true))]),
+                true,
+            ),
+            (HashMap::from([("+", ("add", 1, 1, true))]), false),
+            (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
+        ],
     };
 
-    let mut row = 1;
-    let mut col = 1;
+    let mut loc = Location {
+        src: file.as_str(),
+        row: 1,
+        col: 1,
+    };
     for c in text.chars() {
         let node = context.id();
         context.edges.add_edge(0, node);
         context.chars.insert(node, c);
-        context.locs.insert(
-            node,
-            Location {
-                src: file,
-                row,
-                col,
-            },
-        );
+        context.locs.insert(node, loc.clone());
         if c == '\n' {
-            row += 1;
-            col = 1;
+            loc.row += 1;
+            loc.col = 1;
         } else {
-            col += 1;
+            loc.col += 1;
         }
     }
 
     // compiler
-    let passes = [tokenize, parse, macros, bytecode];
+    let passes = [
+        // tokenize
+        remove_comments,
+        group_tokens,
+        remove_whitespace,
+        // parse
+        group_brackets,
+        group_operators,
+        unroll_operators,
+        unroll_brackets,
+        // transform
+        substitute_macros,
+        strings_to_ops,
+    ];
     for pass in passes {
         pass(&mut context)?
     }
@@ -343,8 +370,7 @@ fn main() -> Result<(), E> {
     Ok(())
 }
 
-fn tokenize(context: &mut Context) -> Result<(), E> {
-    // remove comments
+fn remove_comments(context: &mut Context) -> Result<(), E> {
     let mut i = 0;
     let children = context.edges.children_mut(0);
     while i < children.len() {
@@ -359,8 +385,10 @@ fn tokenize(context: &mut Context) -> Result<(), E> {
             i += 1;
         }
     }
+    Ok(())
+}
 
-    // group tokens
+fn group_tokens(context: &mut Context) -> Result<(), E> {
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
@@ -400,8 +428,10 @@ fn tokenize(context: &mut Context) -> Result<(), E> {
     if !context.chars.is_empty() {
         return Err(E(ExpectedEmptyData("chars".to_owned()), None));
     }
+    Ok(())
+}
 
-    // remove whitespace
+fn remove_whitespace(context: &mut Context) -> Result<(), E> {
     let mut i = 0;
     let children = context.edges.children_mut(0);
     while i < children.len() {
@@ -415,10 +445,8 @@ fn tokenize(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn parse(context: &mut Context) -> Result<(), E> {
-    // group brackets
-    bracket_matcher(context, &mut 0, None)?;
-    fn bracket_matcher(
+fn group_brackets(context: &mut Context) -> Result<(), E> {
+    fn group_brackets(
         context: &mut Context,
         i: &mut usize,
         target: Option<(&str, Location<&str>)>,
@@ -429,7 +457,7 @@ fn parse(context: &mut Context) -> Result<(), E> {
             let s = context.strings.get(&child).unwrap().clone();
             let mut handle_open_bracket = |close| -> Result<(), E> {
                 let start = *i;
-                bracket_matcher(context, i, Some((close, context.locs[&child].clone())))?;
+                group_brackets(context, i, Some((close, context.locs[&child].clone())))?;
                 let mut cs: Vec<Node> = context.edges.children_mut(0).drain(start..*i).collect();
                 cs.pop(); // remove the closing bracket
                 *context.edges.children_mut(child) = cs;
@@ -453,34 +481,17 @@ fn parse(context: &mut Context) -> Result<(), E> {
             Ok(())
         }
     }
+    group_brackets(context, &mut 0, None)
+}
 
-    // group operators
-
-    //                   func     left   right  unroll
-    type Operator<'a> = (&'a str, usize, usize, bool);
-    //                                                        right associativity
-    type Operators<'a> = Vec<(HashMap<&'a str, Operator<'a>>, bool)>;
-    let operators = vec![
-        (HashMap::from([(":", (":", 1, 0, false))]), false),
-        (HashMap::from([("?", ("?", 1, 0, false))]), false),
-        (HashMap::from([("~", ("~", 0, 1, false))]), true),
-        (HashMap::from([("$", ("$", 0, 1, false))]), true),
-        (
-            HashMap::from([("-", ("neg", 0, 1, true)), ("!", ("not", 0, 1, true))]),
-            true,
-        ),
-        (HashMap::from([("+", ("add", 1, 1, true))]), false),
-        (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
-    ];
-
-    group_operators(context, 0, &operators)?;
-    fn group_operators(context: &mut Context, node: Node, operators: &Operators) -> Result<(), E> {
+fn group_operators(context: &mut Context) -> Result<(), E> {
+    fn group_operators(context: &mut Context, node: Node) -> Result<(), E> {
         let children = context.edges.children(node).to_vec();
         for child in children {
-            group_operators(context, child, operators)?
+            group_operators(context, child)?
         }
 
-        for (ops, right_assoc) in operators {
+        for (ops, right_assoc) in &context.operators {
             let mut i = if *right_assoc {
                 context.edges.children(node).len().wrapping_sub(1)
             } else {
@@ -513,12 +524,14 @@ fn parse(context: &mut Context) -> Result<(), E> {
         }
         Ok(())
     }
+    group_operators(context, 0)
+}
 
-    // unroll operators
+fn unroll_operators(context: &mut Context) -> Result<(), E> {
     context.replace_children_postorder(0, &mut |context, node| {
         let s = context.strings.get(&node).unwrap();
         if let Some((func, _left, _right, unroll)) =
-            operators.iter().find_map(|(ops, _)| ops.get(&**s))
+            context.operators.iter().find_map(|(ops, _)| ops.get(&**s))
         {
             context.strings.insert(node, (*func).to_owned());
             if *unroll {
@@ -532,8 +545,10 @@ fn parse(context: &mut Context) -> Result<(), E> {
             None
         }
     });
+    Ok(())
+}
 
-    // unroll brackets
+fn unroll_brackets(context: &mut Context) -> Result<(), E> {
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"(".to_owned()) {
             Some(context.edges.children_mut(node).drain(..).collect())
@@ -545,7 +560,7 @@ fn parse(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn macros(context: &mut Context) -> Result<(), E> {
+fn substitute_macros(context: &mut Context) -> Result<(), E> {
     // gather macro declarations
     let mut macros = vec![];
     context.replace_children_postorder(0, &mut |context, node| {
@@ -631,7 +646,7 @@ impl IndexMut<i64> for Memory {
     }
 }
 
-fn bytecode(context: &mut Context) -> Result<(), E> {
+fn strings_to_ops(context: &mut Context) -> Result<(), E> {
     for node in context.edges.children(0) {
         let s = context
             .strings
