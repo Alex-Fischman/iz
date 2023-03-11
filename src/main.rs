@@ -9,7 +9,7 @@ use std::{
     env::args,
     fmt::{Debug, Formatter, Result as FmtResult},
     fs::read_to_string,
-    iter::{Extend, Iterator},
+    iter::{Extend, IntoIterator, Iterator},
     ops::{FnMut, Index, IndexMut},
     option::{Option, Option::None, Option::Some},
     result::{Result, Result::Err, Result::Ok},
@@ -18,8 +18,87 @@ use std::{
     {matches, print, println, vec, write, writeln},
 };
 
+// usually a key in a map that stores some other data
 type Node = usize;
-type Edges = HashMap<Node, Vec<Node>>; // outgoing adjacency list
+// outgoing adjacency list
+#[derive(Clone)]
+struct Edges(HashMap<Node, Vec<Node>>);
+
+impl Edges {
+    fn add_edge(&mut self, a: Node, b: Node) {
+        self.0.entry(a).or_default().push(b)
+    }
+
+    const EMPTY: &[Node] = &[];
+    fn children(&self, parent: Node) -> &[Node] {
+        self.0
+            .get(&parent)
+            .map(Vec::as_slice)
+            .unwrap_or(Edges::EMPTY)
+    }
+
+    fn children_mut(&mut self, parent: Node) -> &mut Vec<Node> {
+        self.0.entry(parent).or_default()
+    }
+
+    fn from_fn<N, F>(nodes: N, mut has_edge: F) -> Edges
+    where
+        N: IntoIterator<Item = Node> + Clone,
+        F: FnMut(Node, Node) -> bool,
+    {
+        let mut out = Edges(HashMap::new());
+        for a in nodes.clone() {
+            out.0.entry(a).or_default();
+            for b in nodes.clone() {
+                if has_edge(a, b) {
+                    out.add_edge(a, b)
+                }
+            }
+        }
+        out
+    }
+
+    // topological sort using Kahn's algorithm
+    // returns either a sorted list of indices into nodes
+    // or an adjacency list of the cycles if they exist
+    fn topological_sort(mut self) -> Result<Vec<usize>, Edges> {
+        fn has_incoming(edges: &Edges, i: usize) -> bool {
+            for ws in edges.0.values() {
+                for w in ws {
+                    if i == *w {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        let mut sorted = vec![];
+        let mut no_incoming: Vec<usize> = self
+            .0
+            .keys()
+            .copied()
+            .filter(|i| !has_incoming(&self, *i))
+            .collect();
+
+        while let Some(v) = no_incoming.pop() {
+            sorted.push(v);
+            if let Some(ws) = self.0.remove(&v) {
+                for w in ws {
+                    if !has_incoming(&self, w) {
+                        no_incoming.push(w)
+                    }
+                }
+            }
+        }
+
+        if self.0.is_empty() {
+            Ok(sorted)
+        } else {
+            Err(self)
+        }
+    }
+}
 
 // holds all the information given to different passes
 struct Context<'a> {
@@ -49,7 +128,7 @@ impl Debug for Context<'_> {
                 write!(f, " {:?}", o)?;
             }
             writeln!(f)?;
-            for child in &context.edges[&node] {
+            for child in context.edges.children(node) {
                 print_tree(context, f, *child, depth + 1)?;
             }
             Ok(())
@@ -69,12 +148,12 @@ impl Context<'_> {
         F: FnMut(&mut Context, Node) -> Option<Vec<Node>>,
     {
         let mut i = 0;
-        while i < self.edges[&node].len() {
-            let child = self.edges[&node][i];
+        while i < self.edges.children(node).len() {
+            let child = self.edges.children(node)[i];
             self.replace_children_postorder(child, f);
             if let Some(nodes) = f(self, child) {
                 let l = nodes.len();
-                self.edges.get_mut(&node).unwrap().splice(i..=i, nodes);
+                self.edges.children_mut(node).splice(i..=i, nodes);
                 i += l;
             } else {
                 i += 1;
@@ -136,7 +215,7 @@ impl Debug for E {
 
             Error::MacroDependencyCycle { names, edges } => {
                 writeln!(f, "macro dependency cycle detected")?;
-                for (v, ws) in edges {
+                for (v, ws) in &edges.0 {
                     for w in ws {
                         writeln!(f, "{} -> {}", names[*v], names[*w])?
                     }
@@ -174,19 +253,17 @@ fn main() -> Result<(), E> {
     let mut context = Context {
         id: 1, // 0 is the root
         locs: HashMap::new(),
-        edges: HashMap::new(),
+        edges: Edges(HashMap::new()),
         chars: HashMap::new(),
         strings: HashMap::new(),
         ops: HashMap::new(),
     };
-    context.edges.insert(0, vec![]);
 
     let mut row = 1;
     let mut col = 1;
     for c in text.chars() {
         let node = context.id();
-        context.edges.insert(node, vec![]);
-        context.edges.get_mut(&0).unwrap().push(node);
+        context.edges.add_edge(0, node);
         context.chars.insert(node, c);
         context.locs.insert(
             node,
@@ -211,7 +288,9 @@ fn main() -> Result<(), E> {
     }
 
     // backend
-    let code: Vec<Op> = context.edges[&0]
+    let code: Vec<Op> = context
+        .edges
+        .children(0)
         .iter()
         .map(|node| context.ops[node].clone())
         .collect();
@@ -275,7 +354,7 @@ fn main() -> Result<(), E> {
 fn tokenize(context: &mut Context) -> Result<(), E> {
     // remove comments
     let mut i = 0;
-    let children = &mut context.edges.get_mut(&0).unwrap();
+    let children = context.edges.children_mut(0);
     while i < children.len() {
         if context.chars.get(&children[i]) == Some(&'#') {
             let mut j = i;
@@ -309,7 +388,7 @@ fn tokenize(context: &mut Context) -> Result<(), E> {
         return Err(E(ExpectedEmptyData("strings".to_owned()), None));
     }
     let mut i = 0;
-    let children = &mut context.edges.get_mut(&0).unwrap();
+    let children = context.edges.children_mut(0);
     while i < children.len() {
         let c = context.chars.remove(&children[i]).unwrap();
         if i == 0 {
@@ -332,7 +411,7 @@ fn tokenize(context: &mut Context) -> Result<(), E> {
 
     // remove whitespace
     let mut i = 0;
-    let children = &mut context.edges.get_mut(&0).unwrap();
+    let children = context.edges.children_mut(0);
     while i < children.len() {
         let s = context.strings.get(&children[i]).unwrap();
         if s.chars().next().unwrap().is_whitespace() {
@@ -352,21 +431,16 @@ fn parse(context: &mut Context) -> Result<(), E> {
         i: &mut usize,
         target: Option<(&str, Location<&str>)>,
     ) -> Result<(), E> {
-        while *i < context.edges[&0].len() {
-            let child = context.edges[&0][*i];
+        while *i < context.edges.children(0).len() {
+            let child = context.edges.children(0)[*i];
             *i += 1;
             let s = context.strings.get(&child).unwrap().clone();
             let mut handle_open_bracket = |close| -> Result<(), E> {
                 let start = *i;
                 bracket_matcher(context, i, Some((close, context.locs[&child].clone())))?;
-                let mut cs: Vec<Node> = context
-                    .edges
-                    .get_mut(&0)
-                    .unwrap()
-                    .drain(start..*i)
-                    .collect();
+                let mut cs: Vec<Node> = context.edges.children_mut(0).drain(start..*i).collect();
                 cs.pop(); // remove the closing bracket
-                *context.edges.get_mut(&child).unwrap() = cs;
+                *context.edges.children_mut(child) = cs;
                 *i = start;
                 Ok(())
             };
@@ -409,20 +483,21 @@ fn parse(context: &mut Context) -> Result<(), E> {
 
     group_operators(context, 0, &operators)?;
     fn group_operators(context: &mut Context, node: Node, operators: &Operators) -> Result<(), E> {
-        for child in context.edges[&node].clone() {
+        let children = context.edges.children(node).to_vec();
+        for child in children {
             group_operators(context, child, operators)?
         }
 
         for (ops, right_assoc) in operators {
             let mut i = if *right_assoc {
-                context.edges[&node].len().wrapping_sub(1)
+                context.edges.children(node).len().wrapping_sub(1)
             } else {
                 0
             };
-            while let Some(child) = context.edges[&node].get(i).copied() {
+            while let Some(child) = context.edges.children(node).get(i).copied() {
                 let s = context.strings.get(&child).unwrap().clone();
                 if let Some((_func, left, right, _unroll)) = ops.get(&*s) {
-                    if i < *left || i + right >= context.edges[&node].len() {
+                    if i < *left || i + right >= context.edges.children(node).len() {
                         return Err(E(
                             MissingOperatorArgs(s),
                             Some(context.locs[&child].cloned()),
@@ -430,13 +505,12 @@ fn parse(context: &mut Context) -> Result<(), E> {
                     }
                     let mut cs: Vec<Node> = context
                         .edges
-                        .get_mut(&node)
-                        .unwrap()
+                        .children_mut(node)
                         .drain(i + 1..=i + right)
                         .collect();
-                    cs.extend(context.edges.get_mut(&node).unwrap().drain(i - left..i));
+                    cs.extend(context.edges.children_mut(node).drain(i - left..i));
                     i -= left;
-                    *context.edges.get_mut(&child).unwrap() = cs;
+                    *context.edges.children_mut(child) = cs;
                 }
                 i = if *right_assoc {
                     i.wrapping_sub(1)
@@ -456,7 +530,7 @@ fn parse(context: &mut Context) -> Result<(), E> {
         {
             context.strings.insert(node, (*func).to_owned());
             if *unroll {
-                let mut cs: Vec<Node> = context.edges.get_mut(&node).unwrap().drain(..).collect();
+                let mut cs: Vec<Node> = context.edges.children_mut(node).drain(..).collect();
                 cs.push(node);
                 Some(cs)
             } else {
@@ -470,7 +544,7 @@ fn parse(context: &mut Context) -> Result<(), E> {
     // unroll brackets
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"(".to_owned()) {
-            Some(context.edges.get_mut(&node).unwrap().drain(..).collect())
+            Some(context.edges.children_mut(node).drain(..).collect())
         } else {
             None
         }
@@ -484,8 +558,11 @@ fn macros(context: &mut Context) -> Result<(), E> {
     let mut macros = vec![];
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"macro".to_owned()) {
-            let key = context.strings.remove(&context.edges[&node][0]).unwrap();
-            let value = context.edges[&node][1..].to_vec();
+            let key = context
+                .strings
+                .remove(&context.edges.children(node)[0])
+                .unwrap();
+            let value = context.edges.children(node)[1..].to_vec();
             macros.push((key, value));
             Some(vec![])
         } else {
@@ -494,10 +571,10 @@ fn macros(context: &mut Context) -> Result<(), E> {
     });
 
     // sort macros by dependency so that all nestings get expanded
-    let sorted = topological_sort(&macros, |(_, nodes), (key, _)| -> bool {
-        fn depends(context: &mut Context, nodes: &[Node], key: &String) -> bool {
+    let sorted = Edges::from_fn(0..macros.len(), |i, j| -> bool {
+        fn depends(context: &Context, nodes: &[Node], key: &String) -> bool {
             for node in nodes {
-                if depends(context, &context.edges[node].clone(), key)
+                if depends(context, context.edges.children(*node), key)
                     || context.strings.get(node) == Some(key)
                 {
                     return true;
@@ -505,8 +582,9 @@ fn macros(context: &mut Context) -> Result<(), E> {
             }
             false
         }
-        depends(context, nodes, key)
+        depends(context, &macros[i].1, &macros[j].0)
     })
+    .topological_sort()
     .map_err(|edges| MacroDependencyCycle {
         names: macros.iter().map(|(name, _)| name.clone()).collect(),
         edges,
@@ -526,56 +604,6 @@ fn macros(context: &mut Context) -> Result<(), E> {
     }
 
     Ok(())
-}
-
-// topological sort using Kahn's algorithm on an adjacency list
-// returns either a sorted list of indices into nodes
-// or an adjacency list of the cycles if they exist
-fn topological_sort<N, F>(nodes: &[N], mut has_edge: F) -> Result<Vec<usize>, Edges>
-where
-    F: FnMut(&N, &N) -> bool,
-{
-    let mut edges: Edges = HashMap::new();
-    for (i, a) in nodes.iter().enumerate() {
-        for (j, b) in nodes.iter().enumerate() {
-            if has_edge(a, b) {
-                edges.entry(i).or_default().push(j);
-            }
-        }
-    }
-
-    fn has_incoming(edges: &Edges, i: usize) -> bool {
-        for ws in edges.values() {
-            for w in ws {
-                if i == *w {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    let mut sorted = vec![];
-    let mut no_incoming: Vec<usize> = (0..nodes.len())
-        .filter(|i| !has_incoming(&edges, *i))
-        .collect();
-
-    while let Some(v) = no_incoming.pop() {
-        sorted.push(v);
-        if let Some(ws) = edges.remove(&v) {
-            for w in ws {
-                if !has_incoming(&edges, w) {
-                    no_incoming.push(w)
-                }
-            }
-        }
-    }
-
-    if edges.is_empty() {
-        Ok(sorted)
-    } else {
-        Err(edges)
-    }
 }
 
 // should be extensible
@@ -612,7 +640,7 @@ impl IndexMut<i64> for Memory {
 }
 
 fn bytecode(context: &mut Context) -> Result<(), E> {
-    for node in &context.edges[&0] {
+    for node in context.edges.children(0) {
         let s = context
             .strings
             .get(node)
@@ -621,7 +649,7 @@ fn bytecode(context: &mut Context) -> Result<(), E> {
             *node,
             match s.as_str() {
                 "~" => {
-                    let child = context.edges[node][0];
+                    let child = context.edges.children(*node)[0];
                     Op::Move(
                         context
                             .strings
@@ -631,7 +659,7 @@ fn bytecode(context: &mut Context) -> Result<(), E> {
                     )
                 }
                 "$" => {
-                    let child = context.edges[node][0];
+                    let child = context.edges.children(*node)[0];
                     Op::Copy(
                         context
                             .strings
@@ -646,14 +674,14 @@ fn bytecode(context: &mut Context) -> Result<(), E> {
                 "?" => Op::Jumpz(
                     context
                         .strings
-                        .get(&context.edges[node][0])
+                        .get(&context.edges.children(*node)[0])
                         .unwrap()
                         .clone(),
                 ),
                 ":" => Op::Label(
                     context
                         .strings
-                        .get(&context.edges[node][0])
+                        .get(&context.edges.children(*node)[0])
                         .unwrap()
                         .clone(),
                 ),
