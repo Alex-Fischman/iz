@@ -59,43 +59,34 @@ impl Edges {
     }
 
     // topological sort using Kahn's algorithm
-    // returns either a sorted list of indices into nodes
-    // or an adjacency list of the cycles if they exist
-    fn topological_sort(mut self) -> Result<Vec<usize>, Edges> {
-        fn has_incoming(edges: &Edges, i: usize) -> bool {
-            for ws in edges.0.values() {
-                for w in ws {
-                    if i == *w {
-                        return true;
-                    }
-                }
+    // either returns a sorted list of indices into nodes
+    // or returns an incoming adjancency list of remaining edges
+    fn topological_sort(&self) -> Result<Vec<Node>, HashMap<Node, Vec<Node>>> {
+        let mut incoming: HashMap<Node, Vec<Node>> = HashMap::new();
+        for (v, ws) in &self.0 {
+            for w in ws {
+                incoming.entry(*w).or_default().push(*v);
             }
-            false
         }
 
         let mut sorted = vec![];
-        let mut no_incoming: Vec<usize> = self
-            .0
-            .keys()
-            .copied()
-            .filter(|i| !has_incoming(&self, *i))
-            .collect();
+        let mut no_incoming: Vec<usize> = self.0.keys().copied().collect();
+        no_incoming.retain(|i| incoming.get(i).is_none());
 
         while let Some(v) = no_incoming.pop() {
             sorted.push(v);
-            if let Some(ws) = self.0.remove(&v) {
-                for w in ws {
-                    if !has_incoming(&self, w) {
-                        no_incoming.push(w)
-                    }
+            for w in self.children(v) {
+                incoming.get_mut(w).unwrap().retain(|i| *i != v);
+                if incoming[w].is_empty() {
+                    no_incoming.push(*w)
                 }
             }
         }
 
-        if self.0.is_empty() {
+        if sorted.len() == self.0.len() {
             Ok(sorted)
         } else {
-            Err(self)
+            Err(incoming)
         }
     }
 }
@@ -192,7 +183,10 @@ enum Error {
     MissingCloseBracket(String),
     MissingOperatorArgs(String),
 
-    MacroDependencyCycle { names: Vec<String>, edges: Edges },
+    MacroDependencyCycle {
+        names: Vec<String>,
+        incoming: HashMap<Node, Vec<Node>>,
+    },
 
     ExpectedInt,
     UnknownOpCode(String),
@@ -213,10 +207,10 @@ impl Debug for E {
             Error::MissingCloseBracket(bracket) => write!(f, "missing {}", bracket),
             Error::MissingOperatorArgs(op) => write!(f, "missing args for {}", op),
 
-            Error::MacroDependencyCycle { names, edges } => {
+            Error::MacroDependencyCycle { names, incoming } => {
                 writeln!(f, "macro dependency cycle detected")?;
-                for (v, ws) in &edges.0 {
-                    for w in ws {
+                for (w, vs) in incoming {
+                    for v in vs {
                         writeln!(f, "{} -> {}", names[*v], names[*w])?
                     }
                 }
@@ -585,9 +579,9 @@ fn macros(context: &mut Context) -> Result<(), E> {
         depends(context, &macros[i].1, &macros[j].0)
     })
     .topological_sort()
-    .map_err(|edges| MacroDependencyCycle {
+    .map_err(|incoming| MacroDependencyCycle {
         names: macros.iter().map(|(name, _)| name.clone()).collect(),
-        edges,
+        incoming,
     })
     .map_err(|e| E(e, None))?;
 
