@@ -20,7 +20,8 @@ use std::{
 
 // usually a key in a map that stores some other data
 type Node = usize;
-// outgoing adjacency list
+// adjacency list, usually outgoing unless otherwise specified
+// methods are all named assuming it's outgoing
 #[derive(Clone)]
 struct Edges(HashMap<Node, Vec<Node>>);
 
@@ -60,24 +61,24 @@ impl Edges {
 
     // topological sort using Kahn's algorithm
     // either returns a sorted list of indices into nodes
-    // or returns an incoming adjancency list of remaining edges
-    fn topological_sort(&self) -> Result<Vec<Node>, HashMap<Node, Vec<Node>>> {
-        let mut incoming: HashMap<Node, Vec<Node>> = HashMap::new();
+    // or returns an INCOMING adjancency list of remaining edges
+    fn topological_sort(&self) -> Result<Vec<Node>, Edges> {
+        let mut incoming = Edges(HashMap::new());
         for (v, ws) in &self.0 {
             for w in ws {
-                incoming.entry(*w).or_default().push(*v);
+                incoming.add_edge(*w, *v);
             }
         }
 
         let mut sorted = vec![];
         let mut no_incoming: Vec<usize> = self.0.keys().copied().collect();
-        no_incoming.retain(|i| incoming.get(i).is_none());
+        no_incoming.retain(|i| !incoming.0.contains_key(i));
 
         while let Some(v) = no_incoming.pop() {
             sorted.push(v);
             for w in self.children(v) {
-                incoming.get_mut(w).unwrap().retain(|i| *i != v);
-                if incoming[w].is_empty() {
+                incoming.children_mut(*w).retain(|i| *i != v);
+                if incoming.children(*w).is_empty() {
                     no_incoming.push(*w)
                 }
             }
@@ -183,10 +184,7 @@ enum Error {
     MissingCloseBracket(String),
     MissingOperatorArgs(String),
 
-    MacroDependencyCycle {
-        names: Vec<String>,
-        incoming: HashMap<Node, Vec<Node>>,
-    },
+    MacroDependencyCycle { names: Vec<String>, incoming: Edges },
 
     ExpectedInt,
     UnknownOpCode(String),
@@ -209,7 +207,7 @@ impl Debug for E {
 
             Error::MacroDependencyCycle { names, incoming } => {
                 writeln!(f, "macro dependency cycle detected")?;
-                for (w, vs) in incoming {
+                for (w, vs) in &incoming.0 {
                     for v in vs {
                         writeln!(f, "{} -> {}", names[*v], names[*w])?
                     }
