@@ -28,7 +28,7 @@ struct Context<'a> {
     locs: HashMap<Node, Location<&'a str>>,
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
-    ints: HashMap<Node, i64>,
+    ops: HashMap<Node, Op>,
 }
 
 impl Debug for Context<'_> {
@@ -45,8 +45,8 @@ impl Debug for Context<'_> {
             if let Some(s) = context.strings.get(&node) {
                 write!(f, " {}", s)?;
             }
-            if let Some(i) = context.ints.get(&node) {
-                write!(f, " {}", i)?;
+            if let Some(o) = context.ops.get(&node) {
+                write!(f, " {:?}", o)?;
             }
             writeln!(f)?;
             for child in &context.edges[&node] {
@@ -83,39 +83,6 @@ impl Context<'_> {
     }
 }
 
-// should be extensible
-#[derive(Clone, Debug, PartialEq)]
-enum Op {
-    Push(i64),
-    Move(i64),
-    Copy(i64),
-    Add,
-    Neg,
-    Ltz,
-    Jumpz(String),
-    Label(String),
-}
-
-// for the bytecode interpreter
-struct Memory(Vec<i64>);
-
-impl Index<i64> for Memory {
-    type Output = i64;
-    fn index(&self, i: i64) -> &i64 {
-        &self.0[i as usize]
-    }
-}
-
-impl IndexMut<i64> for Memory {
-    fn index_mut(&mut self, i: i64) -> &mut i64 {
-        let i = i as usize;
-        if self.0.len() <= i {
-            self.0.resize(i + 1, 0);
-        }
-        &mut self.0[i]
-    }
-}
-
 #[derive(Clone, Debug)]
 struct Location<Src: ToString> {
     row: usize,
@@ -148,6 +115,7 @@ enum Error {
 
     MacroDependencyCycle { names: Vec<String>, edges: Edges },
 
+    ExpectedInt,
     UnknownOpCode(String),
     MissingOpCode,
     UnknownLabel(String),
@@ -176,6 +144,7 @@ impl Debug for E {
                 Ok(())
             }
 
+            Error::ExpectedInt => write!(f, "expected int"),
             Error::UnknownOpCode(op) => write!(f, "unknown op code {}", op),
             Error::MissingOpCode => write!(f, "expected string or int for op, found neither"),
             Error::UnknownLabel(label) => write!(f, "unknown label {}", label),
@@ -208,7 +177,7 @@ fn main() -> Result<(), E> {
         edges: HashMap::new(),
         chars: HashMap::new(),
         strings: HashMap::new(),
-        ints: HashMap::new(),
+        ops: HashMap::new(),
     };
     context.edges.insert(0, vec![]);
 
@@ -236,58 +205,16 @@ fn main() -> Result<(), E> {
     }
 
     // compiler
-    let passes = [
-        tokenize, // list of strings
-        parse,    // tree of strings
-        literals, // tree of strings and ints
-        macros,   // DAG of strings and ints
-    ];
+    let passes = [tokenize, parse, macros, bytecode];
     for pass in passes {
         pass(&mut context)?
     }
 
     // backend
-    let code = context.edges[&0]
+    let code: Vec<Op> = context.edges[&0]
         .iter()
-        .cloned()
-        .map(|node| {
-            if let Some(int) = context.ints.get(&node) {
-                Ok(Op::Push(*int))
-            } else if let Some(s) = context.strings.get(&node) {
-                match s.as_str() {
-                    "~" => Ok(Op::Move(
-                        *context.ints.get(&context.edges[&node][0]).unwrap(),
-                    )),
-                    "$" => Ok(Op::Copy(
-                        *context.ints.get(&context.edges[&node][0]).unwrap(),
-                    )),
-                    "add" => Ok(Op::Add),
-                    "neg" => Ok(Op::Neg),
-                    "ltz" => Ok(Op::Ltz),
-                    "?" => Ok(Op::Jumpz(
-                        context
-                            .strings
-                            .get(&context.edges[&node][0])
-                            .unwrap()
-                            .clone(),
-                    )),
-                    ":" => Ok(Op::Label(
-                        context
-                            .strings
-                            .get(&context.edges[&node][0])
-                            .unwrap()
-                            .clone(),
-                    )),
-                    _ => Err(E(
-                        UnknownOpCode(s.clone()),
-                        Some(context.locs[&node].cloned()),
-                    )),
-                }
-            } else {
-                Err(E(MissingOpCode, Some(context.locs[&node].cloned())))
-            }
-        })
-        .collect::<Result<Vec<Op>, _>>()?;
+        .map(|node| context.ops[node].clone())
+        .collect();
 
     let mut labels = HashMap::new();
     for (pc, op) in code.iter().enumerate() {
@@ -552,24 +479,8 @@ fn parse(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn literals(context: &mut Context) -> Result<(), E> {
-    integer_literals(context, 0);
-    fn integer_literals(context: &mut Context, node: Node) {
-        for child in context.edges[&node].clone() {
-            integer_literals(context, child)
-        }
-        if let Some(s) = context.strings.get(&node) {
-            if let Ok(int) = s.parse::<i64>() {
-                context.strings.remove(&node);
-                context.ints.insert(node, int);
-            }
-        }
-    }
-
-    Ok(())
-}
-
 fn macros(context: &mut Context) -> Result<(), E> {
+    // gather macro declarations
     let mut macros = vec![];
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"macro".to_owned()) {
@@ -582,6 +493,7 @@ fn macros(context: &mut Context) -> Result<(), E> {
         }
     });
 
+    // sort macros by dependency so that all nestings get expanded
     let sorted = topological_sort(&macros, |(_, nodes), (key, _)| -> bool {
         fn depends(context: &mut Context, nodes: &[Node], key: &String) -> bool {
             for node in nodes {
@@ -594,15 +506,14 @@ fn macros(context: &mut Context) -> Result<(), E> {
             false
         }
         depends(context, nodes, key)
-    });
+    })
+    .map_err(|edges| MacroDependencyCycle {
+        names: macros.iter().map(|(name, _)| name.clone()).collect(),
+        edges,
+    })
+    .map_err(|e| E(e, None))?;
 
-    let sorted = sorted
-        .map_err(|edges| MacroDependencyCycle {
-            names: macros.iter().map(|(name, _)| name.clone()).collect(),
-            edges,
-        })
-        .map_err(|e| E(e, None))?;
-
+    // replace names by values in the tree
     for i in sorted {
         let (key, value) = &macros[i];
         context.replace_children_postorder(0, &mut |context, node| {
@@ -665,4 +576,98 @@ where
     } else {
         Err(edges)
     }
+}
+
+// should be extensible
+#[derive(Clone, Debug, PartialEq)]
+enum Op {
+    Push(i64),
+    Move(i64),
+    Copy(i64),
+    Add,
+    Neg,
+    Ltz,
+    Jumpz(String),
+    Label(String),
+}
+
+// for the bytecode interpreter
+struct Memory(Vec<i64>);
+
+impl Index<i64> for Memory {
+    type Output = i64;
+    fn index(&self, i: i64) -> &i64 {
+        &self.0[i as usize]
+    }
+}
+
+impl IndexMut<i64> for Memory {
+    fn index_mut(&mut self, i: i64) -> &mut i64 {
+        let i = i as usize;
+        if self.0.len() <= i {
+            self.0.resize(i + 1, 0);
+        }
+        &mut self.0[i]
+    }
+}
+
+fn bytecode(context: &mut Context) -> Result<(), E> {
+    for node in &context.edges[&0] {
+        let s = context
+            .strings
+            .get(node)
+            .ok_or(E(MissingOpCode, Some(context.locs[node].cloned())))?;
+        context.ops.insert(
+            *node,
+            match s.as_str() {
+                "~" => {
+                    let child = context.edges[node][0];
+                    Op::Move(
+                        context
+                            .strings
+                            .get(&child)
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .ok_or(E(ExpectedInt, Some(context.locs[&child].cloned())))?,
+                    )
+                }
+                "$" => {
+                    let child = context.edges[node][0];
+                    Op::Copy(
+                        context
+                            .strings
+                            .get(&child)
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .ok_or(E(ExpectedInt, Some(context.locs[&child].cloned())))?,
+                    )
+                }
+                "add" => Op::Add,
+                "neg" => Op::Neg,
+                "ltz" => Op::Ltz,
+                "?" => Op::Jumpz(
+                    context
+                        .strings
+                        .get(&context.edges[node][0])
+                        .unwrap()
+                        .clone(),
+                ),
+                ":" => Op::Label(
+                    context
+                        .strings
+                        .get(&context.edges[node][0])
+                        .unwrap()
+                        .clone(),
+                ),
+                _ => match s.parse::<i64>() {
+                    Ok(i) => Op::Push(i),
+                    Err(_) => {
+                        return Err(E(
+                            UnknownOpCode(s.clone()),
+                            Some(context.locs[node].cloned()),
+                        ))
+                    }
+                },
+            },
+        );
+    }
+    Ok(())
 }
