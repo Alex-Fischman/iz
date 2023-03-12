@@ -7,7 +7,6 @@ use std::{
     cmp::Eq,
     collections::HashMap,
     env::args,
-    fmt::{Display, Formatter, Result as FmtResult},
     fs::read_to_string,
     hash::Hash,
     iter::Iterator,
@@ -15,7 +14,7 @@ use std::{
     result::{Result, Result::Ok},
     string::String,
     vec::Vec,
-    {format, print, write},
+    {format, print},
 };
 
 trait Key: Clone + Eq + Hash {}
@@ -36,19 +35,12 @@ impl<K: Key, V> IndexMap<K, V> {
         }
     }
 
-    fn get(&self, key: &K) -> Option<&V> {
+    fn value(&self, key: &K) -> Option<&V> {
         self.idxs.get(key).map(|i| &self.vals[*i])
     }
 
-    fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+    fn value_mut(&mut self, key: &K) -> Option<&mut V> {
         self.idxs.get(key).map(|i| &mut self.vals[*i])
-    }
-
-    fn remove(&mut self, key: &K) -> Option<V> {
-        self.idxs.remove(key).map(|i| {
-            self.keys.remove(i);
-            self.vals.remove(i)
-        })
     }
 
     fn insert(&mut self, key: K, val: V) -> Option<V> {
@@ -68,7 +60,7 @@ impl<K: Key, V> IndexMap<K, V> {
             Some(i) => &mut self.vals[*i],
             None => {
                 self.insert(key.clone(), val);
-                self.get_mut(&key).unwrap()
+                self.value_mut(&key).unwrap()
             }
         }
     }
@@ -77,75 +69,85 @@ impl<K: Key, V> IndexMap<K, V> {
 struct Graph<T: Key>(IndexMap<T, IndexMap<T, ()>>);
 
 impl<T: Key> Graph<T> {
-    fn add_node(&mut self, node: T) -> Option<IndexMap<T, ()>> {
+    fn node(&mut self, node: T) -> Option<IndexMap<T, ()>> {
         self.0.insert(node, IndexMap::new())
     }
 
-    fn add_edge(&mut self, parent: T, child: T) {
+    fn edge(&mut self, parent: T, child: T) {
         self.0.or_insert(parent, IndexMap::new()).insert(child, ());
     }
 
     fn children(&self, parent: T) -> &[T] {
-        &self.0.get(&parent).unwrap().keys
+        &self.0.value(&parent).unwrap().keys
     }
 
-    fn children_mut(&self, parent: T) -> &mut Vec<T> {
-        &mut self.0.get(&parent).unwrap().keys
-    }
-}
-
-#[derive(Clone)]
-struct Location<'a> {
-    src: &'a str,
-    row: usize,
-    col: usize,
-}
-
-impl Display for Location<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "{}:{}:{}", self.src, self.row, self.col)
+    fn children_mut(&mut self, parent: T) -> &mut Vec<T> {
+        &mut self.0.value_mut(&parent).unwrap().keys
     }
 }
 
 struct Context<'a> {
+    #[allow(unused)]
+    file: &'a str,
+    text: &'a str,
+
     id: usize,
     graph: Graph<usize>,
+
+    locations: HashMap<usize, usize>,
     chars: HashMap<usize, char>,
-    locations: HashMap<usize, Location<'a>>,
 }
 
 impl<'a> Context<'a> {
-    fn new() -> Context<'a> {
+    fn new(file: &'a str, text: &'a str) -> Context<'a> {
         Context {
+            file,
+            text,
+
             id: 0,
             graph: Graph(IndexMap::new()),
-            chars: HashMap::new(),
+
             locations: HashMap::new(),
+            chars: HashMap::new(),
         }
     }
 
-    fn add_node(&mut self) -> usize {
+    fn node(&mut self) -> usize {
         let node = self.id;
         self.id += 1;
-        self.graph.add_node(node);
+        self.graph.node(node);
         node
+    }
+
+    #[allow(unused)]
+    fn location(&self, node: usize) -> String {
+        let mut row = 1;
+        let mut col = 1;
+        for c in self.text.chars().take(*self.locations.get(&node).unwrap()) {
+            if c == '\n' {
+                row += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+        format!("{}:{}:{}", self.file, row, col)
     }
 
     // if self.graph is a tree, will work as expected
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
     fn print_tree(&self, root: usize, indent: usize) {
-        print!("{} {}", "----".repeat(indent), root);
-        if let Some(Location { src, row, col }) = self.locations.get(&root) {
-            print!("@{}:{}:{}", src, row, col);
+        print!("{}{:05}", "------- ".repeat(indent), root);
+        if let Some(location) = self.locations.get(&root) {
+            print!("\t{}", location);
         }
-        print!(":");
         if let Some(c) = self.chars.get(&root) {
-            print!("\t{}", c);
+            print!("\t{:?}", c);
         }
-
+        print!("\n");
         for child in self.graph.children(root) {
-            self.print_tree(child, indent + 1);
+            self.print_tree(*child, indent + 1);
         }
     }
 }
@@ -157,30 +159,19 @@ fn main() -> Result<(), String> {
         .ok_or("pass a .iz file as a command line argument")?;
     let text = read_to_string(file).map_err(|_| format!("could not read {}", file))?;
 
-    let mut context = Context::new();
-    assert!(context.add_node() == 0); // 0 is used as a root node
+    let mut context = Context::new(file, &text);
+    assert!(context.node() == 0); // 0 is used as a root node
 
-    let mut location = Location {
-        src: file,
-        row: 1,
-        col: 1,
-    };
-    for c in text.chars() {
-        let node = context.add_node();
-        context.graph.add_edge(0, node);
+    for (i, c) in text.chars().enumerate() {
+        let node = context.node();
+        context.graph.edge(0, node);
+        context.locations.insert(node, i);
         context.chars.insert(node, c);
-        context.locations.insert(node, location.clone());
-        if c == '\n' {
-            location.row += 1;
-            location.col = 1;
-        } else {
-            location.col += 1;
-        }
     }
 
-    let passes: &[fn(&mut Context) -> Result<(), String>] = &[
+    let passes = [
         // tokenize
-        // remove_comments,
+        remove_comments,
         // chars_to_strings,
         // remove_whitespace,
         // parse
@@ -204,5 +195,23 @@ fn main() -> Result<(), String> {
 
     context.print_tree(0, 0);
 
+    Ok(())
+}
+
+fn remove_comments(context: &mut Context) -> Result<(), String> {
+    let mut i = 0;
+    let children = context.graph.children_mut(0);
+    while i < children.len() {
+        if context.chars.get(&children[i]) == Some(&'#') {
+            let mut j = i;
+            while j < children.len() && context.chars.remove(&children[j]) != Some('\n') {
+                j += 1;
+            }
+            context.chars.insert(children[j], '\n');
+            children.drain(i..j);
+        } else {
+            i += 1;
+        }
+    }
     Ok(())
 }
