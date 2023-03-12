@@ -39,9 +39,6 @@ impl Edges {
         self.0.entry(parent).or_default()
     }
 
-    // guarantees that all nodes are present
-    // this doesn't matter for add_edge, children, or children_mut
-    // this does matter for topological sort
     fn from_fn<N, F>(nodes: N, mut has_edge: F) -> Edges
     where
         N: IntoIterator<Item = Node> + Clone,
@@ -62,7 +59,7 @@ impl Edges {
     // topological sort using Kahn's algorithm
     // either returns a sorted list of indices into nodes
     // or returns an INCOMING adjancency list of remaining edges
-    fn topological_sort(&self) -> Result<Vec<Node>, Edges> {
+    fn topological_sort<N: IntoIterator<Item = Node>>(&self, nodes: N) -> Result<Vec<Node>, Edges> {
         let mut incoming = Edges(HashMap::new());
         for (v, ws) in &self.0 {
             for w in ws {
@@ -71,7 +68,7 @@ impl Edges {
         }
 
         let mut sorted = vec![];
-        let mut no_incoming: Vec<usize> = self.0.keys().copied().collect();
+        let mut no_incoming: Vec<usize> = nodes.into_iter().collect();
         no_incoming.retain(|i| !incoming.0.contains_key(i));
 
         while let Some(v) = no_incoming.pop() {
@@ -84,7 +81,7 @@ impl Edges {
             }
         }
 
-        if sorted.len() == self.0.len() {
+        if incoming.0.values().all(|v| v.is_empty()) {
             Ok(sorted)
         } else {
             Err(incoming)
@@ -535,7 +532,7 @@ fn sort_macros(context: &mut Context) -> Result<(), E> {
         }
         depends(context, &context.macros[i].1, &context.macros[j].0)
     })
-    .topological_sort()
+    .topological_sort(0..context.macros.len())
     .map_err(|incoming| MacroDependencyCycle {
         names: context
             .macros
