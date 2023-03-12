@@ -102,6 +102,7 @@ struct Context<'a> {
     ops: HashMap<Node, Op>,
     operators: Operators<'a>,
     labels: HashMap<String, i64>,
+    macros: Vec<(String, Vec<Node>)>,
 }
 
 impl Debug for Context<'_> {
@@ -268,6 +269,7 @@ fn main() -> Result<(), E> {
             (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
         ],
         labels: HashMap::new(),
+        macros: vec![],
     };
 
     let mut loc = Location {
@@ -299,6 +301,8 @@ fn main() -> Result<(), E> {
         unroll_operators,
         unroll_brackets,
         // transform
+        collect_macros,
+        sort_macros,
         substitute_macros,
         strings_to_ops,
         // backend
@@ -428,8 +432,8 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
 
 fn group_operators(context: &mut Context) -> Result<(), E> {
     fn group_operators(context: &mut Context, node: Node) -> Result<(), E> {
-        let children = context.edges.children(node).to_vec();
-        for child in children {
+        #[allow(clippy::unnecessary_to_owned)] // github.com/rust-lang/rust-clippy/issues/8148
+        for child in context.edges.children(node).to_owned() {
             group_operators(context, child)?
         }
 
@@ -502,9 +506,7 @@ fn unroll_brackets(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn substitute_macros(context: &mut Context) -> Result<(), E> {
-    // gather macro declarations
-    let mut macros = vec![];
+fn collect_macros(context: &mut Context) -> Result<(), E> {
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"macro".to_owned()) {
             let key = context
@@ -512,15 +514,18 @@ fn substitute_macros(context: &mut Context) -> Result<(), E> {
                 .remove(&context.edges.children(node)[0])
                 .unwrap();
             let value = context.edges.children(node)[1..].to_vec();
-            macros.push((key, value));
+            context.macros.push((key, value));
             Some(vec![])
         } else {
             None
         }
     });
+    Ok(())
+}
 
-    // sort macros by dependency so that all nestings get expanded
-    let sorted = Edges::from_fn(0..macros.len(), |i, j| -> bool {
+// sort macros by dependency so that all nestings get expanded
+fn sort_macros(context: &mut Context) -> Result<(), E> {
+    let indices = Edges::from_fn(0..context.macros.len(), |i, j| -> bool {
         fn depends(context: &Context, nodes: &[Node], key: &String) -> bool {
             for node in nodes {
                 if depends(context, context.edges.children(*node), key)
@@ -531,20 +536,31 @@ fn substitute_macros(context: &mut Context) -> Result<(), E> {
             }
             false
         }
-        depends(context, &macros[i].1, &macros[j].0)
+        depends(context, &context.macros[i].1, &context.macros[j].0)
     })
     .topological_sort()
     .map_err(|incoming| MacroDependencyCycle {
-        names: macros.iter().map(|(name, _)| name.clone()).collect(),
+        names: context
+            .macros
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect(),
         incoming,
     })
     .map_err(|e| E(e, None))?;
+    let mut sorted = vec![];
+    for i in indices {
+        sorted.push(context.macros[i].clone());
+    }
+    context.macros = sorted;
+    Ok(())
+}
 
-    // replace names by values in the tree
-    for i in sorted {
-        let (key, value) = &macros[i];
+fn substitute_macros(context: &mut Context) -> Result<(), E> {
+    #[allow(clippy::unnecessary_to_owned)] // github.com/rust-lang/rust-clippy/issues/8148
+    for (key, value) in context.macros.to_owned() {
         context.replace_children_postorder(0, &mut |context, node| {
-            if context.strings.get(&node) == Some(key) {
+            if context.strings.get(&node) == Some(&key) {
                 Some(value.clone())
             } else {
                 None
