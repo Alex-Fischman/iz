@@ -1,4 +1,5 @@
 #![no_implicit_prelude]
+#![allow(clippy::unnecessary_to_owned)] // github.com/rust-lang/rust-clippy/issues/8148
 extern crate std;
 
 use std::{
@@ -192,24 +193,26 @@ enum Error {
 
     ExpectedInt,
     UnknownOpCode(String),
-    MissingOpCode,
+
     UnknownLabel(String),
     RedeclaredLabel(String),
 
     ExpectedEmptyData(String),
+    MissingOp,
+    OpHadChildren,
 }
 
 impl Debug for E {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match &self.0 {
-            Error::NoFilePassed => write!(f, "pass a .iz file as a command line argument"),
-            Error::CouldNotRead(file) => write!(f, "could not read from file {}", file),
+            NoFilePassed => write!(f, "pass a .iz file as a command line argument"),
+            CouldNotRead(file) => write!(f, "could not read from file {}", file),
 
-            Error::ExtraCloseBracket(bracket) => write!(f, "extra {}", bracket),
-            Error::MissingCloseBracket(bracket) => write!(f, "missing {}", bracket),
-            Error::MissingOperatorArgs(op) => write!(f, "missing args for {}", op),
+            ExtraCloseBracket(bracket) => write!(f, "extra {}", bracket),
+            MissingCloseBracket(bracket) => write!(f, "missing {}", bracket),
+            MissingOperatorArgs(op) => write!(f, "missing args for {}", op),
 
-            Error::MacroDependencyCycle { names, incoming } => {
+            MacroDependencyCycle { names, incoming } => {
                 writeln!(f, "macro dependency cycle detected")?;
                 for (w, vs) in &incoming.0 {
                     for v in vs {
@@ -219,19 +222,20 @@ impl Debug for E {
                 Ok(())
             }
 
-            Error::ExpectedInt => write!(f, "expected int"),
-            Error::UnknownOpCode(op) => write!(f, "unknown op code {}", op),
-            Error::MissingOpCode => write!(f, "expected string or int for op, found neither"),
-            Error::UnknownLabel(label) => write!(f, "unknown label {}", label),
-            Error::RedeclaredLabel(label) => write!(f, "label {} is declared twice", label),
+            ExpectedInt => write!(f, "expected int"),
+            UnknownOpCode(op) => write!(f, "unknown op code {}", op),
+            UnknownLabel(label) => write!(f, "unknown label {}", label),
+            RedeclaredLabel(label) => write!(f, "label {} is declared twice", label),
 
-            Error::ExpectedEmptyData(data) => {
+            ExpectedEmptyData(data) => {
                 write!(
                     f,
                     "[debug] expected context.{} to be empty but it wasn't",
                     data
                 )
             }
+            Error::MissingOp => write!(f, "node was missing op"),
+            Error::OpHadChildren => write!(f, "op node had children"),
         }?;
         if let Some(Location { row, col, src }) = &self.1 {
             write!(f, " at {}:{}:{}", src, row, col)?;
@@ -289,7 +293,7 @@ fn main() -> Result<(), E> {
     let passes = [
         // tokenize
         remove_comments,
-        group_tokens,
+        chars_to_strings,
         remove_whitespace,
         // parse
         group_brackets,
@@ -302,6 +306,7 @@ fn main() -> Result<(), E> {
         substitute_macros,
         strings_to_ops,
         // backend
+        check_nodes_are_ops,
         collect_labels,
         interpret,
     ];
@@ -330,7 +335,7 @@ fn remove_comments(context: &mut Context) -> Result<(), E> {
     Ok(())
 }
 
-fn group_tokens(context: &mut Context) -> Result<(), E> {
+fn chars_to_strings(context: &mut Context) -> Result<(), E> {
     fn is_bracket(c: char) -> bool {
         matches!(c, '(' | ')' | '{' | '}' | '[' | ']')
     }
@@ -469,7 +474,6 @@ impl Operators {
 
 fn group_operators(context: &mut Context) -> Result<(), E> {
     fn group_operators(context: &mut Context, node: Node) -> Result<(), E> {
-        #[allow(clippy::unnecessary_to_owned)] // github.com/rust-lang/rust-clippy/issues/8148
         for child in context.edges.children(node).to_owned() {
             group_operators(context, child)?
         }
@@ -582,7 +586,6 @@ fn sort_macros(context: &mut Context) -> Result<(), E> {
 }
 
 fn substitute_macros(context: &mut Context) -> Result<(), E> {
-    #[allow(clippy::unnecessary_to_owned)] // github.com/rust-lang/rust-clippy/issues/8148
     for (key, value) in context.macros.to_owned() {
         context.replace_children_postorder(0, &mut |context, node| {
             if context.strings.get(&node) == Some(&key) {
@@ -609,62 +612,49 @@ enum Op {
 }
 
 fn strings_to_ops(context: &mut Context) -> Result<(), E> {
-    for node in context.edges.children(0) {
-        let s = context
-            .strings
-            .get(node)
-            .ok_or(E(MissingOpCode, Some(context.locs[node].cloned())))?;
-        context.ops.insert(
-            *node,
-            match s.as_str() {
-                "~" => {
-                    let child = context.edges.children(*node)[0];
-                    Op::Move(
-                        context
-                            .strings
-                            .get(&child)
-                            .and_then(|s| s.parse::<i64>().ok())
-                            .ok_or(E(ExpectedInt, Some(context.locs[&child].cloned())))?,
-                    )
-                }
-                "$" => {
-                    let child = context.edges.children(*node)[0];
-                    Op::Copy(
-                        context
-                            .strings
-                            .get(&child)
-                            .and_then(|s| s.parse::<i64>().ok())
-                            .ok_or(E(ExpectedInt, Some(context.locs[&child].cloned())))?,
-                    )
-                }
-                "add" => Op::Add,
-                "neg" => Op::Neg,
-                "ltz" => Op::Ltz,
-                "?" => Op::Jumpz(
-                    context
-                        .strings
-                        .get(&context.edges.children(*node)[0])
-                        .unwrap()
-                        .clone(),
-                ),
-                ":" => Op::Label(
-                    context
-                        .strings
-                        .get(&context.edges.children(*node)[0])
-                        .unwrap()
-                        .clone(),
-                ),
-                _ => match s.parse::<i64>() {
-                    Ok(i) => Op::Push(i),
-                    Err(_) => {
-                        return Err(E(
-                            UnknownOpCode(s.clone()),
-                            Some(context.locs[node].cloned()),
-                        ))
+    for node in context.edges.children(0).to_owned() {
+        if let Some(s) = context.strings.remove(&node) {
+            let mut child = || context.edges.children_mut(node).remove(0);
+            context.ops.insert(
+                node,
+                match s.as_str() {
+                    "~" => {
+                        let child = child();
+                        Op::Move(
+                            context
+                                .strings
+                                .remove(&child)
+                                .and_then(|s| s.parse::<i64>().ok())
+                                .ok_or(E(ExpectedInt, Some(context.locs[&child].cloned())))?,
+                        )
                     }
+                    "$" => {
+                        let child = child();
+                        Op::Copy(
+                            context
+                                .strings
+                                .remove(&child)
+                                .and_then(|s| s.parse::<i64>().ok())
+                                .ok_or(E(ExpectedInt, Some(context.locs[&child].cloned())))?,
+                        )
+                    }
+                    "add" => Op::Add,
+                    "neg" => Op::Neg,
+                    "ltz" => Op::Ltz,
+                    "?" => Op::Jumpz(context.strings.remove(&child()).unwrap().clone()),
+                    ":" => Op::Label(context.strings.remove(&child()).unwrap().clone()),
+                    _ => match s.parse::<i64>() {
+                        Ok(i) => Op::Push(i),
+                        Err(_) => {
+                            return Err(E(
+                                UnknownOpCode(s.clone()),
+                                Some(context.locs[&node].cloned()),
+                            ))
+                        }
+                    },
                 },
-            },
-        );
+            );
+        }
     }
     Ok(())
 }
@@ -677,6 +667,19 @@ fn collect_labels(context: &mut Context) -> Result<(), E> {
             if old.is_some() {
                 return Err(E(RedeclaredLabel(label.clone()), None));
             }
+        }
+    }
+    Ok(())
+}
+
+fn check_nodes_are_ops(context: &mut Context) -> Result<(), E> {
+    for node in context.edges.children(0) {
+        context
+            .ops
+            .get(node)
+            .ok_or(E(MissingOp, Some(context.locs[node].cloned())))?;
+        if !context.edges.children(*node).is_empty() {
+            return Err(E(OpHadChildren, Some(context.locs[node].cloned())));
         }
     }
     Ok(())
