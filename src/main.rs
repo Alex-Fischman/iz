@@ -5,7 +5,6 @@ use std::{
     borrow::ToOwned,
     clone::Clone,
     collections::HashMap,
-    convert::From,
     env::args,
     fmt::{Debug, Formatter, Result as FmtResult},
     fs::read_to_string,
@@ -39,7 +38,7 @@ impl Edges {
         self.0.entry(parent).or_default()
     }
 
-    fn from_fn<N, F>(nodes: N, mut has_edge: F) -> Edges
+    fn from_relation<N, F>(nodes: N, mut has_edge: F) -> Edges
     where
         N: IntoIterator<Item = Node> + Clone,
         F: FnMut(Node, Node) -> bool,
@@ -56,17 +55,21 @@ impl Edges {
         out
     }
 
-    // topological sort using Kahn's algorithm
-    // either returns a sorted list of indices into nodes
-    // or returns an INCOMING adjancency list of remaining edges
-    fn topological_sort<N: IntoIterator<Item = Node>>(&self, nodes: N) -> Result<Vec<Node>, Edges> {
+    fn incoming(&self) -> Edges {
         let mut incoming = Edges(HashMap::new());
         for (v, ws) in &self.0 {
             for w in ws {
                 incoming.add_edge(*w, *v);
             }
         }
+        incoming
+    }
 
+    // topological sort using Kahn's algorithm
+    // either returns a sorted list of indices into nodes
+    // or returns an INCOMING adjancency list of remaining edges
+    fn topological_sort<N: IntoIterator<Item = Node>>(&self, nodes: N) -> Result<Vec<Node>, Edges> {
+        let mut incoming = self.incoming();
         let mut sorted = vec![];
         let mut no_incoming: Vec<usize> = nodes.into_iter().collect();
         no_incoming.retain(|i| !incoming.0.contains_key(i));
@@ -97,7 +100,7 @@ struct Context<'a> {
     chars: HashMap<Node, char>,
     strings: HashMap<Node, String>,
     ops: HashMap<Node, Op>,
-    operators: Operators<'a>,
+    precedences: Vec<Operators>,
     labels: HashMap<String, i64>,
     macros: Vec<(String, Vec<Node>)>,
 }
@@ -154,11 +157,6 @@ impl Context<'_> {
         Ok(())
     }
 }
-
-//                   func     left   right  unroll
-type Operator<'a> = (&'a str, usize, usize, bool);
-//                                                        right associativity
-type Operators<'a> = Vec<(HashMap<&'a str, Operator<'a>>, bool)>;
 
 #[derive(Clone, Debug)]
 struct Location<Src: ToString> {
@@ -254,17 +252,17 @@ fn main() -> Result<(), E> {
         chars: HashMap::new(),
         strings: HashMap::new(),
         ops: HashMap::new(),
-        operators: vec![
-            (HashMap::from([(":", (":", 1, 0, false))]), false),
-            (HashMap::from([("?", ("?", 1, 0, false))]), false),
-            (HashMap::from([("~", ("~", 0, 1, false))]), true),
-            (HashMap::from([("$", ("$", 0, 1, false))]), true),
-            (
-                HashMap::from([("-", ("neg", 0, 1, true)), ("!", ("not", 0, 1, true))]),
+        precedences: vec![
+            Operators::new(&[(":", (":", 1, 0, false))], false),
+            Operators::new(&[("?", ("?", 1, 0, false))], false),
+            Operators::new(&[("~", ("~", 0, 1, false))], true),
+            Operators::new(&[("$", ("$", 0, 1, false))], true),
+            Operators::new(
+                &[("-", ("neg", 0, 1, true)), ("!", ("not", 0, 1, true))],
                 true,
             ),
-            (HashMap::from([("+", ("add", 1, 1, true))]), false),
-            (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
+            Operators::new(&[("+", ("add", 1, 1, true))], false),
+            Operators::new(&[("macro", ("macro", 0, 2, false))], true),
         ],
         labels: HashMap::new(),
         macros: vec![],
@@ -428,6 +426,47 @@ fn group_brackets(context: &mut Context) -> Result<(), E> {
     group_brackets(context, &mut 0, None)
 }
 
+fn unroll_brackets(context: &mut Context) -> Result<(), E> {
+    context.replace_children_postorder(0, &mut |context, node| {
+        if context.strings.get(&node) == Some(&"(".to_owned()) {
+            Ok(Some(context.edges.children_mut(node).drain(..).collect()))
+        } else {
+            Ok(None)
+        }
+    })
+}
+
+struct Operator {
+    func: String,
+    left: usize,
+    right: usize,
+    unroll: bool,
+}
+
+struct Operators {
+    data: HashMap<String, Operator>,
+    right_assoc: bool,
+}
+
+impl Operators {
+    #[allow(clippy::type_complexity)] // this is just for shorthand to convert into the real struct
+    fn new(ops: &[(&str, (&str, usize, usize, bool))], right_assoc: bool) -> Operators {
+        let mut data = HashMap::new();
+        for (name, op) in ops {
+            data.insert(
+                (*name).to_owned(),
+                Operator {
+                    func: op.0.to_owned(),
+                    left: op.1.to_owned(),
+                    right: op.2,
+                    unroll: op.3,
+                },
+            );
+        }
+        Operators { data, right_assoc }
+    }
+}
+
 fn group_operators(context: &mut Context) -> Result<(), E> {
     fn group_operators(context: &mut Context, node: Node) -> Result<(), E> {
         #[allow(clippy::unnecessary_to_owned)] // github.com/rust-lang/rust-clippy/issues/8148
@@ -435,16 +474,16 @@ fn group_operators(context: &mut Context) -> Result<(), E> {
             group_operators(context, child)?
         }
 
-        for (ops, right_assoc) in &context.operators {
-            let mut i = if *right_assoc {
+        for operators in &context.precedences {
+            let mut i = if operators.right_assoc {
                 context.edges.children(node).len().wrapping_sub(1)
             } else {
                 0
             };
             while let Some(child) = context.edges.children(node).get(i).copied() {
                 let s = context.strings.get(&child).unwrap().clone();
-                if let Some((_func, left, right, _unroll)) = ops.get(&*s) {
-                    if i < *left || i + right >= context.edges.children(node).len() {
+                if let Some(op) = operators.data.get(&*s) {
+                    if i < op.left || i + op.right >= context.edges.children(node).len() {
                         return Err(E(
                             MissingOperatorArgs(s),
                             Some(context.locs[&child].cloned()),
@@ -453,13 +492,13 @@ fn group_operators(context: &mut Context) -> Result<(), E> {
                     let mut cs: Vec<Node> = context
                         .edges
                         .children_mut(node)
-                        .drain(i + 1..=i + right)
+                        .drain(i + 1..=i + op.right)
                         .collect();
-                    cs.extend(context.edges.children_mut(node).drain(i - left..i));
-                    i -= left;
+                    cs.extend(context.edges.children_mut(node).drain(i - op.left..i));
+                    i -= op.left;
                     *context.edges.children_mut(child) = cs;
                 }
-                i = if *right_assoc {
+                i = if operators.right_assoc {
                     i.wrapping_sub(1)
                 } else {
                     i + 1
@@ -474,27 +513,19 @@ fn group_operators(context: &mut Context) -> Result<(), E> {
 fn unroll_operators(context: &mut Context) -> Result<(), E> {
     context.replace_children_postorder(0, &mut |context, node| {
         let s = context.strings.get(&node).unwrap();
-        if let Some((func, _left, _right, unroll)) =
-            context.operators.iter().find_map(|(ops, _)| ops.get(&**s))
+        if let Some(op) = context
+            .precedences
+            .iter()
+            .find_map(|ops| ops.data.get(&**s))
         {
-            context.strings.insert(node, (*func).to_owned());
-            if *unroll {
+            context.strings.insert(node, op.func.to_owned());
+            if op.unroll {
                 let mut cs: Vec<Node> = context.edges.children_mut(node).drain(..).collect();
                 cs.push(node);
                 Ok(Some(cs))
             } else {
                 Ok(None)
             }
-        } else {
-            Ok(None)
-        }
-    })
-}
-
-fn unroll_brackets(context: &mut Context) -> Result<(), E> {
-    context.replace_children_postorder(0, &mut |context, node| {
-        if context.strings.get(&node) == Some(&"(".to_owned()) {
-            Ok(Some(context.edges.children_mut(node).drain(..).collect()))
         } else {
             Ok(None)
         }
@@ -519,7 +550,7 @@ fn collect_macros(context: &mut Context) -> Result<(), E> {
 
 // sort macros by dependency so that all nestings get expanded
 fn sort_macros(context: &mut Context) -> Result<(), E> {
-    let indices = Edges::from_fn(0..context.macros.len(), |i, j| -> bool {
+    let indices = Edges::from_relation(0..context.macros.len(), |i, j| -> bool {
         fn depends(context: &Context, nodes: &[Node], key: &String) -> bool {
             for node in nodes {
                 if depends(context, context.edges.children(*node), key)
