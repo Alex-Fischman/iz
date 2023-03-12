@@ -18,7 +18,7 @@ use std::{
     {matches, print, println, vec, write, writeln},
 };
 
-// usually a key in a map that stores some other data
+// usually a key in a map or an index in a vec that stores some other data
 type Node = usize;
 // adjacency list, usually outgoing unless otherwise specified
 // methods are all named assuming it's outgoing
@@ -28,6 +28,10 @@ struct Edges(HashMap<Node, Vec<Node>>);
 impl Edges {
     fn add_edge(&mut self, a: Node, b: Node) {
         self.0.entry(a).or_default().push(b)
+    }
+
+    fn has_edge(&self, a: Node, b: Node) -> bool {
+        matches!(self.0.get(&a), Some(bs) if bs.contains(&b))
     }
 
     const EMPTY: &[Node] = &[];
@@ -46,34 +50,24 @@ impl Edges {
     {
         let mut out = Edges(HashMap::new());
         for a in nodes.clone() {
-            out.0.entry(a).or_default();
+            let ws = out.0.entry(a).or_default();
             for b in nodes.clone() {
                 if has_edge(a, b) {
-                    out.add_edge(a, b)
+                    ws.push(b);
                 }
             }
         }
         out
     }
 
-    fn incoming(&self) -> Edges {
-        let mut incoming = Edges(HashMap::new());
-        for (v, ws) in &self.0 {
-            for w in ws {
-                incoming.add_edge(*w, *v);
-            }
-        }
-        incoming
-    }
-
     // topological sort using Kahn's algorithm
     // either returns a sorted list of indices into nodes
     // or returns an INCOMING adjancency list of remaining edges
-    fn topological_sort<N: IntoIterator<Item = Node>>(&self, nodes: N) -> Result<Vec<Node>, Edges> {
-        let mut incoming = self.incoming();
+    fn topological_sort(&self) -> Result<Vec<Node>, Edges> {
+        let mut incoming = Edges::from_relation(self.0.keys().copied(), |a, b| self.has_edge(b, a));
         let mut sorted = vec![];
-        let mut no_incoming: Vec<usize> = nodes.into_iter().collect();
-        no_incoming.retain(|i| !incoming.0.contains_key(i));
+        let mut no_incoming: Vec<usize> = self.0.keys().copied().collect();
+        no_incoming.retain(|i| incoming.children(*i).is_empty());
 
         while let Some(v) = no_incoming.pop() {
             sorted.push(v);
@@ -554,7 +548,7 @@ fn collect_macros(context: &mut Context) -> Result<(), E> {
 
 // sort macros by dependency so that all nestings get expanded
 fn sort_macros(context: &mut Context) -> Result<(), E> {
-    let indices = Edges::from_relation(0..context.macros.len(), |i, j| -> bool {
+    let edges = Edges::from_relation(0..context.macros.len(), |i, j| -> bool {
         fn depends(context: &Context, nodes: &[Node], key: &String) -> bool {
             for node in nodes {
                 if depends(context, context.edges.children(*node), key)
@@ -566,17 +560,18 @@ fn sort_macros(context: &mut Context) -> Result<(), E> {
             false
         }
         depends(context, &context.macros[i].1, &context.macros[j].0)
-    })
-    .topological_sort(0..context.macros.len())
-    .map_err(|incoming| MacroDependencyCycle {
-        names: context
-            .macros
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect(),
-        incoming,
-    })
-    .map_err(|e| E(e, None))?;
+    });
+    let indices = edges
+        .topological_sort()
+        .map_err(|incoming| MacroDependencyCycle {
+            names: context
+                .macros
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect(),
+            incoming,
+        })
+        .map_err(|e| E(e, None))?;
     let mut sorted = vec![];
     for i in indices {
         sorted.push(context.macros[i].clone());
