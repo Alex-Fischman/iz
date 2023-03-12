@@ -3,15 +3,14 @@
 extern crate std;
 
 use std::{
-    collections::HashMap,
-    env::args,
     clone::Clone,
     cmp::Eq,
+    collections::HashMap,
+    env::args,
     fs::read_to_string,
-    iter::Iterator,
-    ops::{FnOnce},
-    option::{Option, Option::Some, Option::None},
     hash::Hash,
+    iter::Iterator,
+    option::{Option, Option::None, Option::Some},
     result::{Result, Result::Ok},
     string::String,
     vec::Vec,
@@ -35,17 +34,15 @@ impl<K: Key, V> IndexMap<K, V> {
     }
 
     fn get(&self, key: &K) -> Option<&V> {
-        match self.indices.get(key) {
-            Some(i) => Some(&self.entries[*i].1),
-            None => None,
-        }
+        self.indices.get(key).map(|i| &self.entries[*i].1)
     }
 
     fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        match self.indices.get(key) {
-            Some(i) => Some(&mut self.entries[*i].1),
-            None => None,
-        }
+        self.indices.get(key).map(|i| &mut self.entries[*i].1)
+    }
+
+    fn remove(&mut self, key: &K) -> Option<V> {
+        self.indices.remove(key).map(|i| self.entries.remove(i).1)
     }
 
     fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -59,27 +56,14 @@ impl<K: Key, V> IndexMap<K, V> {
         }
     }
 
-    fn remove(&mut self, key: &K) -> Option<V> {
-        match self.indices.remove(key) {
-            Some(i) => Some(self.entries.remove(i).1),
-            None => None,
+    fn or_insert(&mut self, key: K, value: V) -> &mut V {
+        match self.indices.get(&key) {
+            Some(i) => &mut self.entries[*i].1,
+            None => {
+                self.insert(key.clone(), value);
+                self.get_mut(&key).unwrap()
+            }
         }
-    }
-
-    fn entry(&mut self, key: K) -> Entry<K, V> {
-        Entry(self, key)
-    }
-}
-
-struct Entry<'a, K: 'a + Key, V: 'a>(&'a mut IndexMap<K, V>, K);
-
-impl<'a, K: 'a + Key, V: 'a> Entry<'a, K, V> {
-    fn and_modify<F: FnOnce(&mut V)>(self, f: F) -> Entry<'a, K, V> {
-        match self.0.get_mut(&self.1) {
-            Some(value) => f(value),
-            None => {},
-        }
-        self
     }
 }
 
@@ -91,8 +75,6 @@ fn main() -> Result<(), String> {
         .get(1)
         .ok_or("pass a .iz file as a command line argument")?;
     let text = read_to_string(file).map_err(|_| format!("could not read {}", file))?;
-
-
 
     print!("{}\n", text);
 
