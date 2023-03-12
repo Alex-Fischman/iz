@@ -101,6 +101,7 @@ struct Context<'a> {
     strings: HashMap<Node, String>,
     ops: HashMap<Node, Op>,
     operators: Operators<'a>,
+    labels: HashMap<String, i64>,
 }
 
 impl Debug for Context<'_> {
@@ -243,7 +244,6 @@ impl Debug for E {
 }
 
 fn main() -> Result<(), E> {
-    // frontend
     let args: Vec<String> = args().collect();
     let file = args.get(1).ok_or(E(NoFilePassed, None))?;
     let text = read_to_string(file).map_err(|_| E(CouldNotRead(file.clone()), None))?;
@@ -267,6 +267,7 @@ fn main() -> Result<(), E> {
             (HashMap::from([("+", ("add", 1, 1, true))]), false),
             (HashMap::from([("macro", ("macro", 0, 2, false))]), true),
         ],
+        labels: HashMap::new(),
     };
 
     let mut loc = Location {
@@ -287,7 +288,6 @@ fn main() -> Result<(), E> {
         }
     }
 
-    // compiler
     let passes = [
         // tokenize
         remove_comments,
@@ -301,70 +301,12 @@ fn main() -> Result<(), E> {
         // transform
         substitute_macros,
         strings_to_ops,
+        // backend
+        collect_labels,
+        interpret,
     ];
     for pass in passes {
         pass(&mut context)?
-    }
-
-    // backend
-    let code: Vec<Op> = context
-        .edges
-        .children(0)
-        .iter()
-        .map(|node| context.ops[node].clone())
-        .collect();
-
-    let mut labels = HashMap::new();
-    for (pc, op) in code.iter().enumerate() {
-        if let Op::Label(label) = op {
-            let old = labels.insert(label.clone(), pc as i64);
-            if old.is_some() {
-                return Err(E(RedeclaredLabel(label.clone()), None));
-            }
-        }
-    }
-
-    let mut pc = 0;
-    let mut data = Memory(vec![]);
-    let mut sp = -1;
-
-    while (pc as usize) < code.len() {
-        print!("{:?}\t", code[pc as usize]);
-
-        match &code[pc as usize] {
-            Op::Push(i) => {
-                data[sp + 1] = *i;
-                sp += 1;
-            }
-            Op::Move(i) => sp -= i,
-            Op::Copy(i) => {
-                data[sp + 1] = data[sp - i];
-                sp += 1;
-            }
-            Op::Add => {
-                data[sp - 1] += data[sp];
-                sp -= 1;
-            }
-            Op::Neg => data[sp] = -data[sp],
-            Op::Ltz => data[sp] = (data[sp] < 0) as i64,
-            Op::Jumpz(label) if !labels.contains_key(label) => {
-                return Err(E(UnknownLabel(label.clone()), None))
-            }
-            Op::Jumpz(label) => {
-                if data[sp] == 0 {
-                    pc = labels[label];
-                }
-                sp -= 1;
-            }
-            Op::Label(_) => {}
-        }
-
-        match sp {
-            -1 => println!(),
-            sp => println!("{:?}", &data.0[0..=sp as usize]),
-        }
-
-        pc += 1;
     }
 
     Ok(())
@@ -626,26 +568,6 @@ enum Op {
     Label(String),
 }
 
-// for the bytecode interpreter
-struct Memory(Vec<i64>);
-
-impl Index<i64> for Memory {
-    type Output = i64;
-    fn index(&self, i: i64) -> &i64 {
-        &self.0[i as usize]
-    }
-}
-
-impl IndexMut<i64> for Memory {
-    fn index_mut(&mut self, i: i64) -> &mut i64 {
-        let i = i as usize;
-        if self.0.len() <= i {
-            self.0.resize(i + 1, 0);
-        }
-        &mut self.0[i]
-    }
-}
-
 fn strings_to_ops(context: &mut Context) -> Result<(), E> {
     for node in context.edges.children(0) {
         let s = context
@@ -704,5 +626,89 @@ fn strings_to_ops(context: &mut Context) -> Result<(), E> {
             },
         );
     }
+    Ok(())
+}
+
+fn collect_labels(context: &mut Context) -> Result<(), E> {
+    for (pc, node) in context.edges.children(0).iter().enumerate() {
+        let op = context.ops.get(node).unwrap();
+        if let Op::Label(label) = op {
+            let old = context.labels.insert(label.clone(), pc as i64);
+            if old.is_some() {
+                return Err(E(RedeclaredLabel(label.clone()), None));
+            }
+        }
+    }
+    Ok(())
+}
+
+// for the bytecode interpreter
+struct Memory(Vec<i64>);
+
+impl Index<i64> for Memory {
+    type Output = i64;
+    fn index(&self, i: i64) -> &i64 {
+        &self.0[i as usize]
+    }
+}
+
+impl IndexMut<i64> for Memory {
+    fn index_mut(&mut self, i: i64) -> &mut i64 {
+        let i = i as usize;
+        if self.0.len() <= i {
+            self.0.resize(i + 1, 0);
+        }
+        &mut self.0[i]
+    }
+}
+
+fn interpret(context: &mut Context) -> Result<(), E> {
+    let mut pc = 0;
+    let mut data = Memory(vec![]);
+    let mut sp = -1;
+
+    while (pc as usize) < context.edges.children(0).len() {
+        let op = context
+            .ops
+            .get(&context.edges.children(0)[pc as usize])
+            .unwrap();
+
+        print!("{:?}\t", op);
+        match op {
+            Op::Push(i) => {
+                data[sp + 1] = *i;
+                sp += 1;
+            }
+            Op::Move(i) => sp -= i,
+            Op::Copy(i) => {
+                data[sp + 1] = data[sp - i];
+                sp += 1;
+            }
+            Op::Add => {
+                data[sp - 1] += data[sp];
+                sp -= 1;
+            }
+            Op::Neg => data[sp] = -data[sp],
+            Op::Ltz => data[sp] = (data[sp] < 0) as i64,
+            Op::Jumpz(label) if !context.labels.contains_key(label) => {
+                return Err(E(UnknownLabel(label.clone()), None))
+            }
+            Op::Jumpz(label) => {
+                if data[sp] == 0 {
+                    pc = context.labels[label];
+                }
+                sp -= 1;
+            }
+            Op::Label(_) => {}
+        }
+
+        match sp {
+            -1 => println!(),
+            sp => println!("{:?}", &data.0[0..=sp as usize]),
+        }
+
+        pc += 1;
+    }
+
     Ok(())
 }
