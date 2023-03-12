@@ -138,15 +138,15 @@ impl Context<'_> {
         self.id - 1
     }
 
-    fn replace_children_postorder<F>(&mut self, node: Node, f: &mut F)
+    fn replace_children_postorder<F>(&mut self, node: Node, f: &mut F) -> Result<(), E>
     where
-        F: FnMut(&mut Context, Node) -> Option<Vec<Node>>,
+        F: FnMut(&mut Context, Node) -> Result<Option<Vec<Node>>, E>,
     {
         let mut i = 0;
         while i < self.edges.children(node).len() {
             let child = self.edges.children(node)[i];
-            self.replace_children_postorder(child, f);
-            if let Some(nodes) = f(self, child) {
+            self.replace_children_postorder(child, f)?;
+            if let Some(nodes) = f(self, child)? {
                 let l = nodes.len();
                 self.edges.children_mut(node).splice(i..=i, nodes);
                 i += l;
@@ -154,6 +154,7 @@ impl Context<'_> {
                 i += 1;
             }
         }
+        Ok(())
     }
 }
 
@@ -483,27 +484,24 @@ fn unroll_operators(context: &mut Context) -> Result<(), E> {
             if *unroll {
                 let mut cs: Vec<Node> = context.edges.children_mut(node).drain(..).collect();
                 cs.push(node);
-                Some(cs)
+                Ok(Some(cs))
             } else {
-                None
+                Ok(None)
             }
         } else {
-            None
+            Ok(None)
         }
-    });
-    Ok(())
+    })
 }
 
 fn unroll_brackets(context: &mut Context) -> Result<(), E> {
     context.replace_children_postorder(0, &mut |context, node| {
         if context.strings.get(&node) == Some(&"(".to_owned()) {
-            Some(context.edges.children_mut(node).drain(..).collect())
+            Ok(Some(context.edges.children_mut(node).drain(..).collect()))
         } else {
-            None
+            Ok(None)
         }
-    });
-
-    Ok(())
+    })
 }
 
 fn collect_macros(context: &mut Context) -> Result<(), E> {
@@ -515,12 +513,11 @@ fn collect_macros(context: &mut Context) -> Result<(), E> {
                 .unwrap();
             let value = context.edges.children(node)[1..].to_vec();
             context.macros.push((key, value));
-            Some(vec![])
+            Ok(Some(vec![]))
         } else {
-            None
+            Ok(None)
         }
-    });
-    Ok(())
+    })
 }
 
 // sort macros by dependency so that all nestings get expanded
@@ -561,13 +558,12 @@ fn substitute_macros(context: &mut Context) -> Result<(), E> {
     for (key, value) in context.macros.to_owned() {
         context.replace_children_postorder(0, &mut |context, node| {
             if context.strings.get(&node) == Some(&key) {
-                Some(value.clone())
+                Ok(Some(value.clone()))
             } else {
-                None
+                Ok(None)
             }
-        });
+        })?;
     }
-
     Ok(())
 }
 
