@@ -11,11 +11,16 @@ use std::{
     hash::Hash,
     iter::Iterator,
     option::{Option, Option::None, Option::Some},
-    result::{Result, Result::Ok},
     string::String,
     vec::Vec,
-    {format, print},
+    {eprintln, format, print},
 };
+
+macro_rules! panic {
+    () => {{ std::process::exit(-1); }};
+    ($fmt:literal) => {{ eprintln!($fmt); std::process::exit(-1); }};
+    ($fmt:literal, $($arg:tt)*) => {{ eprintln!($fmt, $($arg)*); std::process::exit(-1); }};
+}
 
 trait Key: Clone + Eq + Hash {}
 impl<T: Clone + Eq + Hash> Key for T {}
@@ -87,7 +92,6 @@ impl<T: Key> Graph<T> {
 }
 
 struct Context<'a> {
-    #[allow(unused)]
     file: &'a str,
     text: &'a str,
 
@@ -119,7 +123,6 @@ impl<'a> Context<'a> {
         node
     }
 
-    #[allow(unused)]
     fn location(&self, node: usize) -> String {
         let mut row = 1;
         let mut col = 1;
@@ -131,7 +134,7 @@ impl<'a> Context<'a> {
                 col += 1;
             }
         }
-        format!("{}:{}:{}", self.file, row, col)
+        format!(" at {}:{}:{}", self.file, row, col)
     }
 
     // if self.graph is a tree, will work as expected
@@ -152,12 +155,11 @@ impl<'a> Context<'a> {
     }
 }
 
-fn main() -> Result<(), String> {
+fn main() {
     let args: Vec<String> = args().collect();
-    let file = args
-        .get(1)
-        .ok_or("pass a .iz file as a command line argument")?;
-    let text = read_to_string(file).map_err(|_| format!("could not read {}", file))?;
+    let file = args.get(1);
+    let file = file.unwrap_or_else(|| panic!("expected command line argument"));
+    let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
 
     let mut context = Context::new(file, &text);
     assert!(context.node() == 0); // 0 is used as a root node
@@ -190,28 +192,29 @@ fn main() -> Result<(), String> {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut context)?
+        pass(&mut context)
     }
 
     context.print_tree(0, 0);
-
-    Ok(())
 }
 
-fn remove_comments(context: &mut Context) -> Result<(), String> {
+fn remove_comments(context: &mut Context) {
     let mut i = 0;
-    let children = context.graph.children_mut(0);
-    while i < children.len() {
-        if context.chars.get(&children[i]) == Some(&'#') {
+    while i < context.graph.children(0).len() {
+        let child = context.graph.children(0)[i];
+        let c = context.chars.get(&child);
+        let c = c.unwrap_or_else(|| panic!("missing character at {}", context.location(child)));
+        if *c == '#' {
             let mut j = i;
-            while j < children.len() && context.chars.remove(&children[j]) != Some('\n') {
+            while j < context.graph.children(0).len()
+                && context.chars.remove(&context.graph.children(0)[j]) != Some('\n')
+            {
                 j += 1;
             }
-            context.chars.insert(children[j], '\n');
-            children.drain(i..j);
+            context.chars.insert(context.graph.children(0)[j], '\n');
+            context.graph.children_mut(0).drain(i..j);
         } else {
             i += 1;
         }
     }
-    Ok(())
 }
