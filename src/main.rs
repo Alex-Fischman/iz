@@ -6,7 +6,6 @@ use std::{
     clone::Clone,
     cmp::Eq,
     collections::HashMap,
-    default::Default,
     env::args,
     fs::read_to_string,
     hash::Hash,
@@ -34,6 +33,14 @@ struct IndexMap<K: Key, V> {
 }
 
 impl<K: Key, V> IndexMap<K, V> {
+    fn new() -> IndexMap<K, V> {
+        IndexMap {
+            idxs: HashMap::new(),
+            keys: Vec::new(),
+            vals: Vec::new(),
+        }
+    }
+
     fn get(&self, key: &K) -> Option<&V> {
         self.idxs.get(key).map(|i| &self.vals[*i])
     }
@@ -55,38 +62,15 @@ impl<K: Key, V> IndexMap<K, V> {
     }
 }
 
-impl<K: Key, V: Default> IndexMap<K, V> {
-    fn or_default(&mut self, key: K) -> &mut V {
-        match self.idxs.get(&key) {
-            Some(i) => &mut self.vals[*i],
-            None => {
-                self.insert(key, V::default());
-                self.get_mut(&key).unwrap()
-            }
-        }
-    }
-}
-
-// we can't use #[derive(Default)] because https://github.com/rust-lang/rust/issues/26925
-impl<K: Key, V> Default for IndexMap<K, V> {
-    fn default() -> IndexMap<K, V> {
-        IndexMap {
-            idxs: HashMap::default(),
-            keys: Vec::default(),
-            vals: Vec::default(),
-        }
-    }
-}
-
 struct Graph<T: Key>(IndexMap<T, IndexMap<T, ()>>);
 
 impl<T: Key> Graph<T> {
     fn node(&mut self, node: T) -> Option<IndexMap<T, ()>> {
-        self.0.insert(node, IndexMap::default())
+        self.0.insert(node, IndexMap::new())
     }
 
     fn edge(&mut self, parent: T, child: T) {
-        self.0.or_default(parent).insert(child, ());
+        self.0.get_mut(&parent).unwrap().insert(child, ());
     }
 
     fn children(&self, parent: T) -> &[T] {
@@ -177,8 +161,8 @@ fn main() {
 
     let mut context = Context {
         id: Node(0),
-        graph: Graph(IndexMap::default()),
-        tokens: HashMap::default(),
+        graph: Graph(IndexMap::new()),
+        tokens: HashMap::new(),
     };
     let root = context.node();
 
