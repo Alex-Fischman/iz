@@ -32,13 +32,13 @@ struct Node(usize);
 
 // package these to make Token as small as possible
 #[derive(PartialEq)]
-struct Source<'a> {
-    name: &'a str,
-    text: &'a str,
+struct Source {
+    name: String,
+    text: String,
 }
 
 struct Token<'a> {
-    source: &'a Source<'a>,
+    source: &'a Source,
     lo: usize,
     hi: usize,
 }
@@ -100,8 +100,8 @@ fn main() {
     let file = file.unwrap_or_else(|| panic!("expected command line argument\n"));
     let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}\n", file));
     let source = &Source {
-        name: file,
-        text: &text, // TODO: don't read text to string in the first place
+        name: file.clone(),
+        text,
     };
 
     let mut context = Context {
@@ -111,9 +111,9 @@ fn main() {
     };
     let root = context.node();
 
-    let is = text.char_indices().map(|(i, _)| i);
-    let js = text.char_indices().map(|(j, _)| j);
-    for (i, j) in is.zip(js.skip(1).chain([text.len()])) {
+    let is = source.text.char_indices().map(|(i, _)| i);
+    let js = source.text.char_indices().map(|(j, _)| j);
+    for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
         let node = context.node();
         context.graph.edge(root, node, ());
         context.tokens.insert(
