@@ -62,22 +62,25 @@ impl<K: Key, V> IndexMap<K, V> {
     }
 }
 
-struct Graph<T: Key>(IndexMap<T, IndexMap<T, ()>>);
+struct Graph<N: Key, E>(IndexMap<N, IndexMap<N, E>>);
 
-impl<T: Key> Graph<T> {
-    fn node(&mut self, node: T) -> Option<IndexMap<T, ()>> {
+impl<N: Key, E> Graph<N, E> {
+    fn node(&mut self, node: N) -> Option<IndexMap<N, E>> {
         self.0.insert(node, IndexMap::new())
     }
 
-    fn edge(&mut self, parent: T, child: T) {
-        self.0.get_mut(&parent).unwrap().insert(child, ());
+    fn edge(&mut self, parent: N, child: N, edge: E) {
+        self.0
+            .get_mut(&parent)
+            .expect("could not add edge off of missing node")
+            .insert(child, edge);
     }
 
-    fn children(&self, parent: T) -> &[T] {
+    fn children(&self, parent: N) -> &[N] {
         &self.0.get(&parent).unwrap().keys
     }
 
-    fn children_mut(&mut self, parent: T) -> &mut Vec<T> {
+    fn children_mut(&mut self, parent: N) -> &mut Vec<N> {
         &mut self.0.get_mut(&parent).unwrap().keys
     }
 }
@@ -122,7 +125,7 @@ impl Token<'_> {
 
 struct Context<'a> {
     id: Node,
-    graph: Graph<Node>,
+    graph: Graph<Node, ()>,
     tokens: HashMap<Node, Token<'a>>,
 }
 
@@ -170,7 +173,7 @@ fn main() {
     let js = text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([text.len()])) {
         let node = context.node();
-        context.graph.edge(root, node);
+        context.graph.edge(root, node, ());
         context.tokens.insert(
             node,
             Token {
