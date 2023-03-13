@@ -9,8 +9,9 @@ use std::{
     env::args,
     fs::read_to_string,
     hash::Hash,
-    iter::Iterator,
+    iter::{IntoIterator, Iterator},
     marker::Copy,
+    ops::{Index, RangeBounds},
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
@@ -23,8 +24,8 @@ macro_rules! panic {
     ($fmt:literal, $($arg:tt)*) => {{ eprint!($fmt, $($arg)*); std::process::exit(-1); }};
 }
 
-trait Key: Clone + Copy + Eq + Hash {}
-impl<T: Clone + Copy + Eq + Hash> Key for T {}
+trait Key: Clone + Eq + Hash {}
+impl<T: Clone + Eq + Hash> Key for T {}
 
 struct IndexMap<K: Key, V> {
     idxs: HashMap<K, usize>,
@@ -32,6 +33,7 @@ struct IndexMap<K: Key, V> {
     vals: Vec<V>,
 }
 
+// Map-ish methods
 impl<K: Key, V> IndexMap<K, V> {
     fn new() -> IndexMap<K, V> {
         IndexMap {
@@ -39,6 +41,10 @@ impl<K: Key, V> IndexMap<K, V> {
             keys: Vec::new(),
             vals: Vec::new(),
         }
+    }
+
+    fn len(&self) -> usize {
+        self.keys.len()
     }
 
     fn get(&self, key: &K) -> Option<&V> {
@@ -53,12 +59,54 @@ impl<K: Key, V> IndexMap<K, V> {
         match self.idxs.get(&key) {
             Some(i) => Some(std::mem::replace(&mut self.vals[*i], val)),
             None => {
-                self.idxs.insert(key, self.keys.len());
+                self.idxs.insert(key.clone(), self.keys.len());
                 self.keys.push(key);
                 self.vals.push(val);
                 None
             }
         }
+    }
+}
+
+impl<K: Key, V> Index<usize> for IndexMap<K, V> {
+    type Output = K;
+    fn index(&self, i: usize) -> &K {
+        &self.keys[i]
+    }
+}
+
+// Vec-ish methods
+impl<K: Key, V> IndexMap<K, V> {
+    fn rebuild_idxs(&mut self) {
+        self.idxs = self
+            .keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| (key.clone(), i))
+            .collect()
+    }
+
+    fn remove(&mut self, key: &K) -> Option<V> {
+        match self.idxs.get(key).cloned() {
+            Some(i) => {
+                self.keys.remove(i);
+                self.rebuild_idxs();
+                Some(self.vals.remove(i))
+            }
+            None => None,
+        }
+    }
+
+    fn splice<R, Ks, Vs>(&mut self, range: R, keys: Ks, vals: Vs) -> (Vec<K>, Vec<V>)
+    where
+        R: RangeBounds<usize> + Clone,
+        Ks: IntoIterator<Item = K>,
+        Vs: IntoIterator<Item = V>,
+    {
+        let keys = self.keys.splice(range.clone(), keys).collect();
+        let vals = self.vals.splice(range, vals).collect();
+        self.rebuild_idxs();
+        (keys, vals)
     }
 }
 
@@ -70,18 +118,17 @@ impl<N: Key, E> Graph<N, E> {
     }
 
     fn edge(&mut self, parent: N, child: N, edge: E) {
-        self.0
-            .get_mut(&parent)
-            .expect("could not add edge off of missing node")
-            .insert(child, edge);
+        assert!(self.0.idxs.contains_key(&parent), "missing parent");
+        assert!(self.0.idxs.contains_key(&child), "missing child");
+        self.0.get_mut(&parent).unwrap().insert(child, edge);
     }
 
-    fn children(&self, parent: N) -> &[N] {
-        &self.0.get(&parent).unwrap().keys
+    fn children(&self, parent: &N) -> &IndexMap<N, E> {
+        self.0.get(parent).unwrap()
     }
 
-    fn children_mut(&mut self, parent: N) -> &mut Vec<N> {
-        &mut self.0.get_mut(&parent).unwrap().keys
+    fn children_mut(&mut self, parent: &N) -> &mut IndexMap<N, E> {
+        self.0.get_mut(parent).unwrap()
     }
 }
 
@@ -146,7 +193,7 @@ impl<'a> Context<'a> {
             print!(" at {}\t{:?}", token.location(), token.as_str());
         }
         print!("\n");
-        for child in self.graph.children(root) {
+        for child in &self.graph.children(&root).keys {
             self.print_tree(*child, indent + 1);
         }
     }
@@ -213,16 +260,16 @@ fn main() {
 
 fn remove_comments(context: &mut Context, root: Node) {
     let mut i = 0;
-    while i < context.graph.children(root).len() {
-        if context.tokens[&context.graph.children(root)[i]].as_str() == "#" {
+    while i < context.graph.children(&root).len() {
+        if context.tokens[&context.graph.children(&root)[i]].as_str() == "#" {
             let mut j = i;
-            while j < context.graph.children(root).len()
-                && context.tokens[&context.graph.children(root)[j]].as_str() != "\n"
+            while j < context.graph.children(&root).len()
+                && context.tokens[&context.graph.children(&root)[j]].as_str() != "\n"
             {
-                context.tokens.remove(&context.graph.children(root)[j]);
+                context.tokens.remove(&context.graph.children(&root)[j]);
                 j += 1;
             }
-            context.graph.children_mut(root).drain(i..j);
+            context.graph.children_mut(&root).splice(i..j, [], []);
         } else {
             i += 1;
         }
@@ -254,8 +301,9 @@ fn token_type(s: &str) -> usize {
 
 fn group_tokens(context: &mut Context, root: Node) {
     let mut i = 1;
-    let children = context.graph.children_mut(root);
+    let children = context.graph.children_mut(&root);
     while i < children.len() {
+        let child = children[i];
         let curr = &context.tokens[&children[i]];
         let prev = &context.tokens[&children[i - 1]];
         if !is_bracket(curr.as_str())
@@ -263,9 +311,9 @@ fn group_tokens(context: &mut Context, root: Node) {
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            let curr = context.tokens.remove(&children[i]).unwrap();
+            let curr = context.tokens.remove(&child).unwrap();
             context.tokens.get_mut(&children[i - 1]).unwrap().hi = curr.hi;
-            children.remove(i);
+            children.remove(&child);
         } else {
             i += 1;
         }
@@ -274,11 +322,12 @@ fn group_tokens(context: &mut Context, root: Node) {
 
 fn remove_whitespace(context: &mut Context, root: Node) {
     let mut i = 0;
-    let children = context.graph.children_mut(root);
+    let children = context.graph.children_mut(&root);
     while i < children.len() {
-        if is_whitespace(context.tokens[&children[i]].as_str()) {
-            context.tokens.remove(&children[i]).unwrap();
-            children.remove(i);
+        let child = children[i];
+        if is_whitespace(context.tokens[&child].as_str()) {
+            context.tokens.remove(&child).unwrap();
+            children.remove(&child);
         } else {
             i += 1;
         }
