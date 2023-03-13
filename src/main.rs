@@ -159,12 +159,16 @@ fn remove_comments(context: &mut Context, root: Node) {
         if context.tokens[&context.graph.children(&root)[i]].as_str() == "#" {
             let mut j = i;
             while j < context.graph.children(&root).len()
-                && context.tokens[&context.graph.children(&root)[j]].as_str() != "\n"
+                && context
+                    .tokens
+                    .remove(&context.graph.children(&root)[j])
+                    .unwrap()
+                    .as_str()
+                    != "\n"
             {
-                context.tokens.remove(&context.graph.children(&root)[j]);
                 j += 1;
             }
-            context.graph.children_mut(&root).splice(i..j, [], []);
+            context.graph.children_mut(&root).splice(i..=j, [], []);
         } else {
             i += 1;
         }
@@ -207,7 +211,7 @@ fn group_tokens(context: &mut Context, root: Node) {
         {
             let curr = context.tokens.remove(&children[i]).unwrap();
             context.tokens.get_mut(&children[i - 1]).unwrap().hi = curr.hi;
-            children.remove(&children[i].clone());
+            children.splice(i..=i, [], []);
         } else {
             i += 1;
         }
@@ -220,7 +224,7 @@ fn remove_whitespace(context: &mut Context, root: Node) {
     while i < children.len() {
         if is_whitespace(context.tokens[&children[i]].as_str()) {
             context.tokens.remove(&children[i]).unwrap();
-            children.remove(&children[i].clone());
+            children.splice(i..=i, [], []);
         } else {
             i += 1;
         }

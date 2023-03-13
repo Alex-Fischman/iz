@@ -76,21 +76,9 @@ impl<K: Key, V> Map<K, V> {
         self.idxs = self
             .keys
             .iter()
-            .cloned()
             .enumerate()
-            .map(|(i, key)| (key, i))
+            .map(|(i, key)| (key.clone(), i))
             .collect()
-    }
-
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        match self.idxs.get(key).cloned() {
-            Some(i) => {
-                self.keys.remove(i);
-                self.rebuild_idxs();
-                Some(self.vals.remove(i))
-            }
-            None => None,
-        }
     }
 
     pub fn splice<R, Ks, Vs>(&mut self, range: R, keys: Ks, vals: Vs) -> (Vec<K>, Vec<V>)
