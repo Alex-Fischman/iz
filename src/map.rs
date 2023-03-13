@@ -1,10 +1,12 @@
 extern crate std;
+use crate::panic;
 use std::{
     clone::Clone,
     cmp::Eq,
     collections::HashMap,
+    fmt::Debug,
     hash::Hash,
-    iter::{IntoIterator, Iterator},
+    iter::Iterator,
     ops::{Index, RangeBounds},
     option::{Option, Option::None, Option::Some},
     vec::Vec,
@@ -71,7 +73,7 @@ impl<K: Key, V> Index<usize> for Map<K, V> {
     }
 }
 
-impl<K: Key, V> Map<K, V> {
+impl<K: Debug + Key, V: Debug> Map<K, V> {
     fn rebuild_idxs(&mut self) {
         self.idxs = self
             .keys
@@ -81,12 +83,13 @@ impl<K: Key, V> Map<K, V> {
             .collect()
     }
 
-    pub fn splice<R, Ks, Vs>(&mut self, range: R, keys: Ks, vals: Vs) -> (Vec<K>, Vec<V>)
+    pub fn splice<R>(&mut self, range: R, keys: Vec<K>, vals: Vec<V>) -> (Vec<K>, Vec<V>)
     where
         R: RangeBounds<usize> + Clone,
-        Ks: IntoIterator<Item = K>,
-        Vs: IntoIterator<Item = V>,
     {
+        if keys.len() != vals.len() {
+            panic!("keys {:?} and vals {:?} had different lengths", keys, vals)
+        }
         let keys = self.keys.splice(range.clone(), keys).collect();
         let vals = self.vals.splice(range, vals).collect();
         self.rebuild_idxs();
