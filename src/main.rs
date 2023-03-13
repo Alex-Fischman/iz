@@ -147,13 +147,13 @@ fn main() {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut context, root)
+        pass(&mut context, &root)
     }
 
     context.print_tree(root, 0);
 }
 
-fn remove_comments(context: &mut Context, root: Node) {
+fn remove_comments(context: &mut Context, root: &Node) {
     let mut i = 0;
     while i < context.graph.children(&root).len() {
         if context.tokens[&context.graph.children(&root)[i]].as_str() == "#" {
@@ -175,7 +175,7 @@ fn remove_comments(context: &mut Context, root: Node) {
     }
 }
 
-fn group_tokens(context: &mut Context, root: Node) {
+fn group_tokens(context: &mut Context, root: &Node) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -210,7 +210,7 @@ fn group_tokens(context: &mut Context, root: Node) {
     }
 }
 
-fn remove_whitespace(context: &mut Context, root: Node) {
+fn remove_whitespace(context: &mut Context, root: &Node) {
     let mut i = 0;
     let children = context.graph.children_mut(&root);
     while i < children.len() {
@@ -227,7 +227,7 @@ fn remove_whitespace(context: &mut Context, root: Node) {
     }
 }
 
-// fn group_brackets(context: &mut Context, root: Node) {
+// fn group_brackets(context: &mut Context, root: &Node) {
 //     enum Target<'a> {
 //         Nothing,
 //         Round(Token<'a>),
@@ -235,8 +235,10 @@ fn remove_whitespace(context: &mut Context, root: Node) {
 //         Square(Token<'a>),
 //     }
 
-//     group_brackets(context, root, &mut 0, Target::Nothing);
-//     fn group_brackets(context: &mut Context, root: Node, i: &mut usize, target: Target) {
+//     group_brackets(context, &root, &mut 0, Target::Nothing);
+//     fn group_brackets(context: &mut Context, root: &Node, i: &mut usize, target: Target) {
+//         while *i < context.graph.children(root).len() {
 
+//         }
 //     }
 // }
