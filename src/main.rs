@@ -15,13 +15,13 @@ use std::{
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {eprintln, format, matches, print},
+    {eprint, format, matches, print},
 };
 
 macro_rules! panic {
     () => {{ std::process::exit(-1); }};
-    ($fmt:literal) => {{ eprintln!($fmt); std::process::exit(-1); }};
-    ($fmt:literal, $($arg:tt)*) => {{ eprintln!($fmt, $($arg)*); std::process::exit(-1); }};
+    ($fmt:literal) => {{ eprint!($fmt); std::process::exit(-1); }};
+    ($fmt:literal, $($arg:tt)*) => {{ eprint!($fmt, $($arg)*); std::process::exit(-1); }};
 }
 
 trait Key: Clone + Copy + Eq + Hash {}
@@ -151,8 +151,8 @@ impl<'a> Context<'a> {
 fn main() {
     let args: Vec<String> = args().collect();
     let file = args.get(1);
-    let file = file.unwrap_or_else(|| panic!("expected command line argument"));
-    let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
+    let file = file.unwrap_or_else(|| panic!("expected command line argument\n"));
+    let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}\n", file));
 
     let mut context = Context {
         file,
