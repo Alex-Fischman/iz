@@ -13,7 +13,7 @@ use std::{
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {eprintln, format, print},
+    {eprintln, format, matches, print},
 };
 
 macro_rules! panic {
@@ -97,9 +97,7 @@ struct Context<'a> {
 
     id: usize,
     graph: Graph<usize>,
-
-    locations: HashMap<usize, usize>,
-    chars: HashMap<usize, char>,
+    tokens: HashMap<usize, &'a str>,
 }
 
 impl<'a> Context<'a> {
@@ -110,9 +108,7 @@ impl<'a> Context<'a> {
 
             id: 0,
             graph: Graph(IndexMap::new()),
-
-            locations: HashMap::new(),
-            chars: HashMap::new(),
+            tokens: HashMap::new(),
         }
     }
 
@@ -123,30 +119,33 @@ impl<'a> Context<'a> {
         node
     }
 
-    fn location(&self, node: usize) -> String {
+    fn location(&self, node: usize) -> Option<String> {
         let mut row = 1;
         let mut col = 1;
-        for c in self.text.chars().take(*self.locations.get(&node).unwrap()) {
-            if c == '\n' {
+        let end = self.tokens.get(&node)?.as_ptr();
+        for (i, c) in self.text.char_indices() {
+            if self.text[i..].as_ptr() == end {
+                break;
+            } else if c == '\n' {
                 row += 1;
                 col = 1;
             } else {
                 col += 1;
             }
         }
-        format!(" at {}:{}:{}", self.file, row, col)
+        Some(format!(" at {}:{}:{}", self.file, row, col))
     }
 
     // if self.graph is a tree, will work as expected
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
     fn print_tree(&self, root: usize, indent: usize) {
-        print!("{}{:05}", "------- ".repeat(indent), root);
-        if let Some(location) = self.locations.get(&root) {
-            print!("\t{}", location);
+        print!("{}{:05}", "------- ".repeat(indent), root,);
+        if let Some(location) = self.location(root) {
+            print!(" @ {}", location);
         }
-        if let Some(c) = self.chars.get(&root) {
-            print!("\t{:?}", c);
+        if let Some(token) = self.tokens.get(&root) {
+            print!("\t{:?}", token);
         }
         print!("\n");
         for child in self.graph.children(root) {
@@ -164,18 +163,23 @@ fn main() {
     let mut context = Context::new(file, &text);
     assert!(context.node() == 0); // 0 is used as a root node
 
-    for (i, c) in text.chars().enumerate() {
+    let is = text.char_indices().map(|(i, _)| i);
+    let js = text
+        .char_indices()
+        .map(|(j, _)| j)
+        .skip(1)
+        .chain([text.len()]);
+    for (i, j) in is.zip(js) {
         let node = context.node();
         context.graph.edge(0, node);
-        context.locations.insert(node, i);
-        context.chars.insert(node, c);
+        context.tokens.insert(node, &text[i..j]);
     }
 
     let passes = [
         // tokenize
         remove_comments,
-        // chars_to_strings,
-        // remove_whitespace,
+        group_tokens,
+        remove_whitespace,
         // parse
         // group_brackets,
         // group_operators,
@@ -202,17 +206,77 @@ fn remove_comments(context: &mut Context) {
     let mut i = 0;
     while i < context.graph.children(0).len() {
         let child = context.graph.children(0)[i];
-        let c = context.chars.get(&child);
-        let c = c.unwrap_or_else(|| panic!("missing character at {}", context.location(child)));
-        if *c == '#' {
+        let c = context
+            .tokens
+            .get(&child)
+            .unwrap_or_else(|| panic!("missing token at {}", context.location(child).unwrap()));
+        if c == &"#" {
             let mut j = i;
             while j < context.graph.children(0).len()
-                && context.chars.remove(&context.graph.children(0)[j]) != Some('\n')
+                && context.tokens.get(&context.graph.children(0)[j]) != Some(&"\n")
             {
+                context.tokens.remove(&context.graph.children(0)[j]);
                 j += 1;
             }
-            context.chars.insert(context.graph.children(0)[j], '\n');
             context.graph.children_mut(0).drain(i..j);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn is_bracket(s: &str) -> bool {
+    s.chars()
+        .all(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
+}
+
+fn is_identifier(s: &str) -> bool {
+    s.chars()
+        .all(|c| matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
+}
+
+fn is_whitespace(s: &str) -> bool {
+    s.chars().all(char::is_whitespace)
+}
+
+fn token_type(s: &str) -> usize {
+    match s {
+        _ if is_identifier(s) => 0,
+        _ if is_whitespace(s) => 1,
+        _ if is_bracket(s) => 2,
+        _ => 3, // operators
+    }
+}
+
+fn group_tokens(context: &mut Context) {
+    let mut i = 1;
+    let children = context.graph.children_mut(0);
+    while i < children.len() {
+        let curr = context.tokens.get(&children[i]).unwrap();
+        let prev = context.tokens.get(&children[i - 1]).unwrap();
+        // don't want ((s       can consume #s
+        if !is_bracket(curr) && !is_whitespace(curr) && token_type(curr) == token_type(prev) {
+            context.tokens.insert(children[i - 1], unsafe {
+                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                    prev.as_ptr(),
+                    prev.len() + curr.len(),
+                ))
+            });
+            context.tokens.remove(&children[i]).unwrap();
+            children.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn remove_whitespace(context: &mut Context) {
+    let mut i = 0;
+    let children = context.graph.children_mut(0);
+    while i < children.len() {
+        if is_whitespace(context.tokens.get(&children[i]).unwrap()) {
+            context.tokens.remove(&children[i]).unwrap();
+            children.remove(i);
         } else {
             i += 1;
         }
