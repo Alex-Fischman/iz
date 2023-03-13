@@ -11,6 +11,8 @@ use std::{
     fs::read_to_string,
     hash::Hash,
     iter::Iterator,
+    marker::Copy,
+    ops::FnMut,
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
@@ -23,8 +25,8 @@ macro_rules! panic {
     ($fmt:literal, $($arg:tt)*) => {{ eprintln!($fmt, $($arg)*); std::process::exit(-1); }};
 }
 
-trait Key: Clone + Eq + Hash {}
-impl<T: Clone + Eq + Hash> Key for T {}
+trait Key: Clone + Copy + Eq + Hash {}
+impl<T: Clone + Copy + Eq + Hash> Key for T {}
 
 struct IndexMap<K: Key, V> {
     idxs: HashMap<K, usize>,
@@ -45,7 +47,7 @@ impl<K: Key, V> IndexMap<K, V> {
         match self.idxs.get(&key) {
             Some(i) => Some(std::mem::replace(&mut self.vals[*i], val)),
             None => {
-                self.idxs.insert(key.clone(), self.keys.len());
+                self.idxs.insert(key, self.keys.len());
                 self.keys.push(key);
                 self.vals.push(val);
                 None
@@ -59,7 +61,7 @@ impl<K: Key, V: Default> IndexMap<K, V> {
         match self.idxs.get(&key) {
             Some(i) => &mut self.vals[*i],
             None => {
-                self.insert(key.clone(), V::default());
+                self.insert(key, V::default());
                 self.get_mut(&key).unwrap()
             }
         }
@@ -94,6 +96,24 @@ impl<T: Key> Graph<T> {
     fn children_mut(&mut self, parent: T) -> &mut Vec<T> {
         &mut self.0.get_mut(&parent).unwrap().keys
     }
+
+    fn replace_children_postorder<F>(&mut self, root: T, f: &mut F)
+    where
+        F: FnMut(T) -> Option<Vec<T>>,
+    {
+        let mut i = 0;
+        while i < self.children(root).len() {
+            let child = self.children(root)[i];
+            self.replace_children_postorder(child, f);
+            if let Some(nodes) = f(child) {
+                let l = nodes.len();
+                self.children_mut(root).splice(i..=i, nodes);
+                i += l;
+            } else {
+                i += 1;
+            }
+        }
+    }
 }
 
 struct Context<'a> {
@@ -105,16 +125,6 @@ struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    fn new(file: &'a str, text: &'a str) -> Context<'a> {
-        Context {
-            file,
-            text,
-            id: 0,
-            graph: Graph(IndexMap::default()),
-            tokens: HashMap::new(),
-        }
-    }
-
     fn node(&mut self) -> usize {
         let node = self.id;
         self.id += 1;
@@ -163,16 +173,18 @@ fn main() {
     let file = file.unwrap_or_else(|| panic!("expected command line argument"));
     let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
 
-    let mut context = Context::new(file, &text);
+    let mut context = Context {
+        file,
+        text: &text,
+        id: 0,
+        graph: Graph(IndexMap::default()),
+        tokens: HashMap::default(),
+    };
     assert!(context.node() == 0); // 0 is used as a root node
 
     let is = text.char_indices().map(|(i, _)| i);
-    let js = text
-        .char_indices()
-        .map(|(j, _)| j)
-        ;
-    for (i, j) in is.zip(js.skip(1)
-        .chain([text.len()])) {
+    let js = text.char_indices().map(|(j, _)| j);
+    for (i, j) in is.zip(js.skip(1).chain([text.len()])) {
         let node = context.node();
         context.graph.edge(0, node);
         context.tokens.insert(node, &text[i..j]);
@@ -183,17 +195,17 @@ fn main() {
         remove_comments,
         group_tokens,
         remove_whitespace,
-        // parse
+        // // parse
         // group_brackets,
         // group_operators,
         // unroll_operators,
         // unroll_brackets,
-        // transform
+        // // transform
         // collect_macros,
         // sort_macros,
         // substitute_macros,
         // strings_to_ops,
-        // backend
+        // // backend
         // check_nodes_are_ops,
         // collect_labels,
         // interpret,
@@ -208,12 +220,7 @@ fn main() {
 fn remove_comments(context: &mut Context) {
     let mut i = 0;
     while i < context.graph.children(0).len() {
-        let child = context.graph.children(0)[i];
-        let c = context
-            .tokens
-            .get(&child)
-            .unwrap_or_else(|| panic!("missing token at {}", context.location(child).unwrap()));
-        if c == &"#" {
+        if context.tokens[&context.graph.children(0)[i]] == "#" {
             let mut j = i;
             while j < context.graph.children(0).len()
                 && context.tokens[&context.graph.children(0)[j]] != "\n"
@@ -274,14 +281,12 @@ fn group_tokens(context: &mut Context) {
 }
 
 fn remove_whitespace(context: &mut Context) {
-    let mut i = 0;
-    let children = context.graph.children_mut(0);
-    while i < children.len() {
-        if is_whitespace(context.tokens[&children[i]]) {
-            context.tokens.remove(&children[i]).unwrap();
-            children.remove(i);
+    context.graph.replace_children_postorder(0, &mut |node| {
+        if is_whitespace(context.tokens[&node]) {
+            context.tokens.remove(&node).unwrap();
+            Some(Vec::default())
         } else {
-            i += 1;
+            None
         }
-    }
+    })
 }
