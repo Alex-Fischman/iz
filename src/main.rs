@@ -170,9 +170,9 @@ fn main() {
     let js = text
         .char_indices()
         .map(|(j, _)| j)
-        .skip(1)
-        .chain([text.len()]);
-    for (i, j) in is.zip(js) {
+        ;
+    for (i, j) in is.zip(js.skip(1)
+        .chain([text.len()])) {
         let node = context.node();
         context.graph.edge(0, node);
         context.tokens.insert(node, &text[i..j]);
