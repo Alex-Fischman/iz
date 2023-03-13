@@ -198,7 +198,6 @@ fn group_tokens(context: &mut Context, root: Node) {
     let mut i = 1;
     let children = context.graph.children_mut(&root);
     while i < children.len() {
-        let child = children[i];
         let curr = &context.tokens[&children[i]];
         let prev = &context.tokens[&children[i - 1]];
         if !is_bracket(curr.as_str())
@@ -206,9 +205,9 @@ fn group_tokens(context: &mut Context, root: Node) {
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            let curr = context.tokens.remove(&child).unwrap();
+            let curr = context.tokens.remove(&children[i]).unwrap();
             context.tokens.get_mut(&children[i - 1]).unwrap().hi = curr.hi;
-            children.remove(&child);
+            children.remove(&children[i].clone());
         } else {
             i += 1;
         }
