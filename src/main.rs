@@ -249,14 +249,13 @@ fn group_brackets(context: &mut Context, root: &Node) {
             let mut handle_open_bracket = |target| {
                 let start = *i;
                 group_brackets(context, root, i, target);
-                let (mut cs, mut ts) =
-                    context
-                        .graph
-                        .children_mut(root)
-                        .splice(start..*i, Vec::new(), Vec::new());
-                cs.pop(); // remove the closing bracket
-                ts.pop();
-                context.graph.children_mut(&child).splice(0..0, cs, ts);
+                let cs = context.graph.children_mut(root);
+                let mut vecs = cs.splice(start..*i, Vec::new(), Vec::new());
+                // remove the closing bracket
+                vecs.0.pop();
+                vecs.1.pop();
+                let cs = context.graph.children_mut(&child);
+                cs.splice(0..0, vecs.0, vecs.1);
                 *i = start;
             };
             match token.as_str() {
