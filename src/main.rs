@@ -12,7 +12,6 @@ use std::{
     hash::Hash,
     iter::Iterator,
     marker::Copy,
-    ops::FnMut,
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
@@ -96,24 +95,6 @@ impl<T: Key> Graph<T> {
     fn children_mut(&mut self, parent: T) -> &mut Vec<T> {
         &mut self.0.get_mut(&parent).unwrap().keys
     }
-
-    fn replace_children_postorder<F>(&mut self, root: T, f: &mut F)
-    where
-        F: FnMut(T) -> Option<Vec<T>>,
-    {
-        let mut i = 0;
-        while i < self.children(root).len() {
-            let child = self.children(root)[i];
-            self.replace_children_postorder(child, f);
-            if let Some(nodes) = f(child) {
-                let l = nodes.len();
-                self.children_mut(root).splice(i..=i, nodes);
-                i += l;
-            } else {
-                i += 1;
-            }
-        }
-    }
 }
 
 struct Context<'a> {
@@ -180,13 +161,13 @@ fn main() {
         graph: Graph(IndexMap::default()),
         tokens: HashMap::default(),
     };
-    assert!(context.node() == 0); // 0 is used as a root node
+    let root = context.node();
 
     let is = text.char_indices().map(|(i, _)| i);
     let js = text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([text.len()])) {
         let node = context.node();
-        context.graph.edge(0, node);
+        context.graph.edge(root, node);
         context.tokens.insert(node, &text[i..j]);
     }
 
@@ -211,24 +192,24 @@ fn main() {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut context)
+        pass(&mut context, root)
     }
 
-    context.print_tree(0, 0);
+    context.print_tree(root, 0);
 }
 
-fn remove_comments(context: &mut Context) {
+fn remove_comments(context: &mut Context, root: usize) {
     let mut i = 0;
-    while i < context.graph.children(0).len() {
-        if context.tokens[&context.graph.children(0)[i]] == "#" {
+    while i < context.graph.children(root).len() {
+        if context.tokens[&context.graph.children(root)[i]] == "#" {
             let mut j = i;
-            while j < context.graph.children(0).len()
-                && context.tokens[&context.graph.children(0)[j]] != "\n"
+            while j < context.graph.children(root).len()
+                && context.tokens[&context.graph.children(root)[j]] != "\n"
             {
-                context.tokens.remove(&context.graph.children(0)[j]);
+                context.tokens.remove(&context.graph.children(root)[j]);
                 j += 1;
             }
-            context.graph.children_mut(0).drain(i..j);
+            context.graph.children_mut(root).drain(i..j);
         } else {
             i += 1;
         }
@@ -258,9 +239,9 @@ fn token_type(s: &str) -> usize {
     }
 }
 
-fn group_tokens(context: &mut Context) {
+fn group_tokens(context: &mut Context, root: usize) {
     let mut i = 1;
-    let children = context.graph.children_mut(0);
+    let children = context.graph.children_mut(root);
     while i < children.len() {
         let curr = context.tokens[&children[i]];
         let prev = context.tokens[&children[i - 1]];
@@ -280,13 +261,15 @@ fn group_tokens(context: &mut Context) {
     }
 }
 
-fn remove_whitespace(context: &mut Context) {
-    context.graph.replace_children_postorder(0, &mut |node| {
-        if is_whitespace(context.tokens[&node]) {
-            context.tokens.remove(&node).unwrap();
-            Some(Vec::default())
+fn remove_whitespace(context: &mut Context, root: usize) {
+    let mut i = 1;
+    let children = context.graph.children_mut(root);
+    while i < children.len() {
+        if is_whitespace(context.tokens[&children[i]]) {
+            context.tokens.remove(&children[i]).unwrap();
+            children.remove(i);
         } else {
-            None
+            i += 1;
         }
-    })
+    }
 }
