@@ -175,30 +175,22 @@ fn remove_comments(context: &mut Context, root: Node) {
     }
 }
 
-fn is_bracket(s: &str) -> bool {
-    s.chars()
-        .all(|c| matches!(c, '(' | ')' | '{' | '}' | '[' | ']'))
-}
-
-fn is_identifier(s: &str) -> bool {
-    s.chars()
-        .all(|c| matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
-}
-
-fn is_whitespace(s: &str) -> bool {
-    s.chars().all(char::is_whitespace)
-}
-
-fn token_type(s: &str) -> usize {
-    match s {
-        _ if is_identifier(s) => 0,
-        _ if is_whitespace(s) => 1,
-        _ if is_bracket(s) => 2,
-        _ => 3, // operators
-    }
-}
-
 fn group_tokens(context: &mut Context, root: Node) {
+    let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
+    let token_type = |s: &str| {
+        if s.chars()
+            .all(|c| matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
+        {
+            0
+        } else if s.chars().all(char::is_whitespace) {
+            1
+        } else if is_bracket(s) {
+            2
+        } else {
+            3
+        }
+    };
+
     let mut i = 1;
     let children = context.graph.children_mut(&root);
     while i < children.len() {
@@ -222,7 +214,11 @@ fn remove_whitespace(context: &mut Context, root: Node) {
     let mut i = 0;
     let children = context.graph.children_mut(&root);
     while i < children.len() {
-        if is_whitespace(context.tokens[&children[i]].as_str()) {
+        if context.tokens[&children[i]]
+            .as_str()
+            .chars()
+            .all(char::is_whitespace)
+        {
             context.tokens.remove(&children[i]).unwrap();
             children.splice(i..=i, [], []);
         } else {
@@ -230,3 +226,17 @@ fn remove_whitespace(context: &mut Context, root: Node) {
         }
     }
 }
+
+// fn group_brackets(context: &mut Context, root: Node) {
+//     enum Target<'a> {
+//         Nothing,
+//         Round(Token<'a>),
+//         Curly(Token<'a>),
+//         Square(Token<'a>),
+//     }
+
+//     group_brackets(context, root, &mut 0, Target::Nothing);
+//     fn group_brackets(context: &mut Context, root: Node, i: &mut usize, target: Target) {
+
+//     }
+// }
