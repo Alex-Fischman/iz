@@ -218,10 +218,9 @@ fn remove_whitespace(context: &mut Context, root: Node) {
     let mut i = 0;
     let children = context.graph.children_mut(&root);
     while i < children.len() {
-        let child = children[i];
-        if is_whitespace(context.tokens[&child].as_str()) {
-            context.tokens.remove(&child).unwrap();
-            children.remove(&child);
+        if is_whitespace(context.tokens[&children[i]].as_str()) {
+            context.tokens.remove(&children[i]).unwrap();
+            children.remove(&children[i].clone());
         } else {
             i += 1;
         }
