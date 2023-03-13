@@ -101,12 +101,45 @@ impl<T: Key> Graph<T> {
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 struct Node(usize);
 
-struct Context<'a> {
-    file: &'a str,
+// package these to make Token as small as possible
+#[derive(PartialEq)]
+struct Source<'a> {
+    name: &'a str,
     text: &'a str,
+}
+
+struct Token<'a> {
+    source: &'a Source<'a>,
+    lo: usize,
+    hi: usize,
+}
+
+impl Token<'_> {
+    fn as_str(&self) -> &str {
+        &self.source.text[self.lo..self.hi]
+    }
+
+    fn location(&self) -> String {
+        let mut row = 1;
+        let mut col = 1;
+        for (i, c) in self.source.text.char_indices() {
+            if i == self.lo {
+                break;
+            } else if c == '\n' {
+                row += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+        format!("{}:{}:{}", self.source.name, row, col)
+    }
+}
+
+struct Context<'a> {
     id: Node,
     graph: Graph<Node>,
-    tokens: HashMap<Node, &'a str>,
+    tokens: HashMap<Node, Token<'a>>,
 }
 
 impl<'a> Context<'a> {
@@ -117,33 +150,13 @@ impl<'a> Context<'a> {
         node
     }
 
-    fn location(&self, node: Node) -> Option<String> {
-        let mut row = 1;
-        let mut col = 1;
-        let end = self.tokens.get(&node)?.as_ptr();
-        for (i, c) in self.text.char_indices() {
-            if self.text[i..].as_ptr() == end {
-                break;
-            } else if c == '\n' {
-                row += 1;
-                col = 1;
-            } else {
-                col += 1;
-            }
-        }
-        Some(format!("{}:{}:{}", self.file, row, col))
-    }
-
     // if self.graph is a tree, will work as expected
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
     fn print_tree(&self, root: Node, indent: usize) {
         print!("{}{:05}", "------- ".repeat(indent), root.0);
-        if let Some(location) = self.location(root) {
-            print!(" at {}", location);
-        }
         if let Some(token) = self.tokens.get(&root) {
-            print!("\t{:?}", token);
+            print!(" at {}\t{:?}", token.location(), token.as_str());
         }
         print!("\n");
         for child in self.graph.children(root) {
@@ -157,10 +170,12 @@ fn main() {
     let file = args.get(1);
     let file = file.unwrap_or_else(|| panic!("expected command line argument\n"));
     let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}\n", file));
+    let source = &Source {
+        name: file,
+        text: &text, // TODO: don't read text to string in the first place
+    };
 
     let mut context = Context {
-        file,
-        text: &text,
         id: Node(0),
         graph: Graph(IndexMap::default()),
         tokens: HashMap::default(),
@@ -172,7 +187,14 @@ fn main() {
     for (i, j) in is.zip(js.skip(1).chain([text.len()])) {
         let node = context.node();
         context.graph.edge(root, node);
-        context.tokens.insert(node, &text[i..j]);
+        context.tokens.insert(
+            node,
+            Token {
+                source,
+                lo: i,
+                hi: j,
+            },
+        );
     }
 
     let passes = [
@@ -205,10 +227,10 @@ fn main() {
 fn remove_comments(context: &mut Context, root: Node) {
     let mut i = 0;
     while i < context.graph.children(root).len() {
-        if context.tokens[&context.graph.children(root)[i]] == "#" {
+        if context.tokens[&context.graph.children(root)[i]].as_str() == "#" {
             let mut j = i;
             while j < context.graph.children(root).len()
-                && context.tokens[&context.graph.children(root)[j]] != "\n"
+                && context.tokens[&context.graph.children(root)[j]].as_str() != "\n"
             {
                 context.tokens.remove(&context.graph.children(root)[j]);
                 j += 1;
@@ -247,17 +269,15 @@ fn group_tokens(context: &mut Context, root: Node) {
     let mut i = 1;
     let children = context.graph.children_mut(root);
     while i < children.len() {
-        let curr = context.tokens[&children[i]];
-        let prev = context.tokens[&children[i - 1]];
-        // don't want ((s       can consume #s
-        if !is_bracket(curr) && !is_whitespace(curr) && token_type(curr) == token_type(prev) {
-            context.tokens.insert(children[i - 1], unsafe {
-                std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                    prev.as_ptr(),
-                    prev.len() + curr.len(),
-                ))
-            });
-            context.tokens.remove(&children[i]).unwrap();
+        let curr = &context.tokens[&children[i]];
+        let prev = &context.tokens[&children[i - 1]];
+        if !is_bracket(curr.as_str())
+            && token_type(curr.as_str()) == token_type(prev.as_str())
+            && curr.source == prev.source
+            && prev.hi == curr.lo
+        {
+            let curr = context.tokens.remove(&children[i]).unwrap();
+            context.tokens.get_mut(&children[i - 1]).unwrap().hi = curr.hi;
             children.remove(i);
         } else {
             i += 1;
@@ -266,10 +286,10 @@ fn group_tokens(context: &mut Context, root: Node) {
 }
 
 fn remove_whitespace(context: &mut Context, root: Node) {
-    let mut i = 1;
+    let mut i = 0;
     let children = context.graph.children_mut(root);
     while i < children.len() {
-        if is_whitespace(context.tokens[&children[i]]) {
+        if is_whitespace(context.tokens[&children[i]].as_str()) {
             context.tokens.remove(&children[i]).unwrap();
             children.remove(i);
         } else {
