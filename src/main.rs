@@ -67,6 +67,7 @@ impl<K: Key, V: Default> IndexMap<K, V> {
     }
 }
 
+// we can't use #[derive(Default)] because https://github.com/rust-lang/rust/issues/26925
 impl<K: Key, V> Default for IndexMap<K, V> {
     fn default() -> IndexMap<K, V> {
         IndexMap {
@@ -97,23 +98,26 @@ impl<T: Key> Graph<T> {
     }
 }
 
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+struct Node(usize);
+
 struct Context<'a> {
     file: &'a str,
     text: &'a str,
-    id: usize,
-    graph: Graph<usize>,
-    tokens: HashMap<usize, &'a str>,
+    id: Node,
+    graph: Graph<Node>,
+    tokens: HashMap<Node, &'a str>,
 }
 
 impl<'a> Context<'a> {
-    fn node(&mut self) -> usize {
+    fn node(&mut self) -> Node {
         let node = self.id;
-        self.id += 1;
+        self.id.0 += 1;
         self.graph.node(node);
         node
     }
 
-    fn location(&self, node: usize) -> Option<String> {
+    fn location(&self, node: Node) -> Option<String> {
         let mut row = 1;
         let mut col = 1;
         let end = self.tokens.get(&node)?.as_ptr();
@@ -133,8 +137,8 @@ impl<'a> Context<'a> {
     // if self.graph is a tree, will work as expected
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
-    fn print_tree(&self, root: usize, indent: usize) {
-        print!("{}{:05}", "------- ".repeat(indent), root,);
+    fn print_tree(&self, root: Node, indent: usize) {
+        print!("{}{:05}", "------- ".repeat(indent), root.0);
         if let Some(location) = self.location(root) {
             print!(" at {}", location);
         }
@@ -157,7 +161,7 @@ fn main() {
     let mut context = Context {
         file,
         text: &text,
-        id: 0,
+        id: Node(0),
         graph: Graph(IndexMap::default()),
         tokens: HashMap::default(),
     };
@@ -198,7 +202,7 @@ fn main() {
     context.print_tree(root, 0);
 }
 
-fn remove_comments(context: &mut Context, root: usize) {
+fn remove_comments(context: &mut Context, root: Node) {
     let mut i = 0;
     while i < context.graph.children(root).len() {
         if context.tokens[&context.graph.children(root)[i]] == "#" {
@@ -239,7 +243,7 @@ fn token_type(s: &str) -> usize {
     }
 }
 
-fn group_tokens(context: &mut Context, root: usize) {
+fn group_tokens(context: &mut Context, root: Node) {
     let mut i = 1;
     let children = context.graph.children_mut(root);
     while i < children.len() {
@@ -261,7 +265,7 @@ fn group_tokens(context: &mut Context, root: usize) {
     }
 }
 
-fn remove_whitespace(context: &mut Context, root: usize) {
+fn remove_whitespace(context: &mut Context, root: Node) {
     let mut i = 1;
     let children = context.graph.children_mut(root);
     while i < children.len() {
