@@ -85,7 +85,7 @@ impl<'a> Context<'a> {
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
     fn print_tree(&self, root: Node, indent: usize) {
-        print!("{}{:05}", "------- ".repeat(indent), root.0);
+        print!("{}{:5}", "\t".repeat(indent), root.0);
         if let Some(token) = self.tokens.get(&root) {
             print!(" at {}\t{:?}", token.location(), token.as_str());
         }
