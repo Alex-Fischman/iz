@@ -240,26 +240,6 @@ fn group_brackets(context: &mut Context, root: &Node) {
         Square(&'a Token<'a>),
     }
 
-    impl Target<'_> {
-        fn as_str(&self) -> &str {
-            match self {
-                Target::Nothing => "",
-                Target::Round(_) => ")",
-                Target::Curly(_) => "}",
-                Target::Square(_) => "]",
-            }
-        }
-
-        fn token(&self) -> &Token {
-            match self {
-                Target::Nothing => panic!("no token for Nothing"),
-                Target::Round(token) => token,
-                Target::Curly(token) => token,
-                Target::Square(token) => token,
-            }
-        }
-    }
-
     group_brackets(context, root, &mut 0, Target::Nothing);
     fn group_brackets(context: &mut Context, root: &Node, i: &mut usize, target: Target) {
         while *i < context.graph.children(root).len() {
@@ -283,23 +263,24 @@ fn group_brackets(context: &mut Context, root: &Node) {
                 "(" => handle_open_bracket(Target::Round(&token)),
                 "{" => handle_open_bracket(Target::Curly(&token)),
                 "[" => handle_open_bracket(Target::Square(&token)),
-                ")" | "}" | "]" => {
-                    if token.as_str() == target.as_str() {
-                        return;
-                    } else {
-                        panic!("extra {} at {}", token.as_str(), token.location())
-                    }
+                ")" if !matches!(target, Target::Round(_)) => {
+                    panic!("extra ) at {}", token.location())
                 }
+                "}" if !matches!(target, Target::Curly(_)) => {
+                    panic!("extra }} at {}", token.location())
+                }
+                "]" if !matches!(target, Target::Square(_)) => {
+                    panic!("extra ] at {}", token.location())
+                }
+                ")" | "}" | "]" => return,
                 _ => {}
             }
         }
         match target {
             Target::Nothing => {}
-            _ => panic!(
-                "missing {} at {}",
-                target.as_str(),
-                target.token().location()
-            ),
+            Target::Round(token) => panic!("missing ) for {}", token.location()),
+            Target::Curly(token) => panic!("missing }} for {}", token.location()),
+            Target::Square(token) => panic!("missing ] for {}", token.location()),
         }
     }
 }
