@@ -155,20 +155,20 @@ fn main() {
 
 fn remove_comments(context: &mut Context, root: &Node) {
     let mut i = 0;
-    while i < context.graph.children(&root).len() {
-        if context.tokens[&context.graph.children(&root)[i]].as_str() == "#" {
+    while i < context.graph.children(root).len() {
+        if context.tokens[&context.graph.children(root)[i]].as_str() == "#" {
             let mut j = i;
-            while j < context.graph.children(&root).len()
+            while j < context.graph.children(root).len()
                 && context
                     .tokens
-                    .remove(&context.graph.children(&root)[j])
+                    .remove(&context.graph.children(root)[j])
                     .unwrap()
                     .as_str()
                     != "\n"
             {
                 j += 1;
             }
-            context.graph.children_mut(&root).splice(i..=j, [], []);
+            context.graph.children_mut(root).splice(i..=j, [], []);
         } else {
             i += 1;
         }
@@ -192,7 +192,7 @@ fn group_tokens(context: &mut Context, root: &Node) {
     };
 
     let mut i = 1;
-    let children = context.graph.children_mut(&root);
+    let children = context.graph.children_mut(root);
     while i < children.len() {
         let curr = &context.tokens[&children[i]];
         let prev = &context.tokens[&children[i - 1]];
@@ -212,7 +212,7 @@ fn group_tokens(context: &mut Context, root: &Node) {
 
 fn remove_whitespace(context: &mut Context, root: &Node) {
     let mut i = 0;
-    let children = context.graph.children_mut(&root);
+    let children = context.graph.children_mut(root);
     while i < children.len() {
         if context.tokens[&children[i]]
             .as_str()
