@@ -263,24 +263,20 @@ fn group_brackets(context: &mut Context, root: &Node) {
                 "(" => handle_open_bracket(Target::Round(&token)),
                 "{" => handle_open_bracket(Target::Curly(&token)),
                 "[" => handle_open_bracket(Target::Square(&token)),
-                ")" if !matches!(target, Target::Round(_)) => {
-                    panic!("extra ) at {}", token.location())
-                }
-                "}" if !matches!(target, Target::Curly(_)) => {
-                    panic!("extra }} at {}", token.location())
-                }
-                "]" if !matches!(target, Target::Square(_)) => {
-                    panic!("extra ] at {}", token.location())
-                }
-                ")" | "}" | "]" => return,
+                ")" if matches!(target, Target::Round(_)) => return,
+                ")" => panic!("extra ) at {}", token.location()),
+                "}" if matches!(target, Target::Curly(_)) => return,
+                "}" => panic!("extra }} at {}", token.location()),
+                "]" if matches!(target, Target::Square(_)) => return,
+                "]" => panic!("extra ] at {}", token.location()),
                 _ => {}
             }
         }
         match target {
             Target::Nothing => {}
-            Target::Round(token) => panic!("missing ) for {}", token.location()),
-            Target::Curly(token) => panic!("missing }} for {}", token.location()),
-            Target::Square(token) => panic!("missing ] for {}", token.location()),
+            Target::Round(token) => panic!("missing ) for ( at {}", token.location()),
+            Target::Curly(token) => panic!("missing }} for {{ at {}", token.location()),
+            Target::Square(token) => panic!("missing ] for [ at {}", token.location()),
         }
     }
 }
