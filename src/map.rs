@@ -13,16 +13,17 @@ use std::{
 pub trait Key: Clone + Eq + Hash {}
 impl<T: Clone + Eq + Hash> Key for T {}
 
-pub struct IndexMap<K: Key, V> {
+// has fast lookup from HashMap and ordering from Vec
+pub struct Map<K: Key, V> {
     idxs: HashMap<K, usize>,
     keys: Vec<K>,
     vals: Vec<V>,
 }
 
 // Map-ish methods
-impl<K: Key, V> IndexMap<K, V> {
-    pub fn new() -> IndexMap<K, V> {
-        IndexMap {
+impl<K: Key, V> Map<K, V> {
+    pub fn new() -> Map<K, V> {
+        Map {
             idxs: HashMap::new(),
             keys: Vec::new(),
             vals: Vec::new(),
@@ -63,14 +64,14 @@ impl<K: Key, V> IndexMap<K, V> {
 }
 
 // Vec-ish methods
-impl<K: Key, V> Index<usize> for IndexMap<K, V> {
+impl<K: Key, V> Index<usize> for Map<K, V> {
     type Output = K;
     fn index(&self, i: usize) -> &K {
         &self.keys[i]
     }
 }
 
-impl<K: Key, V> IndexMap<K, V> {
+impl<K: Key, V> Map<K, V> {
     fn rebuild_idxs(&mut self) {
         self.idxs = self
             .keys

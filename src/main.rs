@@ -4,7 +4,7 @@ extern crate std;
 
 mod map;
 
-use crate::map::{IndexMap, Key};
+use crate::map::{Key, Map};
 use std::{
     clone::Clone,
     cmp::Eq,
@@ -26,11 +26,11 @@ macro_rules! panic {
     ($fmt:literal, $($arg:tt)*) => {{ eprint!($fmt, $($arg)*); std::process::exit(-1); }};
 }
 
-struct Graph<N: Key, E>(IndexMap<N, IndexMap<N, E>>);
+struct Graph<N: Key, E>(Map<N, Map<N, E>>);
 
 impl<N: Key, E> Graph<N, E> {
-    fn node(&mut self, node: N) -> Option<IndexMap<N, E>> {
-        self.0.insert(node, IndexMap::new())
+    fn node(&mut self, node: N) -> Option<Map<N, E>> {
+        self.0.insert(node, Map::new())
     }
 
     fn edge(&mut self, parent: N, child: N, edge: E) {
@@ -39,11 +39,11 @@ impl<N: Key, E> Graph<N, E> {
         self.0.get_mut(&parent).unwrap().insert(child, edge);
     }
 
-    fn children(&self, parent: &N) -> &IndexMap<N, E> {
+    fn children(&self, parent: &N) -> &Map<N, E> {
         self.0.get(parent).unwrap()
     }
 
-    fn children_mut(&mut self, parent: &N) -> &mut IndexMap<N, E> {
+    fn children_mut(&mut self, parent: &N) -> &mut Map<N, E> {
         self.0.get_mut(parent).unwrap()
     }
 }
@@ -127,7 +127,7 @@ fn main() {
 
     let mut context = Context {
         id: Node(0),
-        graph: Graph(IndexMap::new()),
+        graph: Graph(Map::new()),
         tokens: HashMap::new(),
     };
     let root = context.node();
