@@ -2,6 +2,9 @@
 #![allow(clippy::print_with_newline)]
 extern crate std;
 
+mod map;
+
+use crate::map::{IndexMap, Key};
 use std::{
     clone::Clone,
     cmp::Eq,
@@ -9,10 +12,9 @@ use std::{
     env::args,
     fs::read_to_string,
     hash::Hash,
-    iter::{IntoIterator, Iterator},
+    iter::Iterator,
     marker::Copy,
-    ops::{Index, RangeBounds},
-    option::{Option, Option::None, Option::Some},
+    option::{Option, Option::Some},
     string::String,
     vec::Vec,
     {eprint, format, matches, print},
@@ -24,92 +26,6 @@ macro_rules! panic {
     ($fmt:literal, $($arg:tt)*) => {{ eprint!($fmt, $($arg)*); std::process::exit(-1); }};
 }
 
-trait Key: Clone + Eq + Hash {}
-impl<T: Clone + Eq + Hash> Key for T {}
-
-struct IndexMap<K: Key, V> {
-    idxs: HashMap<K, usize>,
-    keys: Vec<K>,
-    vals: Vec<V>,
-}
-
-// Map-ish methods
-impl<K: Key, V> IndexMap<K, V> {
-    fn new() -> IndexMap<K, V> {
-        IndexMap {
-            idxs: HashMap::new(),
-            keys: Vec::new(),
-            vals: Vec::new(),
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.keys.len()
-    }
-
-    fn get(&self, key: &K) -> Option<&V> {
-        self.idxs.get(key).map(|i| &self.vals[*i])
-    }
-
-    fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        self.idxs.get(key).map(|i| &mut self.vals[*i])
-    }
-
-    fn insert(&mut self, key: K, val: V) -> Option<V> {
-        match self.idxs.get(&key) {
-            Some(i) => Some(std::mem::replace(&mut self.vals[*i], val)),
-            None => {
-                self.idxs.insert(key.clone(), self.keys.len());
-                self.keys.push(key);
-                self.vals.push(val);
-                None
-            }
-        }
-    }
-}
-
-impl<K: Key, V> Index<usize> for IndexMap<K, V> {
-    type Output = K;
-    fn index(&self, i: usize) -> &K {
-        &self.keys[i]
-    }
-}
-
-// Vec-ish methods
-impl<K: Key, V> IndexMap<K, V> {
-    fn rebuild_idxs(&mut self) {
-        self.idxs = self
-            .keys
-            .iter()
-            .enumerate()
-            .map(|(i, key)| (key.clone(), i))
-            .collect()
-    }
-
-    fn remove(&mut self, key: &K) -> Option<V> {
-        match self.idxs.get(key).cloned() {
-            Some(i) => {
-                self.keys.remove(i);
-                self.rebuild_idxs();
-                Some(self.vals.remove(i))
-            }
-            None => None,
-        }
-    }
-
-    fn splice<R, Ks, Vs>(&mut self, range: R, keys: Ks, vals: Vs) -> (Vec<K>, Vec<V>)
-    where
-        R: RangeBounds<usize> + Clone,
-        Ks: IntoIterator<Item = K>,
-        Vs: IntoIterator<Item = V>,
-    {
-        let keys = self.keys.splice(range.clone(), keys).collect();
-        let vals = self.vals.splice(range, vals).collect();
-        self.rebuild_idxs();
-        (keys, vals)
-    }
-}
-
 struct Graph<N: Key, E>(IndexMap<N, IndexMap<N, E>>);
 
 impl<N: Key, E> Graph<N, E> {
@@ -118,8 +34,8 @@ impl<N: Key, E> Graph<N, E> {
     }
 
     fn edge(&mut self, parent: N, child: N, edge: E) {
-        assert!(self.0.idxs.contains_key(&parent), "missing parent");
-        assert!(self.0.idxs.contains_key(&child), "missing child");
+        assert!(self.0.contains_key(&parent), "missing parent");
+        assert!(self.0.contains_key(&child), "missing child");
         self.0.get_mut(&parent).unwrap().insert(child, edge);
     }
 
@@ -193,7 +109,7 @@ impl<'a> Context<'a> {
             print!(" at {}\t{:?}", token.location(), token.as_str());
         }
         print!("\n");
-        for child in &self.graph.children(&root).keys {
+        for child in self.graph.children(&root).keys() {
             self.print_tree(*child, indent + 1);
         }
     }
