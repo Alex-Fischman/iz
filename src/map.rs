@@ -4,10 +4,9 @@ use std::{
     clone::Clone,
     cmp::Eq,
     collections::HashMap,
-    fmt::Debug,
     hash::Hash,
-    iter::Iterator,
-    ops::{Index, RangeBounds},
+    iter::{ExactSizeIterator, IntoIterator, Iterator},
+    ops::RangeBounds,
     option::{Option, Option::None, Option::Some},
     vec::Vec,
 };
@@ -32,8 +31,8 @@ impl<K: Key, V> Map<K, V> {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.keys.len()
+    pub fn keys(&self) -> &[K] {
+        &self.keys
     }
 
     pub fn get(&self, key: &K) -> Option<&V> {
@@ -42,6 +41,10 @@ impl<K: Key, V> Map<K, V> {
 
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
         self.idxs.get(key).map(|i| &mut self.vals[*i])
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.idxs.contains_key(key)
     }
 
     pub fn insert(&mut self, key: K, val: V) -> Option<V> {
@@ -56,43 +59,28 @@ impl<K: Key, V> Map<K, V> {
         }
     }
 
-    pub fn contains_key(&self, key: &K) -> bool {
-        self.idxs.contains_key(key)
-    }
-
-    pub fn keys(&self) -> impl Iterator<Item = &K> {
-        self.keys.iter()
-    }
-}
-
-// Vec-ish methods
-impl<K: Key, V> Index<usize> for Map<K, V> {
-    type Output = K;
-    fn index(&self, i: usize) -> &K {
-        &self.keys[i]
-    }
-}
-
-impl<K: Debug + Key, V: Debug> Map<K, V> {
-    fn rebuild_idxs(&mut self) {
+    pub fn splice<'a, R, A, X, B, Y>(&'a mut self, range: R, keys: A, vals: B) -> (Vec<K>, Vec<V>)
+    where
+        R: RangeBounds<usize> + Clone,
+        A: IntoIterator<IntoIter = X>,
+        B: IntoIterator<IntoIter = Y>,
+        X: ExactSizeIterator<Item = K> + 'a,
+        Y: ExactSizeIterator<Item = V> + 'a,
+    {
+        let keys = keys.into_iter();
+        let vals = vals.into_iter();
+        if keys.len() != vals.len() {
+            panic!("keys and vals had different lengths")
+        }
+        let keys = self.keys.splice(range.clone(), keys).collect();
+        let vals = self.vals.splice(range, vals).collect();
+        // completely rebuild idxs; has to be linear anyway
         self.idxs = self
             .keys
             .iter()
             .enumerate()
             .map(|(i, key)| (key.clone(), i))
-            .collect()
-    }
-
-    pub fn splice<R>(&mut self, range: R, keys: Vec<K>, vals: Vec<V>) -> (Vec<K>, Vec<V>)
-    where
-        R: RangeBounds<usize> + Clone,
-    {
-        if keys.len() != vals.len() {
-            panic!("keys {:?} and vals {:?} had different lengths", keys, vals)
-        }
-        let keys = self.keys.splice(range.clone(), keys).collect();
-        let vals = self.vals.splice(range, vals).collect();
-        self.rebuild_idxs();
+            .collect();
         (keys, vals)
     }
 }
