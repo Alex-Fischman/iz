@@ -21,7 +21,6 @@ pub struct Map<K: Key, V> {
     vals: Vec<V>,
 }
 
-// Map-ish methods
 impl<K: Key, V> Map<K, V> {
     pub fn new() -> Map<K, V> {
         Map {

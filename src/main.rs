@@ -157,20 +157,21 @@ fn main() {
 
 fn remove_comments(context: &mut Context, root: &Node) {
     let mut i = 0;
-    while i < context.graph.children(root).keys().len() {
-        if context.tokens[&context.graph.children(root).keys()[i]].as_str() == "#" {
+    let children = context.graph.children_mut(root);
+    while i < children.keys().len() {
+        if context.tokens[&children.keys()[i]].as_str() == "#" {
             let mut j = i;
-            while j < context.graph.children(root).keys().len()
+            while j < children.keys().len()
                 && context
                     .tokens
-                    .remove(&context.graph.children(root).keys()[j])
+                    .remove(&children.keys()[j])
                     .unwrap()
                     .as_str()
                     != "\n"
             {
                 j += 1;
             }
-            context.graph.children_mut(root).splice(i..=j, [], []);
+            children.splice(i..=j, [], []);
         } else {
             i += 1;
         }
