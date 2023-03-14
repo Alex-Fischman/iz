@@ -98,11 +98,11 @@ fn main() {
         text,
     };
 
-    let mut context = Context {
+    let mut c = Context {
         graph: Graph::new(),
         tokens: Vec::new(),
     };
-    let root = context.node(Token {
+    let root = c.node(Token {
         source,
         lo: 0,
         hi: 0,
@@ -111,12 +111,12 @@ fn main() {
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        let node = context.node(Token {
+        let node = c.node(Token {
             source,
             lo: i,
             hi: j,
         });
-        context.graph.edge(root, node, ());
+        c.graph.edge(root, node, ());
     }
 
     let passes = [
@@ -140,19 +140,19 @@ fn main() {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut context, &root)
+        pass(&mut c, &root)
     }
 
-    context.print_tree(root, 0);
+    c.print_tree(root, 0);
 }
 
-fn remove_comments(context: &mut Context, root: &usize) {
+fn remove_comments(c: &mut Context, root: &usize) {
     let mut i = 0;
-    let children = context.graph.children_mut(root);
+    let children = c.graph.children_mut(root);
     while i < children.keys().len() {
-        if context.tokens[children.keys()[i]].as_str() == "#" {
+        if c.tokens[children.keys()[i]].as_str() == "#" {
             let mut j = i;
-            while j < children.keys().len() && context.tokens[children.keys()[j]].as_str() != "\n" {
+            while j < children.keys().len() && c.tokens[children.keys()[j]].as_str() != "\n" {
                 j += 1;
             }
             children.splice(i..=j, [], []);
@@ -162,7 +162,7 @@ fn remove_comments(context: &mut Context, root: &usize) {
     }
 }
 
-fn group_tokens(context: &mut Context, root: &usize) {
+fn group_tokens(c: &mut Context, root: &usize) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -179,16 +179,16 @@ fn group_tokens(context: &mut Context, root: &usize) {
     };
 
     let mut i = 1;
-    let children = context.graph.children_mut(root);
+    let children = c.graph.children_mut(root);
     while i < children.keys().len() {
-        let curr = &context.tokens[children.keys()[i]];
-        let prev = &context.tokens[children.keys()[i - 1]];
+        let curr = &c.tokens[children.keys()[i]];
+        let prev = &c.tokens[children.keys()[i - 1]];
         if !is_bracket(curr.as_str())
             && token_type(curr.as_str()) == token_type(prev.as_str())
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            context.tokens.get_mut(children.keys()[i - 1]).unwrap().hi = curr.hi;
+            c.tokens.get_mut(children.keys()[i - 1]).unwrap().hi = curr.hi;
             children.splice(i..=i, [], []);
         } else {
             i += 1;
@@ -196,11 +196,11 @@ fn group_tokens(context: &mut Context, root: &usize) {
     }
 }
 
-fn remove_whitespace(context: &mut Context, root: &usize) {
+fn remove_whitespace(c: &mut Context, root: &usize) {
     let mut i = 0;
-    let children = context.graph.children_mut(root);
+    let children = c.graph.children_mut(root);
     while i < children.keys().len() {
-        if context.tokens[children.keys()[i]]
+        if c.tokens[children.keys()[i]]
             .as_str()
             .chars()
             .all(char::is_whitespace)
@@ -212,7 +212,7 @@ fn remove_whitespace(context: &mut Context, root: &usize) {
     }
 }
 
-fn group_brackets(context: &mut Context, root: &usize) {
+fn group_brackets(c: &mut Context, root: &usize) {
     let match_opener = |token: &Token| match token.as_str() {
         "(" => ")",
         "{" => "}",
@@ -221,9 +221,9 @@ fn group_brackets(context: &mut Context, root: &usize) {
     };
     let mut stack = Vec::new();
     let mut i = 0;
-    while i < context.graph.children(root).keys().len() {
-        let child = context.graph.children(root).keys()[i];
-        let token = &context.tokens[child];
+    while i < c.graph.children(root).keys().len() {
+        let child = c.graph.children(root).keys()[i];
+        let token = &c.tokens[child];
         match token.as_str() {
             "(" | "{" | "[" => {
                 stack.push(child);
@@ -232,9 +232,9 @@ fn group_brackets(context: &mut Context, root: &usize) {
             ")" | "}" | "]" => match stack.pop() {
                 None => panic!("extra {} at {}\n", token.as_str(), token.location()),
                 Some(popped) => {
-                    let opener = &context.tokens[popped];
+                    let opener = &c.tokens[popped];
                     if match_opener(opener) == token.as_str() {
-                        context.graph.children_mut(root).splice(i..=i, [], []);
+                        c.graph.children_mut(root).splice(i..=i, [], []);
                     } else {
                         panic!(
                             "{} matched with {} at {} and {}\n",
@@ -248,8 +248,8 @@ fn group_brackets(context: &mut Context, root: &usize) {
             },
             _ if stack.is_empty() => i += 1,
             _ => {
-                let vs = context.graph.children_mut(root).splice(i..=i, [], []);
-                let top = context.graph.children_mut(stack.last().unwrap());
+                let vs = c.graph.children_mut(root).splice(i..=i, [], []);
+                let top = c.graph.children_mut(stack.last().unwrap());
                 top.splice(top.keys().len().., vs.0, vs.1);
             }
         }
