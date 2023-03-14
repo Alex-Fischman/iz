@@ -2,26 +2,125 @@
 #![allow(clippy::print_with_newline)]
 extern crate std;
 
-mod graph;
-mod map;
-
-use crate::graph::Graph;
 use std::{
     clone::Clone,
+    cmp::Eq,
+    collections::HashMap,
     env::args,
     fs::read_to_string,
+    hash::Hash,
     iter::Iterator,
-    option::{Option::None, Option::Some},
+    iter::{ExactSizeIterator, IntoIterator},
+    ops::RangeBounds,
+    option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
     {format, matches, print},
 };
 
-#[macro_export]
 macro_rules! panic {
     () => {{ std::process::exit(-1); }};
     ($fmt:literal) => {{ std::eprint!($fmt); std::process::exit(-1); }};
     ($fmt:literal, $($arg:tt)*) => {{ std::eprint!($fmt, $($arg)*); std::process::exit(-1); }};
+}
+
+pub trait Key: Clone + Eq + Hash {}
+impl<T: Clone + Eq + Hash> Key for T {}
+
+// has fast lookup from HashMap and ordering from Vec
+pub struct Map<K: Key, V> {
+    idxs: HashMap<K, usize>,
+    keys: Vec<K>,
+    vals: Vec<V>,
+}
+
+impl<K: Key, V> Map<K, V> {
+    pub fn new() -> Map<K, V> {
+        Map {
+            idxs: HashMap::new(),
+            keys: Vec::new(),
+            vals: Vec::new(),
+        }
+    }
+
+    pub fn keys(&self) -> &[K] {
+        &self.keys
+    }
+
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.idxs.get(key).map(|i| &self.vals[*i])
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+        self.idxs.get(key).map(|i| &mut self.vals[*i])
+    }
+
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.idxs.contains_key(key)
+    }
+
+    pub fn insert(&mut self, key: K, val: V) -> Option<V> {
+        match self.idxs.get(&key) {
+            Some(i) => Some(std::mem::replace(&mut self.vals[*i], val)),
+            None => {
+                self.idxs.insert(key.clone(), self.keys.len());
+                self.keys.push(key);
+                self.vals.push(val);
+                None
+            }
+        }
+    }
+
+    pub fn splice<'a, R, A, X, B, Y>(&'a mut self, range: R, keys: A, vals: B) -> (Vec<K>, Vec<V>)
+    where
+        R: RangeBounds<usize> + Clone,
+        A: IntoIterator<IntoIter = X>,
+        B: IntoIterator<IntoIter = Y>,
+        X: ExactSizeIterator<Item = K> + 'a,
+        Y: ExactSizeIterator<Item = V> + 'a,
+    {
+        let keys = keys.into_iter();
+        let vals = vals.into_iter();
+        if keys.len() != vals.len() {
+            panic!("keys and vals had different lengths")
+        }
+        let keys = self.keys.splice(range.clone(), keys).collect();
+        let vals = self.vals.splice(range, vals).collect();
+        // completely rebuild idxs; has to be linear anyway
+        self.idxs = self
+            .keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| (key.clone(), i))
+            .collect();
+        (keys, vals)
+    }
+}
+
+pub struct Graph<N: Key, E>(Map<N, Map<N, E>>);
+
+impl<N: Key, E> Graph<N, E> {
+    pub fn new() -> Graph<N, E> {
+        Graph(Map::new())
+    }
+
+    pub fn node(&mut self, node: N) {
+        self.0.insert(node, Map::new());
+    }
+
+    pub fn edge(&mut self, parent: N, child: N, edge: E) {
+        assert!(self.0.contains_key(&parent), "missing parent");
+        assert!(self.0.contains_key(&child), "missing child");
+        self.0.get_mut(&parent).unwrap().insert(child, edge);
+    }
+
+    pub fn children(&self, parent: &N) -> &Map<N, E> {
+        self.0.get(parent).unwrap()
+    }
+
+    pub fn children_mut(&mut self, parent: &N) -> &mut Map<N, E> {
+        self.0.get_mut(parent).unwrap()
+    }
 }
 
 // package these to make Token as small as possible
