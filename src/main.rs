@@ -1,5 +1,4 @@
 #![no_implicit_prelude]
-#![allow(clippy::print_with_newline)]
 extern crate std;
 
 use std::{
@@ -11,7 +10,7 @@ use std::{
     option::{Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {format, matches, print},
+    {format, matches, println},
 };
 
 macro_rules! panic {
@@ -71,19 +70,17 @@ impl<'a> Context<'a> {
         node
     }
 
-    fn children_mut(&mut self, parent: usize) -> &mut Vec<usize> {
-        self.graph.get_mut(&parent).unwrap()
-    }
-
     // if self.graph is a tree, will work as expected
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
     fn print_tree(&self, root: usize, indent: usize) {
-        print!("{}{:5}", "\t".repeat(indent), root);
-        if let Some(token) = self.tokens.get(root) {
-            print!(" at {}\t{:?}", token.location(), token.as_str());
-        }
-        print!("\n");
+        println!(
+            "{}{:5} at {}:\t{}",
+            "\t".repeat(indent),
+            root,
+            self.tokens[root].location(),
+            self.tokens[root].as_str(),
+        );
         for child in &self.graph[&root] {
             self.print_tree(*child, indent + 1);
         }
@@ -118,7 +115,7 @@ fn main() {
             lo: i,
             hi: j,
         });
-        c.children_mut(root).push(node);
+        c.graph.get_mut(&root).unwrap().push(node);
     }
 
     let passes = [
@@ -233,7 +230,7 @@ fn group_brackets(c: &mut Context, root: usize) {
                 Some(popped) => {
                     let opener = &c.tokens[popped];
                     if match_opener(opener) == token.as_str() {
-                        c.children_mut(root).remove(i);
+                        c.graph.get_mut(&root).unwrap().remove(i);
                     } else {
                         panic!(
                             "{} matched with {} at {} and {}\n",
@@ -247,8 +244,8 @@ fn group_brackets(c: &mut Context, root: usize) {
             },
             _ if stack.is_empty() => i += 1,
             _ => {
-                let child = c.children_mut(root).remove(i);
-                c.children_mut(*stack.last().unwrap()).push(child);
+                let child = c.graph.get_mut(&root).unwrap().remove(i);
+                c.graph.get_mut(stack.last().unwrap()).unwrap().push(child);
             }
         }
     }
