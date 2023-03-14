@@ -15,7 +15,7 @@ use std::{
     hash::Hash,
     iter::Iterator,
     marker::Copy,
-    option::Option::Some,
+    option::{Option::None, Option::Some},
     string::String,
     vec::Vec,
     {format, matches, print},
@@ -161,13 +161,7 @@ fn remove_comments(context: &mut Context, root: &Node) {
     while i < children.keys().len() {
         if context.tokens[&children.keys()[i]].as_str() == "#" {
             let mut j = i;
-            while j < children.keys().len()
-                && context
-                    .tokens
-                    .remove(&children.keys()[j])
-                    .unwrap()
-                    .as_str()
-                    != "\n"
+            while j < children.keys().len() && context.tokens[&children.keys()[j]].as_str() != "\n"
             {
                 j += 1;
             }
@@ -204,7 +198,6 @@ fn group_tokens(context: &mut Context, root: &Node) {
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            let curr = context.tokens.remove(&children.keys()[i]).unwrap();
             context.tokens.get_mut(&children.keys()[i - 1]).unwrap().hi = curr.hi;
             children.splice(i..=i, [], []);
         } else {
@@ -222,7 +215,6 @@ fn remove_whitespace(context: &mut Context, root: &Node) {
             .chars()
             .all(char::is_whitespace)
         {
-            context.tokens.remove(&children.keys()[i]).unwrap();
             children.splice(i..=i, [], []);
         } else {
             i += 1;
@@ -231,49 +223,45 @@ fn remove_whitespace(context: &mut Context, root: &Node) {
 }
 
 fn group_brackets(context: &mut Context, root: &Node) {
-    enum Target<'a> {
-        Nothing,
-        Round(&'a Token<'a>),
-        Curly(&'a Token<'a>),
-        Square(&'a Token<'a>),
-    }
-
-    group_brackets(context, root, &mut 0, Target::Nothing);
-    fn group_brackets(context: &mut Context, root: &Node, i: &mut usize, target: Target) {
-        while *i < context.graph.children(root).keys().len() {
-            let child = context.graph.children(root).keys()[*i];
-            *i += 1;
-            let token = context.tokens.get(&child).cloned().unwrap();
-            let mut handle_open_bracket = |target| {
-                let start = *i;
-                group_brackets(context, root, i, target);
-                let cs = context.graph.children_mut(root);
-                let mut vecs = cs.splice(start..*i, [], []);
-                // remove the closing bracket
-                vecs.0.pop();
-                vecs.1.pop();
-                let cs = context.graph.children_mut(&child);
-                cs.splice(0..0, vecs.0, vecs.1);
-                *i = start;
-            };
-            match token.as_str() {
-                "(" => handle_open_bracket(Target::Round(&token)),
-                "{" => handle_open_bracket(Target::Curly(&token)),
-                "[" => handle_open_bracket(Target::Square(&token)),
-                ")" if matches!(target, Target::Round(_)) => return,
-                ")" => panic!("extra ) at {}\n", token.location()),
-                "}" if matches!(target, Target::Curly(_)) => return,
-                "}" => panic!("extra }} at {}\n", token.location()),
-                "]" if matches!(target, Target::Square(_)) => return,
-                "]" => panic!("extra ] at {}\n", token.location()),
-                _ => {}
+    let match_opener = |token: &Token| match token.as_str() {
+        "(" => ")",
+        "{" => "}",
+        "[" => "]",
+        s => panic!("{} is not a token", s),
+    };
+    let mut stack = Vec::new();
+    let mut i = 0;
+    while i < context.graph.children(root).keys().len() {
+        let child = context.graph.children(root).keys()[i];
+        let token = &context.tokens[&child];
+        match token.as_str() {
+            "(" | "{" | "[" => {
+                stack.push(child);
+                i += 1
             }
-        }
-        match target {
-            Target::Nothing => {}
-            Target::Round(token) => panic!("missing ) for ( at {}\n", token.location()),
-            Target::Curly(token) => panic!("missing }} for {{ at {}\n", token.location()),
-            Target::Square(token) => panic!("missing ] for [ at {}\n", token.location()),
+            ")" | "}" | "]" => match stack.pop() {
+                None => panic!("extra {} at {}\n", token.as_str(), token.location()),
+                Some(popped) => {
+                    let opener = &context.tokens[&popped];
+                    if match_opener(opener) == token.as_str() {
+                        context.graph.children_mut(root).splice(i..=i, [], []);
+                    } else {
+                        panic!(
+                            "{} matched with {} at {} and {}\n",
+                            opener.as_str(),
+                            token.as_str(),
+                            opener.location(),
+                            token.location(),
+                        )
+                    }
+                }
+            },
+            _ if stack.is_empty() => i += 1,
+            _ => {
+                let vs = context.graph.children_mut(root).splice(i..=i, [], []);
+                let top = context.graph.children_mut(stack.last().unwrap());
+                top.splice(top.keys().len().., vs.0, vs.1);
+            }
         }
     }
 }
