@@ -8,13 +8,9 @@ mod map;
 use crate::graph::Graph;
 use std::{
     clone::Clone,
-    cmp::Eq,
-    collections::HashMap,
     env::args,
     fs::read_to_string,
-    hash::Hash,
     iter::Iterator,
-    marker::Copy,
     option::{Option::None, Option::Some},
     string::String,
     vec::Vec,
@@ -27,9 +23,6 @@ macro_rules! panic {
     ($fmt:literal) => {{ std::eprint!($fmt); std::process::exit(-1); }};
     ($fmt:literal, $($arg:tt)*) => {{ std::eprint!($fmt, $($arg)*); std::process::exit(-1); }};
 }
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct Node(usize);
 
 // package these to make Token as small as possible
 #[derive(PartialEq)]
@@ -68,25 +61,24 @@ impl Token<'_> {
 }
 
 struct Context<'a> {
-    id: Node,
-    graph: Graph<Node, ()>,
-    tokens: HashMap<Node, Token<'a>>,
+    graph: Graph<usize, ()>,
+    tokens: Vec<Token<'a>>,
 }
 
 impl<'a> Context<'a> {
-    fn node(&mut self) -> Node {
-        let node = self.id;
-        self.id.0 += 1;
+    fn node(&mut self, token: Token<'a>) -> usize {
+        let node = self.tokens.len();
         self.graph.node(node);
+        self.tokens.push(token);
         node
     }
 
     // if self.graph is a tree, will work as expected
     // if self.graph is a DAG, will print shared nodes multiple times
     // if self.graph has cycles, will loop forever
-    fn print_tree(&self, root: Node, indent: usize) {
-        print!("{}{:5}", "\t".repeat(indent), root.0);
-        if let Some(token) = self.tokens.get(&root) {
+    fn print_tree(&self, root: usize, indent: usize) {
+        print!("{}{:5}", "\t".repeat(indent), root);
+        if let Some(token) = self.tokens.get(root) {
             print!(" at {}\t{:?}", token.location(), token.as_str());
         }
         print!("\n");
@@ -107,25 +99,24 @@ fn main() {
     };
 
     let mut context = Context {
-        id: Node(0),
         graph: Graph::new(),
-        tokens: HashMap::new(),
+        tokens: Vec::new(),
     };
-    let root = context.node();
+    let root = context.node(Token {
+        source,
+        lo: 0,
+        hi: 0,
+    });
 
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        let node = context.node();
+        let node = context.node(Token {
+            source,
+            lo: i,
+            hi: j,
+        });
         context.graph.edge(root, node, ());
-        context.tokens.insert(
-            node,
-            Token {
-                source,
-                lo: i,
-                hi: j,
-            },
-        );
     }
 
     let passes = [
@@ -155,14 +146,13 @@ fn main() {
     context.print_tree(root, 0);
 }
 
-fn remove_comments(context: &mut Context, root: &Node) {
+fn remove_comments(context: &mut Context, root: &usize) {
     let mut i = 0;
     let children = context.graph.children_mut(root);
     while i < children.keys().len() {
-        if context.tokens[&children.keys()[i]].as_str() == "#" {
+        if context.tokens[children.keys()[i]].as_str() == "#" {
             let mut j = i;
-            while j < children.keys().len() && context.tokens[&children.keys()[j]].as_str() != "\n"
-            {
+            while j < children.keys().len() && context.tokens[children.keys()[j]].as_str() != "\n" {
                 j += 1;
             }
             children.splice(i..=j, [], []);
@@ -172,7 +162,7 @@ fn remove_comments(context: &mut Context, root: &Node) {
     }
 }
 
-fn group_tokens(context: &mut Context, root: &Node) {
+fn group_tokens(context: &mut Context, root: &usize) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -191,14 +181,14 @@ fn group_tokens(context: &mut Context, root: &Node) {
     let mut i = 1;
     let children = context.graph.children_mut(root);
     while i < children.keys().len() {
-        let curr = &context.tokens[&children.keys()[i]];
-        let prev = &context.tokens[&children.keys()[i - 1]];
+        let curr = &context.tokens[children.keys()[i]];
+        let prev = &context.tokens[children.keys()[i - 1]];
         if !is_bracket(curr.as_str())
             && token_type(curr.as_str()) == token_type(prev.as_str())
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            context.tokens.get_mut(&children.keys()[i - 1]).unwrap().hi = curr.hi;
+            context.tokens.get_mut(children.keys()[i - 1]).unwrap().hi = curr.hi;
             children.splice(i..=i, [], []);
         } else {
             i += 1;
@@ -206,11 +196,11 @@ fn group_tokens(context: &mut Context, root: &Node) {
     }
 }
 
-fn remove_whitespace(context: &mut Context, root: &Node) {
+fn remove_whitespace(context: &mut Context, root: &usize) {
     let mut i = 0;
     let children = context.graph.children_mut(root);
     while i < children.keys().len() {
-        if context.tokens[&children.keys()[i]]
+        if context.tokens[children.keys()[i]]
             .as_str()
             .chars()
             .all(char::is_whitespace)
@@ -222,7 +212,7 @@ fn remove_whitespace(context: &mut Context, root: &Node) {
     }
 }
 
-fn group_brackets(context: &mut Context, root: &Node) {
+fn group_brackets(context: &mut Context, root: &usize) {
     let match_opener = |token: &Token| match token.as_str() {
         "(" => ")",
         "{" => "}",
@@ -233,7 +223,7 @@ fn group_brackets(context: &mut Context, root: &Node) {
     let mut i = 0;
     while i < context.graph.children(root).keys().len() {
         let child = context.graph.children(root).keys()[i];
-        let token = &context.tokens[&child];
+        let token = &context.tokens[child];
         match token.as_str() {
             "(" | "{" | "[" => {
                 stack.push(child);
@@ -242,7 +232,7 @@ fn group_brackets(context: &mut Context, root: &Node) {
             ")" | "}" | "]" => match stack.pop() {
                 None => panic!("extra {} at {}\n", token.as_str(), token.location()),
                 Some(popped) => {
-                    let opener = &context.tokens[&popped];
+                    let opener = &context.tokens[popped];
                     if match_opener(opener) == token.as_str() {
                         context.graph.children_mut(root).splice(i..=i, [], []);
                     } else {
