@@ -263,19 +263,19 @@ fn group_brackets(context: &mut Context, root: &Node) {
                 "{" => handle_open_bracket(Target::Curly(&token)),
                 "[" => handle_open_bracket(Target::Square(&token)),
                 ")" if matches!(target, Target::Round(_)) => return,
-                ")" => panic!("extra ) at {}", token.location()),
+                ")" => panic!("extra ) at {}\n", token.location()),
                 "}" if matches!(target, Target::Curly(_)) => return,
-                "}" => panic!("extra }} at {}", token.location()),
+                "}" => panic!("extra }} at {}\n", token.location()),
                 "]" if matches!(target, Target::Square(_)) => return,
-                "]" => panic!("extra ] at {}", token.location()),
+                "]" => panic!("extra ] at {}\n", token.location()),
                 _ => {}
             }
         }
         match target {
             Target::Nothing => {}
-            Target::Round(token) => panic!("missing ) for ( at {}", token.location()),
-            Target::Curly(token) => panic!("missing }} for {{ at {}", token.location()),
-            Target::Square(token) => panic!("missing ] for [ at {}", token.location()),
+            Target::Round(token) => panic!("missing ) for ( at {}\n", token.location()),
+            Target::Curly(token) => panic!("missing }} for {{ at {}\n", token.location()),
+            Target::Square(token) => panic!("missing ] for [ at {}\n", token.location()),
         }
     }
 }
