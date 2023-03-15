@@ -6,7 +6,7 @@ use std::{
     env::args,
     fs::read_to_string,
     iter::Iterator,
-    option::{Option, Option::None, Option::Some},
+    option::{Option::None, Option::Some},
     string::String,
     vec::Vec,
     {format, matches, println},
@@ -187,52 +187,47 @@ fn remove_whitespace(c: &mut Context) {
 }
 
 fn group_brackets(c: &mut Context) {
-    group_brackets(c, &mut 0, None);
-    fn group_brackets(c: &mut Context, i: &mut usize, opener: Option<Token>) {
-        let match_opener = |token: &Token| match token.as_str() {
-            "(" => ")",
-            "{" => "}",
-            "[" => "]",
-            s => panic!("{} is not a bracket\n", s),
-        };
-        while *i < c.children.len() {
-            match c.children[*i].token.as_str() {
-                "(" | "{" | "[" => {
-                    let start = *i;
-                    *i += 1;
-                    group_brackets(c, i, Some(c.children[start].token.clone()));
-                    c.children[start].children = c.children.drain(start + 1..=*i).collect();
-                    c.children[start].children.pop();
-                    *i = start;
+    let match_opener = |token: &Token| match token.as_str() {
+        "(" => ")",
+        "{" => "}",
+        "[" => "]",
+        s => panic!("{} is not a bracket\n", s),
+    };
+    let mut openers = Vec::new();
+    let mut i = 0;
+    while i < c.children.len() {
+        match c.children[i].token.as_str() {
+            "(" | "{" | "[" => openers.push((i, c.children[i].token.clone())),
+            ")" | "}" | "]" => match openers.pop() {
+                Some((l, opener)) if match_opener(&opener) == c.children[i].token.as_str() => {
+                    let mut cs: Vec<Context> = c.children.drain(l + 1..=i).collect();
+                    cs.pop(); // remove closing bracket
+                    c.children[l].children = cs;
+                    i = l;
                 }
-                ")" | "}" | "]" => match opener {
-                    Some(opener) if match_opener(&opener) == c.children[*i].token.as_str() => {
-                        return
-                    }
-                    Some(opener) => panic!(
-                        "{} matched with {} at {} and {}\n",
-                        opener.as_str(),
-                        c.children[*i].token.as_str(),
-                        opener.location(),
-                        c.children[*i].token.location(),
-                    ),
-                    None => panic!(
-                        "extra {} at {}\n",
-                        c.children[*i].token.as_str(),
-                        c.children[*i].token.location()
-                    ),
-                },
-                _ => {}
-            }
-            *i += 1;
+                Some((_, opener)) => panic!(
+                    "{} matched with {} at {} and {}\n",
+                    opener.as_str(),
+                    c.children[i].token.as_str(),
+                    opener.location(),
+                    c.children[i].token.location(),
+                ),
+                None => panic!(
+                    "extra {} at {}\n",
+                    c.children[i].token.as_str(),
+                    c.children[i].token.location()
+                ),
+            },
+            _ => {}
         }
-        if let Some(opener) = opener {
-            panic!(
-                "no {} for {} at {}\n",
-                match_opener(&opener),
-                opener.as_str(),
-                opener.location()
-            )
-        }
+        i += 1;
+    }
+    if let Some((_, opener)) = openers.last() {
+        panic!(
+            "no {} for {} at {}\n",
+            match_opener(opener),
+            opener.as_str(),
+            opener.location()
+        )
     }
 }
