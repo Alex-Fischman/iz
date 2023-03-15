@@ -3,6 +3,7 @@ extern crate std;
 
 use std::{
     clone::Clone,
+    collections::HashMap,
     env::args,
     fs::read_to_string,
     iter::Iterator,
@@ -54,48 +55,19 @@ impl Token<'_> {
     }
 }
 
-use graph::{Graph, Node};
-mod graph {
-    extern crate std;
-    use std::{collections::HashMap, vec::Vec};
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+struct Node(usize);
+struct Graph<T> {
+    nodes: HashMap<Node, T>,
+    edges: HashMap<Node, Vec<Node>>,
+}
 
-    #[derive(Clone, Copy, Eq, Hash, PartialEq)]
-    pub struct Node(usize);
-    pub struct Graph<T> {
-        nodes: Vec<T>,
-        edges: HashMap<Node, Vec<Node>>,
-    }
-
-    impl<T> Graph<T> {
-        pub fn new() -> Graph<T> {
-            Graph {
-                nodes: Vec::new(),
-                edges: HashMap::new(),
-            }
-        }
-
-        pub fn node(&mut self, x: T) -> Node {
-            let node = self.nodes.len();
-            self.nodes.push(x);
-            self.edges.insert(Node(node), Vec::new());
-            Node(node)
-        }
-
-        pub fn data(&self, node: Node) -> &T {
-            &self.nodes[node.0]
-        }
-
-        pub fn data_mut(&mut self, node: Node) -> &mut T {
-            &mut self.nodes[node.0]
-        }
-
-        pub fn children(&self, node: Node) -> &[Node] {
-            &self.edges[&node]
-        }
-
-        pub fn children_mut(&mut self, node: Node) -> &mut Vec<Node> {
-            self.edges.get_mut(&node).unwrap()
-        }
+impl<T> Graph<T> {
+    fn node(&mut self, x: T) -> Node {
+        let node = Node(self.nodes.len());
+        self.nodes.insert(node, x);
+        self.edges.insert(node, Vec::new());
+        node
     }
 }
 
@@ -108,10 +80,10 @@ fn print_tree(c: &Context, root: &Node, indent: usize) {
     println!(
         "{}at {}:\t{}",
         "\t".repeat(indent),
-        c.data(*root).location(),
-        c.data(*root).as_str(),
+        c.nodes[root].location(),
+        c.nodes[root].as_str(),
     );
-    for child in c.children(*root) {
+    for child in &c.edges[root] {
         print_tree(c, child, indent + 1);
     }
 }
@@ -126,7 +98,10 @@ fn main() {
         text,
     };
 
-    let mut c = Graph::new();
+    let mut c: Context = Graph {
+        nodes: HashMap::new(),
+        edges: HashMap::new(),
+    };
     let root = c.node(Token {
         source,
         lo: 0,
@@ -141,7 +116,7 @@ fn main() {
             lo: i,
             hi: j,
         });
-        c.children_mut(root).push(node);
+        c.edges.get_mut(&root).unwrap().push(node);
     }
 
     let passes = [
@@ -165,28 +140,28 @@ fn main() {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut c, root)
+        pass(&mut c, &root)
     }
 
     print_tree(&c, &root, 0);
 }
 
-fn remove_comments(c: &mut Context, root: Node) {
+fn remove_comments(c: &mut Context, root: &Node) {
     let mut i = 0;
-    while i < c.children(root).len() {
-        if c.data(c.children(root)[i]).as_str() == "#" {
+    while i < c.edges[root].len() {
+        if c.nodes[&c.edges[root][i]].as_str() == "#" {
             let mut j = i;
-            while j < c.children(root).len() && c.data(c.children(root)[j]).as_str() != "\n" {
+            while j < c.edges[root].len() && c.nodes[&c.edges[root][j]].as_str() != "\n" {
                 j += 1;
             }
-            c.children_mut(root).drain(i..=j);
+            c.edges.get_mut(root).unwrap().drain(i..=j);
         } else {
             i += 1;
         }
     }
 }
 
-fn group_tokens(c: &mut Context, root: Node) {
+fn group_tokens(c: &mut Context, root: &Node) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -203,38 +178,30 @@ fn group_tokens(c: &mut Context, root: Node) {
     };
 
     let mut i = 1;
-    while i < c.children(root).len() {
-        let curr = &c.data(c.children(root)[i]);
-        let prev = &c.data(c.children(root)[i - 1]);
+    while i < c.edges[root].len() {
+        let curr = &c.nodes[&c.edges[root][i]];
+        let prev = &c.nodes[&c.edges[root][i - 1]];
         if !is_bracket(curr.as_str())
             && token_type(curr.as_str()) == token_type(prev.as_str())
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            c.data_mut(c.children(root)[i - 1]).hi = curr.hi;
-            c.children_mut(root).remove(i);
+            c.nodes.get_mut(&c.edges[root][i - 1]).unwrap().hi = curr.hi;
+            c.edges.get_mut(root).unwrap().remove(i);
         } else {
             i += 1;
         }
     }
 }
 
-fn remove_whitespace(c: &mut Context, root: Node) {
-    let mut i = 0;
-    while i < c.children(root).len() {
-        if c.data(c.children(root)[i])
-            .as_str()
-            .chars()
-            .all(char::is_whitespace)
-        {
-            c.children_mut(root).remove(i);
-        } else {
-            i += 1;
-        }
-    }
+fn remove_whitespace(c: &mut Context, root: &Node) {
+    c.edges
+        .get_mut(root)
+        .unwrap()
+        .retain(|node| !c.nodes[node].as_str().chars().all(char::is_whitespace));
 }
 
-fn group_brackets(c: &mut Context, root: Node) {
+fn group_brackets(c: &mut Context, root: &Node) {
     let match_opener = |token: &Token| match token.as_str() {
         "(" => ")",
         "{" => "}",
@@ -243,9 +210,9 @@ fn group_brackets(c: &mut Context, root: Node) {
     };
     let mut stack = Vec::new();
     let mut i = 0;
-    while i < c.children(root).len() {
-        let child = c.children(root)[i];
-        let token = c.data(child);
+    while i < c.edges[root].len() {
+        let child = c.edges[root][i];
+        let token = &c.nodes[&child];
         match token.as_str() {
             "(" | "{" | "[" => {
                 stack.push(child);
@@ -254,9 +221,9 @@ fn group_brackets(c: &mut Context, root: Node) {
             ")" | "}" | "]" => match stack.pop() {
                 None => panic!("extra {} at {}\n", token.as_str(), token.location()),
                 Some(popped) => {
-                    let opener = &c.data(popped);
+                    let opener = &c.nodes[&popped];
                     if match_opener(opener) == token.as_str() {
-                        c.children_mut(root).remove(i);
+                        c.edges.get_mut(root).unwrap().remove(i);
                     } else {
                         panic!(
                             "{} matched with {} at {} and {}\n",
@@ -270,8 +237,8 @@ fn group_brackets(c: &mut Context, root: Node) {
             },
             _ if stack.is_empty() => i += 1,
             _ => {
-                let child = c.children_mut(root).remove(i);
-                c.children_mut(*stack.last().unwrap()).push(child);
+                let child = c.edges.get_mut(root).unwrap().remove(i);
+                c.edges.get_mut(stack.last().unwrap()).unwrap().push(child);
             }
         }
     }
