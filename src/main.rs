@@ -37,6 +37,8 @@ impl Token<'_> {
         &self.source.text[self.lo..self.hi]
     }
 
+    // not stored directly because it's only useful in error messages
+    // so we only ever care about finding a few locations per compile
     fn location(&self) -> String {
         let mut row = 1;
         let mut col = 1;
@@ -59,18 +61,17 @@ struct Context<'a> {
     children: Vec<Context<'a>>,
 }
 
-// if self.graph is a tree, will work as expected
-// if self.graph is a DAG, will print shared nodes multiple times
-// if self.graph has cycles, will loop forever
-fn print_tree(c: &Context, indent: usize) {
-    println!(
-        "{}at {}:\t{}",
-        "\t".repeat(indent),
-        c.token.location(),
-        c.token.as_str(),
-    );
-    for child in &c.children {
-        print_tree(child, indent + 1);
+impl Context<'_> {
+    fn print_tree(&self, indent: usize) {
+        println!(
+            "{}at {}:\t{}",
+            "\t".repeat(indent),
+            self.token.location(),
+            self.token.as_str(),
+        );
+        for child in &self.children {
+            child.print_tree(indent + 1);
+        }
     }
 }
 
@@ -130,7 +131,7 @@ fn main() {
         pass(&mut c)
     }
 
-    print_tree(&c, 0);
+    c.print_tree(0);
 }
 
 fn remove_comments(c: &mut Context) {
