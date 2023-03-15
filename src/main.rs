@@ -226,5 +226,13 @@ fn group_brackets(c: &mut Context) {
             }
             *i += 1;
         }
+        if let Some(opener) = opener {
+            panic!(
+                "no {} for {} at {}\n",
+                match_opener(&opener),
+                opener.as_str(),
+                opener.location()
+            )
+        }
     }
 }
