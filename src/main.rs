@@ -193,37 +193,38 @@ fn group_brackets(c: &mut Context) {
             "(" => ")",
             "{" => "}",
             "[" => "]",
-            s => panic!("{} is not a token", s),
+            s => panic!("{} is not a bracket\n", s),
         };
         while *i < c.children.len() {
-            *i += 1;
-            match c.children[*i - 1].token.as_str() {
+            match c.children[*i].token.as_str() {
                 "(" | "{" | "[" => {
                     let start = *i;
-                    group_brackets(c, i, Some(c.children[start - 1].token.clone()));
-                    c.children[start - 1].children = c.children.drain(start..*i).collect();
-                    c.children[start - 1].children.pop();
+                    *i += 1;
+                    group_brackets(c, i, Some(c.children[start].token.clone()));
+                    c.children[start].children = c.children.drain(start + 1..=*i).collect();
+                    c.children[start].children.pop();
                     *i = start;
                 }
                 ")" | "}" | "]" => match opener {
-                    Some(opener) if match_opener(&opener) == c.children[*i - 1].token.as_str() => {
+                    Some(opener) if match_opener(&opener) == c.children[*i].token.as_str() => {
                         return
                     }
                     Some(opener) => panic!(
                         "{} matched with {} at {} and {}\n",
                         opener.as_str(),
-                        c.children[*i - 1].token.as_str(),
+                        c.children[*i].token.as_str(),
                         opener.location(),
-                        c.children[*i - 1].token.location(),
+                        c.children[*i].token.location(),
                     ),
                     None => panic!(
                         "extra {} at {}\n",
-                        c.children[*i - 1].token.as_str(),
-                        c.children[*i - 1].token.location()
+                        c.children[*i].token.as_str(),
+                        c.children[*i].token.location()
                     ),
                 },
                 _ => {}
             }
+            *i += 1;
         }
     }
 }
