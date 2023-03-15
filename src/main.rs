@@ -3,11 +3,10 @@ extern crate std;
 
 use std::{
     clone::Clone,
-    collections::HashMap,
     env::args,
     fs::read_to_string,
     iter::Iterator,
-    option::{Option::None, Option::Some},
+    option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
     {format, matches, println},
@@ -55,36 +54,23 @@ impl Token<'_> {
     }
 }
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-struct Node(usize);
-struct Graph<T> {
-    nodes: HashMap<Node, T>,
-    edges: HashMap<Node, Vec<Node>>,
+struct Context<'a> {
+    token: Token<'a>,
+    children: Vec<Context<'a>>,
 }
-
-impl<T> Graph<T> {
-    fn node(&mut self, x: T) -> Node {
-        let node = Node(self.nodes.len());
-        self.nodes.insert(node, x);
-        self.edges.insert(node, Vec::new());
-        node
-    }
-}
-
-type Context<'a> = Graph<Token<'a>>;
 
 // if self.graph is a tree, will work as expected
 // if self.graph is a DAG, will print shared nodes multiple times
 // if self.graph has cycles, will loop forever
-fn print_tree(c: &Context, root: &Node, indent: usize) {
+fn print_tree(c: &Context, indent: usize) {
     println!(
         "{}at {}:\t{}",
         "\t".repeat(indent),
-        c.nodes[root].location(),
-        c.nodes[root].as_str(),
+        c.token.location(),
+        c.token.as_str(),
     );
-    for child in &c.edges[root] {
-        print_tree(c, child, indent + 1);
+    for child in &c.children {
+        print_tree(child, indent + 1);
     }
 }
 
@@ -98,25 +84,26 @@ fn main() {
         text,
     };
 
-    let mut c: Context = Graph {
-        nodes: HashMap::new(),
-        edges: HashMap::new(),
+    let mut c: Context = Context {
+        token: Token {
+            source,
+            lo: 0,
+            hi: 0,
+        },
+        children: Vec::new(),
     };
-    let root = c.node(Token {
-        source,
-        lo: 0,
-        hi: 0,
-    });
 
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        let node = c.node(Token {
-            source,
-            lo: i,
-            hi: j,
+        c.children.push(Context {
+            token: Token {
+                source,
+                lo: i,
+                hi: j,
+            },
+            children: Vec::new(),
         });
-        c.edges.get_mut(&root).unwrap().push(node);
     }
 
     let passes = [
@@ -140,28 +127,28 @@ fn main() {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut c, &root)
+        pass(&mut c)
     }
 
-    print_tree(&c, &root, 0);
+    print_tree(&c, 0);
 }
 
-fn remove_comments(c: &mut Context, root: &Node) {
+fn remove_comments(c: &mut Context) {
     let mut i = 0;
-    while i < c.edges[root].len() {
-        if c.nodes[&c.edges[root][i]].as_str() == "#" {
+    while i < c.children.len() {
+        if c.children[i].token.as_str() == "#" {
             let mut j = i;
-            while j < c.edges[root].len() && c.nodes[&c.edges[root][j]].as_str() != "\n" {
+            while j < c.children.len() && c.children[j].token.as_str() != "\n" {
                 j += 1;
             }
-            c.edges.get_mut(root).unwrap().drain(i..=j);
+            c.children.drain(i..=j);
         } else {
             i += 1;
         }
     }
 }
 
-fn group_tokens(c: &mut Context, root: &Node) {
+fn group_tokens(c: &mut Context) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -178,67 +165,64 @@ fn group_tokens(c: &mut Context, root: &Node) {
     };
 
     let mut i = 1;
-    while i < c.edges[root].len() {
-        let curr = &c.nodes[&c.edges[root][i]];
-        let prev = &c.nodes[&c.edges[root][i - 1]];
+    while i < c.children.len() {
+        let curr = &c.children[i].token;
+        let prev = &c.children[i - 1].token;
         if !is_bracket(curr.as_str())
             && token_type(curr.as_str()) == token_type(prev.as_str())
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            c.nodes.get_mut(&c.edges[root][i - 1]).unwrap().hi = curr.hi;
-            c.edges.get_mut(root).unwrap().remove(i);
+            c.children[i - 1].token.hi = curr.hi;
+            c.children.remove(i);
         } else {
             i += 1;
         }
     }
 }
 
-fn remove_whitespace(c: &mut Context, root: &Node) {
-    c.edges
-        .get_mut(root)
-        .unwrap()
-        .retain(|node| !c.nodes[node].as_str().chars().all(char::is_whitespace));
+fn remove_whitespace(c: &mut Context) {
+    c.children
+        .retain(|child| !child.token.as_str().chars().all(char::is_whitespace));
 }
 
-fn group_brackets(c: &mut Context, root: &Node) {
-    let match_opener = |token: &Token| match token.as_str() {
-        "(" => ")",
-        "{" => "}",
-        "[" => "]",
-        s => panic!("{} is not a token", s),
-    };
-    let mut stack = Vec::new();
-    let mut i = 0;
-    while i < c.edges[root].len() {
-        let child = c.edges[root][i];
-        let token = &c.nodes[&child];
-        match token.as_str() {
-            "(" | "{" | "[" => {
-                stack.push(child);
-                i += 1
-            }
-            ")" | "}" | "]" => match stack.pop() {
-                None => panic!("extra {} at {}\n", token.as_str(), token.location()),
-                Some(popped) => {
-                    let opener = &c.nodes[&popped];
-                    if match_opener(opener) == token.as_str() {
-                        c.edges.get_mut(root).unwrap().remove(i);
-                    } else {
-                        panic!(
-                            "{} matched with {} at {} and {}\n",
-                            opener.as_str(),
-                            token.as_str(),
-                            opener.location(),
-                            token.location(),
-                        )
-                    }
+fn group_brackets(c: &mut Context) {
+    group_brackets(c, &mut 0, None);
+    fn group_brackets(c: &mut Context, i: &mut usize, opener: Option<Token>) {
+        let match_opener = |token: &Token| match token.as_str() {
+            "(" => ")",
+            "{" => "}",
+            "[" => "]",
+            s => panic!("{} is not a token", s),
+        };
+        while *i < c.children.len() {
+            *i += 1;
+            match c.children[*i - 1].token.as_str() {
+                "(" | "{" | "[" => {
+                    let start = *i;
+                    group_brackets(c, i, Some(c.children[start - 1].token.clone()));
+                    c.children[start - 1].children = c.children.drain(start..*i).collect();
+                    c.children[start - 1].children.pop();
+                    *i = start;
                 }
-            },
-            _ if stack.is_empty() => i += 1,
-            _ => {
-                let child = c.edges.get_mut(root).unwrap().remove(i);
-                c.edges.get_mut(stack.last().unwrap()).unwrap().push(child);
+                ")" | "}" | "]" => match opener {
+                    Some(opener) if match_opener(&opener) == c.children[*i - 1].token.as_str() => {
+                        return
+                    }
+                    Some(opener) => panic!(
+                        "{} matched with {} at {} and {}\n",
+                        opener.as_str(),
+                        c.children[*i - 1].token.as_str(),
+                        opener.location(),
+                        c.children[*i - 1].token.location(),
+                    ),
+                    None => panic!(
+                        "extra {} at {}\n",
+                        c.children[*i - 1].token.as_str(),
+                        c.children[*i - 1].token.location()
+                    ),
+                },
+                _ => {}
             }
         }
     }
