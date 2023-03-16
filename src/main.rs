@@ -162,7 +162,7 @@ fn main() {
             },
             children: Vec::new(),
         },
-        precedences,
+        precedences: Precedences(precedences),
     };
 
     let is = source.text.char_indices().map(|(i, _)| i);
@@ -314,7 +314,7 @@ struct Operator {
 // a list of precedence levels, each of which contains
 // a map from strings to Operators
 // a bool for right associativity
-type Precedences = Vec<(HashMap<String, Operator>, bool)>;
+struct Precedences(Vec<(HashMap<String, Operator>, bool)>);
 
 fn group_operators(c: &mut Context) {
     group_operators(&mut c.tree, &c.precedences);
@@ -323,7 +323,7 @@ fn group_operators(c: &mut Context) {
             group_operators(child, precedences)
         }
 
-        for (ops, right_assoc) in precedences {
+        for (ops, right_assoc) in &precedences.0 {
             let mut i = if *right_assoc {
                 tree.children.len().wrapping_sub(1)
             } else {
