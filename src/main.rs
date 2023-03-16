@@ -9,6 +9,7 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
     fs::read_to_string,
     iter::{Extend, Iterator},
+    ops::{Deref, DerefMut},
     option::{Option, Option::None, Option::Some},
     result::Result::Ok,
     string::String,
@@ -67,6 +68,20 @@ struct Tree<T> {
 
 struct Context<'a> {
     tree: Tree<Token<'a>>,
+    precedences: Precedences<'a>,
+}
+
+impl<'a> Deref for Context<'a> {
+    type Target = Tree<Token<'a>>;
+    fn deref(&self) -> &Tree<Token<'a>> {
+        &self.tree
+    }
+}
+
+impl<'a> DerefMut for Context<'a> {
+    fn deref_mut(&mut self) -> &mut Tree<Token<'a>> {
+        &mut self.tree
+    }
 }
 
 impl Display for Context<'_> {
@@ -98,6 +113,32 @@ fn main() {
         text,
     };
 
+    let ops = |ops: &[(&str, Option<&str>, usize, usize)]| {
+        let mut map = HashMap::new();
+        for &(name, func, left, right) in ops {
+            map.insert(
+                name.to_owned(),
+                Operator {
+                    func: func.map(|s| s.to_owned()),
+                    left,
+                    right,
+                },
+            );
+        }
+        map
+    };
+    let precedences: Precedences = &[
+        (ops(&[(":", None, 1, 0)]), false),
+        (ops(&[("?", None, 1, 0)]), false),
+        (ops(&[("~", None, 0, 1)]), true),
+        (ops(&[("$", None, 0, 1)]), true),
+        (
+            ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)]),
+            true,
+        ),
+        (ops(&[("+", Some("add"), 1, 1)]), false),
+    ];
+
     let mut c: Context = Context {
         tree: Tree {
             x: Token {
@@ -107,12 +148,13 @@ fn main() {
             },
             children: Vec::new(),
         },
+        precedences,
     };
 
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        c.tree.children.push(Tree {
+        c.children.push(Tree {
             x: Token {
                 source,
                 lo: i,
@@ -151,13 +193,13 @@ fn main() {
 
 fn remove_comments(c: &mut Context) {
     let mut i = 0;
-    while i < c.tree.children.len() {
-        if c.tree.children[i].x.as_str() == "#" {
+    while i < c.children.len() {
+        if c.children[i].x.as_str() == "#" {
             let mut j = i;
-            while j < c.tree.children.len() && c.tree.children[j].x.as_str() != "\n" {
+            while j < c.children.len() && c.children[j].x.as_str() != "\n" {
                 j += 1;
             }
-            c.tree.children.drain(i..=j);
+            c.children.drain(i..=j);
         } else {
             i += 1;
         }
@@ -181,16 +223,16 @@ fn group_tokens(c: &mut Context) {
     };
 
     let mut i = 1;
-    while i < c.tree.children.len() {
-        let curr = &c.tree.children[i].x;
-        let prev = &c.tree.children[i - 1].x;
+    while i < c.children.len() {
+        let curr = &c.children[i].x;
+        let prev = &c.children[i - 1].x;
         if !is_bracket(curr.as_str())
             && token_type(curr.as_str()) == token_type(prev.as_str())
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            c.tree.children[i - 1].x.hi = curr.hi;
-            c.tree.children.remove(i);
+            c.children[i - 1].x.hi = curr.hi;
+            c.children.remove(i);
         } else {
             i += 1;
         }
@@ -212,27 +254,27 @@ fn group_brackets(c: &mut Context) {
     };
     let mut openers = Vec::new();
     let mut i = 0;
-    while i < c.tree.children.len() {
-        match c.tree.children[i].x.as_str() {
-            "(" | "{" | "[" => openers.push((i, c.tree.children[i].x.clone())),
+    while i < c.children.len() {
+        match c.children[i].x.as_str() {
+            "(" | "{" | "[" => openers.push((i, c.children[i].x.clone())),
             ")" | "}" | "]" => match openers.pop() {
-                Some((l, opener)) if match_opener(&opener) == c.tree.children[i].x.as_str() => {
-                    let mut cs: Vec<Tree<Token>> = c.tree.children.drain(l + 1..=i).collect();
+                Some((l, opener)) if match_opener(&opener) == c.children[i].x.as_str() => {
+                    let mut cs: Vec<Tree<Token>> = c.children.drain(l + 1..=i).collect();
                     cs.pop(); // remove closing bracket
-                    c.tree.children[l].children = cs;
+                    c.children[l].children = cs;
                     i = l;
                 }
                 Some((_, opener)) => panic!(
                     "{} matched with {} at {} and {}\n",
                     opener.as_str(),
-                    c.tree.children[i].x.as_str(),
+                    c.children[i].x.as_str(),
                     opener.location(),
-                    c.tree.children[i].x.location(),
+                    c.children[i].x.location(),
                 ),
                 None => panic!(
                     "extra {} at {}\n",
-                    c.tree.children[i].x.as_str(),
-                    c.tree.children[i].x.location()
+                    c.children[i].x.as_str(),
+                    c.children[i].x.location()
                 ),
             },
             _ => {}
@@ -261,34 +303,11 @@ struct Operator {
 type Precedences<'a> = &'a [(HashMap<String, Operator>, bool)];
 
 fn group_operators(c: &mut Context) {
-    group_operators(&mut c.tree);
-    fn group_operators(tree: &mut Tree<Token>) {
+    group_operators(&mut c.tree, c.precedences);
+    fn group_operators(tree: &mut Tree<Token>, precedences: Precedences) {
         for child in &mut tree.children {
-            group_operators(child)
+            group_operators(child, precedences)
         }
-
-        let ops = |ops: &[(&str, Option<&str>, usize, usize)]| {
-            let mut map = HashMap::new();
-            for &(name, func, left, right) in ops {
-                map.insert(
-                    name.to_owned(),
-                    Operator {
-                        func: func.map(|s| s.to_owned()),
-                        left,
-                        right,
-                    },
-                );
-            }
-            map
-        };
-        let precedences: Precedences = &[
-            (ops(&[(":", None, 1, 0)]), false),
-            (ops(&[("?", None, 1, 0)]), false),
-            (ops(&[("~", None, 0, 1)]), true),
-            (ops(&[("$", None, 0, 1)]), true),
-            (ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)]), true),
-            (ops(&[("+", Some("add"), 1, 1)]), false),
-        ];
 
         for (ops, right_assoc) in precedences {
             let mut i = if *right_assoc {
