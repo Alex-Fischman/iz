@@ -67,9 +67,9 @@ impl Token<'_> {
     }
 }
 
-struct Tree<T> {
-    x: T,
-    children: Vec<Tree<T>>,
+struct Tree<'a> {
+    x: Token<'a>,
+    children: Vec<Tree<'a>>,
 }
 
 struct Data(HashMap<String, Box<dyn Any>>);
@@ -176,7 +176,7 @@ fn main() {
     }
 
     print_tree(&tree, 0);
-    fn print_tree(tree: &Tree<Token>, indent: usize) {
+    fn print_tree(tree: &Tree, indent: usize) {
         println!(
             "{}at {}:\t{}",
             "\t".repeat(indent),
@@ -189,7 +189,7 @@ fn main() {
     }
 }
 
-fn remove_comments(tree: &mut Tree<Token>, _data: &mut Data) {
+fn remove_comments(tree: &mut Tree, _data: &mut Data) {
     let mut i = 0;
     while i < tree.children.len() {
         if tree.children[i].x.deref() == "#" {
@@ -204,7 +204,7 @@ fn remove_comments(tree: &mut Tree<Token>, _data: &mut Data) {
     }
 }
 
-fn group_tokens(tree: &mut Tree<Token>, _data: &mut Data) {
+fn group_tokens(tree: &mut Tree, _data: &mut Data) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -237,12 +237,12 @@ fn group_tokens(tree: &mut Tree<Token>, _data: &mut Data) {
     }
 }
 
-fn remove_whitespace(tree: &mut Tree<Token>, _data: &mut Data) {
+fn remove_whitespace(tree: &mut Tree, _data: &mut Data) {
     tree.children
         .retain(|child| !child.x.chars().all(char::is_whitespace));
 }
 
-fn group_brackets(tree: &mut Tree<Token>, _data: &mut Data) {
+fn group_brackets(tree: &mut Tree, _data: &mut Data) {
     let match_opener = |token: &str| match token {
         "(" => ")",
         "{" => "}",
@@ -257,7 +257,7 @@ fn group_brackets(tree: &mut Tree<Token>, _data: &mut Data) {
             "(" | "{" | "[" => openers.push((i, tree.children[i].x.clone())),
             ")" | "}" | "]" => match openers.pop() {
                 Some((l, opener)) if match_opener(&opener) == tree.children[i].x.deref() => {
-                    let mut cs: Vec<Tree<Token>> = tree.children.drain(l + 1..=i).collect();
+                    let mut cs: Vec<Tree> = tree.children.drain(l + 1..=i).collect();
                     cs.pop(); // remove closing bracket
                     tree.children[l].children = cs;
                     i = l;
@@ -300,7 +300,7 @@ struct Operator {
 // a bool for right associativity
 type Precedences = Vec<(HashMap<String, Operator>, bool)>;
 
-fn group_operators(tree: &mut Tree<Token>, data: &mut Data) {
+fn group_operators(tree: &mut Tree, data: &mut Data) {
     for child in &mut tree.children {
         group_operators(child, data)
     }
@@ -320,7 +320,7 @@ fn group_operators(tree: &mut Tree<Token>, data: &mut Data) {
                         tree.children[i].x.location()
                     )
                 }
-                let mut cs: Vec<Tree<Token>> = tree.children.drain(i - op.left..i).collect();
+                let mut cs: Vec<Tree> = tree.children.drain(i - op.left..i).collect();
                 i -= op.left;
                 cs.extend(tree.children.drain(i + 1..=i + op.right));
                 tree.children[i].children = cs;
