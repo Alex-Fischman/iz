@@ -2,6 +2,7 @@
 extern crate std;
 
 use std::{
+    any::Any,
     borrow::ToOwned,
     clone::Clone,
     collections::HashMap,
@@ -37,11 +38,14 @@ struct Token<'a> {
     hi: usize,
 }
 
-impl Token<'_> {
-    fn as_str(&self) -> &str {
+impl Deref for Token<'_> {
+    type Target = str;
+    fn deref(&self) -> &str {
         &self.source.text[self.lo..self.hi]
     }
+}
 
+impl Token<'_> {
     // not stored directly because it's only useful in error messages
     // so we only ever care about finding a few locations per compile
     fn location(&self) -> String {
@@ -81,7 +85,7 @@ impl<T> DerefMut for Tree<T> {
 
 struct Context<'a> {
     tree: Tree<Token<'a>>,
-    precedences: Precedences,
+    data: HashMap<String, &'a mut dyn Any>,
 }
 
 impl<'a> Deref for Context<'a> {
@@ -105,7 +109,7 @@ impl Display for Context<'_> {
                 "{}at {}:\t{}",
                 "\t".repeat(indent),
                 tree.location(),
-                tree.as_str(),
+                tree as &str,
             )?;
             for child in &tree.children {
                 print_tree(child, f, indent + 1)?;
@@ -132,7 +136,7 @@ fn main() {
                 (
                     name.to_owned(),
                     Operator {
-                        func: func.map(|s| s.to_owned()),
+                        _func: func.map(|s| s.to_owned()),
                         left,
                         right,
                     },
@@ -150,8 +154,8 @@ fn main() {
             true,
         ),
         (ops(&[("+", Some("add"), 1, 1)]), false),
-    ]
-    .to_vec();
+    ];
+    let mut precedences = Precedences(precedences.to_vec());
 
     let mut c: Context = Context {
         tree: Tree {
@@ -162,8 +166,9 @@ fn main() {
             },
             children: Vec::new(),
         },
-        precedences: Precedences(precedences),
+        data: HashMap::new(),
     };
+    c.data.insert("precedences".to_owned(), &mut precedences);
 
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
@@ -208,9 +213,9 @@ fn main() {
 fn remove_comments(c: &mut Context) {
     let mut i = 0;
     while i < c.children.len() {
-        if c.children[i].as_str() == "#" {
+        if &c.children[i] as &str == "#" {
             let mut j = i;
-            while j < c.children.len() && c.children[j].as_str() != "\n" {
+            while j < c.children.len() && &c.children[j] as &str != "\n" {
                 j += 1;
             }
             c.children.drain(i..=j);
@@ -240,8 +245,8 @@ fn group_tokens(c: &mut Context) {
     while i < c.children.len() {
         let curr = &c.children[i];
         let prev = &c.children[i - 1];
-        if !is_bracket(curr.as_str())
-            && token_type(curr.as_str()) == token_type(prev.as_str())
+        if !is_bracket(curr)
+            && token_type(curr) == token_type(prev)
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
@@ -256,11 +261,11 @@ fn group_tokens(c: &mut Context) {
 fn remove_whitespace(c: &mut Context) {
     c.tree
         .children
-        .retain(|child| !child.as_str().chars().all(char::is_whitespace));
+        .retain(|child| !child.chars().all(char::is_whitespace));
 }
 
 fn group_brackets(c: &mut Context) {
-    let match_opener = |token: &Token| match token.as_str() {
+    let match_opener = |token: &str| match token {
         "(" => ")",
         "{" => "}",
         "[" => "]",
@@ -269,10 +274,11 @@ fn group_brackets(c: &mut Context) {
     let mut openers = Vec::new();
     let mut i = 0;
     while i < c.children.len() {
-        match c.children[i].as_str() {
+        #[allow(clippy::needless_borrow)]
+        match &c.children[i] as &str {
             "(" | "{" | "[" => openers.push((i, c.children[i].clone())),
             ")" | "}" | "]" => match openers.pop() {
-                Some((l, opener)) if match_opener(&opener) == c.children[i].as_str() => {
+                Some((l, opener)) if match_opener(&opener) == &c.children[i] as &str => {
                     let mut cs: Vec<Tree<Token>> = c.children.drain(l + 1..=i).collect();
                     cs.pop(); // remove closing bracket
                     c.children[l].children = cs;
@@ -280,14 +286,14 @@ fn group_brackets(c: &mut Context) {
                 }
                 Some((_, opener)) => panic!(
                     "{} matched with {} at {} and {}\n",
-                    opener.as_str(),
-                    c.children[i].as_str(),
+                    &opener as &str,
+                    &c.children[i] as &str,
                     opener.location(),
                     c.children[i].location(),
                 ),
                 None => panic!(
                     "extra {} at {}\n",
-                    c.children[i].as_str(),
+                    &c.children[i] as &str,
                     c.children[i].location()
                 ),
             },
@@ -299,7 +305,7 @@ fn group_brackets(c: &mut Context) {
         panic!(
             "no {} for {} at {}\n",
             match_opener(opener),
-            opener.as_str(),
+            &opener as &str,
             opener.location()
         )
     }
@@ -307,7 +313,7 @@ fn group_brackets(c: &mut Context) {
 
 #[derive(Clone)]
 struct Operator {
-    func: Option<String>,
+    _func: Option<String>,
     left: usize,
     right: usize,
 }
@@ -317,7 +323,10 @@ struct Operator {
 struct Precedences(Vec<(HashMap<String, Operator>, bool)>);
 
 fn group_operators(c: &mut Context) {
-    group_operators(&mut c.tree, &c.precedences);
+    match c.data.get("precedences").and_then(|any| any.downcast_ref()) {
+        Some(precedences) => group_operators(&mut c.tree, precedences),
+        None => panic!("no precedences available in group_operators"),
+    }
     fn group_operators(tree: &mut Tree<Token>, precedences: &Precedences) {
         for child in &mut tree.children {
             group_operators(child, precedences)
@@ -330,11 +339,11 @@ fn group_operators(c: &mut Context) {
                 0
             };
             while i < tree.children.len() {
-                if let Some(op) = ops.get(tree.children[i].as_str()) {
+                if let Some(op) = ops.get(&tree.children[i] as &str) {
                     if i < op.left || i + op.right >= tree.children.len() {
                         panic!(
                             "{} is missing arguments at {}",
-                            tree.children[i].as_str(),
+                            &tree.children[i] as &str,
                             tree.children[i].location()
                         )
                     }
