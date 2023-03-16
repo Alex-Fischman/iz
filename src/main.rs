@@ -104,46 +104,42 @@ fn main() {
     let file = args.get(1);
     let file = file.unwrap_or_else(|| panic!("expected command line argument\n"));
     let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}\n", file));
-    let source = &Source {
+    let source = Source {
         name: file.clone(),
         text,
     };
 
-    let ops = |ops: &[(&str, Option<&str>, usize, usize)]| {
-        ops.iter()
-            .map(|&(name, func, left, right)| {
-                (
-                    name.to_owned(),
-                    Operator {
-                        _func: func.map(|s| s.to_owned()),
-                        left,
-                        right,
-                    },
-                )
-            })
-            .collect()
+    let ops = |ops: &[(&str, Option<&str>, usize, usize)], unroll| {
+        let ops = ops.iter().map(|&(name, func, left, right)| {
+            (
+                name.to_owned(),
+                Operator {
+                    _func: func.map(|s| s.to_owned()),
+                    left,
+                    right,
+                },
+            )
+        });
+        (ops.collect(), unroll)
     };
     let precedences: Precedences = [
-        (ops(&[(":", None, 1, 0)]), false),
-        (ops(&[("?", None, 1, 0)]), false),
-        (ops(&[("~", None, 0, 1)]), true),
-        (ops(&[("$", None, 0, 1)]), true),
-        (
-            ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)]),
-            true,
-        ),
-        (ops(&[("+", Some("add"), 1, 1)]), false),
+        ops(&[(":", None, 1, 0)], false),
+        ops(&[("?", None, 1, 0)], false),
+        ops(&[("~", None, 0, 1)], true),
+        ops(&[("$", None, 0, 1)], true),
+        ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
+        ops(&[("+", Some("add"), 1, 1)], false),
     ]
     .to_vec();
 
-    let mut tree = Tree::new(source, 0, 0);
+    let mut tree = Tree::new(&source, 0, 0);
     let mut data = Data(HashMap::new());
     data.insert("precedences", precedences);
 
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        tree.children.push(Tree::new(source, i, j));
+        tree.children.push(Tree::new(&source, i, j));
     }
 
     let passes = [
