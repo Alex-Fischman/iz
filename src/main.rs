@@ -4,18 +4,17 @@ extern crate std;
 use std::{
     any::Any,
     borrow::ToOwned,
+    boxed::Box,
     clone::Clone,
     collections::HashMap,
     env::args,
-    fmt::{Display, Formatter, Result as FmtResult},
     fs::read_to_string,
     iter::{Extend, Iterator},
     ops::{Deref, DerefMut},
     option::{Option, Option::None, Option::Some},
-    result::Result::Ok,
     string::String,
     vec::Vec,
-    {format, matches, println, writeln},
+    {format, matches, println},
 };
 
 macro_rules! panic {
@@ -83,40 +82,21 @@ impl<T> DerefMut for Tree<T> {
     }
 }
 
-struct Context<'a> {
-    tree: Tree<Token<'a>>,
-    data: HashMap<String, &'a mut dyn Any>,
-}
+struct Data(HashMap<String, Box<dyn Any>>);
 
-impl<'a> Deref for Context<'a> {
-    type Target = Tree<Token<'a>>;
-    fn deref(&self) -> &Tree<Token<'a>> {
-        &self.tree
+impl Data {
+    fn insert<V: Any>(&mut self, key: &str, value: V) -> Option<Box<dyn Any>> {
+        self.0.insert(key.to_owned(), Box::new(value))
     }
-}
 
-impl<'a> DerefMut for Context<'a> {
-    fn deref_mut(&mut self) -> &mut Tree<Token<'a>> {
-        &mut self.tree
-    }
-}
-
-impl Display for Context<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        fn print_tree(tree: &Tree<Token>, f: &mut Formatter, indent: usize) -> FmtResult {
-            writeln!(
-                f,
-                "{}at {}:\t{}",
-                "\t".repeat(indent),
-                tree.location(),
-                tree as &str,
-            )?;
-            for child in &tree.children {
-                print_tree(child, f, indent + 1)?;
-            }
-            Ok(())
+    fn get<T: 'static>(&self, key: &str) -> &T {
+        match self.0.get(key) {
+            Some(value) => match value.downcast_ref::<T>() {
+                Some(value) => value,
+                None => panic!("{} had the wrong type in data", key),
+            },
+            None => panic!("{} not found in data", key),
         }
-        print_tree(&self.tree, f, 0)
     }
 }
 
@@ -144,7 +124,7 @@ fn main() {
             })
             .collect()
     };
-    let precedences = [
+    let precedences: Precedences = [
         (ops(&[(":", None, 1, 0)]), false),
         (ops(&[("?", None, 1, 0)]), false),
         (ops(&[("~", None, 0, 1)]), true),
@@ -154,26 +134,24 @@ fn main() {
             true,
         ),
         (ops(&[("+", Some("add"), 1, 1)]), false),
-    ];
-    let mut precedences = Precedences(precedences.to_vec());
+    ]
+    .to_vec();
 
-    let mut c: Context = Context {
-        tree: Tree {
-            x: Token {
-                source,
-                lo: 0,
-                hi: 0,
-            },
-            children: Vec::new(),
+    let mut tree = Tree {
+        x: Token {
+            source,
+            lo: 0,
+            hi: 0,
         },
-        data: HashMap::new(),
+        children: Vec::new(),
     };
-    c.data.insert("precedences".to_owned(), &mut precedences);
+    let mut data = Data(HashMap::new());
+    data.insert("precedences", precedences);
 
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        c.children.push(Tree {
+        tree.children.push(Tree {
             x: Token {
                 source,
                 lo: i,
@@ -204,28 +182,39 @@ fn main() {
         // interpret,
     ];
     for pass in passes {
-        pass(&mut c)
+        pass(&mut tree, &mut data)
     }
 
-    println!("{}", c);
+    print_tree(&tree, 0);
+    fn print_tree(tree: &Tree<Token>, indent: usize) {
+        println!(
+            "{}at {}:\t{}",
+            "\t".repeat(indent),
+            tree.location(),
+            tree.deref().deref(),
+        );
+        for child in &tree.children {
+            print_tree(child, indent + 1);
+        }
+    }
 }
 
-fn remove_comments(c: &mut Context) {
+fn remove_comments(tree: &mut Tree<Token>, _data: &mut Data) {
     let mut i = 0;
-    while i < c.children.len() {
-        if &c.children[i] as &str == "#" {
+    while i < tree.children.len() {
+        if tree.children[i].deref().deref() == "#" {
             let mut j = i;
-            while j < c.children.len() && &c.children[j] as &str != "\n" {
+            while j < tree.children.len() && tree.children[j].deref().deref() != "\n" {
                 j += 1;
             }
-            c.children.drain(i..=j);
+            tree.children.drain(i..=j);
         } else {
             i += 1;
         }
     }
 }
 
-fn group_tokens(c: &mut Context) {
+fn group_tokens(tree: &mut Tree<Token>, _data: &mut Data) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let token_type = |s: &str| {
         if s.chars()
@@ -242,29 +231,28 @@ fn group_tokens(c: &mut Context) {
     };
 
     let mut i = 1;
-    while i < c.children.len() {
-        let curr = &c.children[i];
-        let prev = &c.children[i - 1];
+    while i < tree.children.len() {
+        let curr = &tree.children[i];
+        let prev = &tree.children[i - 1];
         if !is_bracket(curr)
             && token_type(curr) == token_type(prev)
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            c.children[i - 1].hi = curr.hi;
-            c.children.remove(i);
+            tree.children[i - 1].hi = curr.hi;
+            tree.children.remove(i);
         } else {
             i += 1;
         }
     }
 }
 
-fn remove_whitespace(c: &mut Context) {
-    c.tree
-        .children
+fn remove_whitespace(tree: &mut Tree<Token>, _data: &mut Data) {
+    tree.children
         .retain(|child| !child.chars().all(char::is_whitespace));
 }
 
-fn group_brackets(c: &mut Context) {
+fn group_brackets(tree: &mut Tree<Token>, _data: &mut Data) {
     let match_opener = |token: &str| match token {
         "(" => ")",
         "{" => "}",
@@ -273,28 +261,28 @@ fn group_brackets(c: &mut Context) {
     };
     let mut openers = Vec::new();
     let mut i = 0;
-    while i < c.children.len() {
+    while i < tree.children.len() {
         #[allow(clippy::needless_borrow)]
-        match &c.children[i] as &str {
-            "(" | "{" | "[" => openers.push((i, c.children[i].clone())),
+        match tree.children[i].deref().deref() {
+            "(" | "{" | "[" => openers.push((i, tree.children[i].clone())),
             ")" | "}" | "]" => match openers.pop() {
-                Some((l, opener)) if match_opener(&opener) == &c.children[i] as &str => {
-                    let mut cs: Vec<Tree<Token>> = c.children.drain(l + 1..=i).collect();
+                Some((l, opener)) if match_opener(&opener) == tree.children[i].deref().deref() => {
+                    let mut cs: Vec<Tree<Token>> = tree.children.drain(l + 1..=i).collect();
                     cs.pop(); // remove closing bracket
-                    c.children[l].children = cs;
+                    tree.children[l].children = cs;
                     i = l;
                 }
                 Some((_, opener)) => panic!(
                     "{} matched with {} at {} and {}\n",
-                    &opener as &str,
-                    &c.children[i] as &str,
+                    opener.deref(),
+                    tree.children[i].deref().deref(),
                     opener.location(),
-                    c.children[i].location(),
+                    tree.children[i].location(),
                 ),
                 None => panic!(
                     "extra {} at {}\n",
-                    &c.children[i] as &str,
-                    c.children[i].location()
+                    tree.children[i].deref().deref(),
+                    tree.children[i].location()
                 ),
             },
             _ => {}
@@ -305,7 +293,7 @@ fn group_brackets(c: &mut Context) {
         panic!(
             "no {} for {} at {}\n",
             match_opener(opener),
-            &opener as &str,
+            opener.deref(),
             opener.location()
         )
     }
@@ -320,44 +308,38 @@ struct Operator {
 // a list of precedence levels, each of which contains
 // a map from strings to Operators
 // a bool for right associativity
-struct Precedences(Vec<(HashMap<String, Operator>, bool)>);
+type Precedences = Vec<(HashMap<String, Operator>, bool)>;
 
-fn group_operators(c: &mut Context) {
-    match c.data.get("precedences").and_then(|any| any.downcast_ref()) {
-        Some(precedences) => group_operators(&mut c.tree, precedences),
-        None => panic!("no precedences available in group_operators"),
+fn group_operators(tree: &mut Tree<Token>, data: &mut Data) {
+    for child in &mut tree.children {
+        group_operators(child, data)
     }
-    fn group_operators(tree: &mut Tree<Token>, precedences: &Precedences) {
-        for child in &mut tree.children {
-            group_operators(child, precedences)
-        }
-
-        for (ops, right_assoc) in &precedences.0 {
-            let mut i = if *right_assoc {
-                tree.children.len().wrapping_sub(1)
-            } else {
-                0
-            };
-            while i < tree.children.len() {
-                if let Some(op) = ops.get(&tree.children[i] as &str) {
-                    if i < op.left || i + op.right >= tree.children.len() {
-                        panic!(
-                            "{} is missing arguments at {}",
-                            &tree.children[i] as &str,
-                            tree.children[i].location()
-                        )
-                    }
-                    let mut cs: Vec<Tree<Token>> = tree.children.drain(i - op.left..i).collect();
-                    i -= op.left;
-                    cs.extend(tree.children.drain(i + 1..=i + op.right));
-                    tree.children[i].children = cs;
+    let precedences: &Precedences = data.get("precedences");
+    for (ops, right_assoc) in precedences {
+        let mut i = if *right_assoc {
+            tree.children.len().wrapping_sub(1)
+        } else {
+            0
+        };
+        while i < tree.children.len() {
+            if let Some(op) = ops.get(tree.children[i].deref().deref()) {
+                if i < op.left || i + op.right >= tree.children.len() {
+                    panic!(
+                        "{} is missing arguments at {}",
+                        tree.children[i].deref().deref(),
+                        tree.children[i].location()
+                    )
                 }
-                i = if *right_assoc {
-                    i.wrapping_sub(1)
-                } else {
-                    i + 1
-                };
+                let mut cs: Vec<Tree<Token>> = tree.children.drain(i - op.left..i).collect();
+                i -= op.left;
+                cs.extend(tree.children.drain(i + 1..=i + op.right));
+                tree.children[i].children = cs;
             }
+            i = if *right_assoc {
+                i.wrapping_sub(1)
+            } else {
+                i + 1
+            };
         }
     }
 }
