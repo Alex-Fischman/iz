@@ -8,7 +8,7 @@ use std::{
     env::args,
     fmt::{Display, Formatter, Result as FmtResult},
     fs::read_to_string,
-    iter::{Extend, Iterator},
+    iter::{Extend, IntoIterator, Iterator},
     ops::{Deref, DerefMut},
     option::{Option, Option::None, Option::Some},
     result::Result::Ok,
@@ -127,18 +127,18 @@ fn main() {
     };
 
     let ops = |ops: &[(&str, Option<&str>, usize, usize)]| {
-        let mut map = HashMap::new();
-        for &(name, func, left, right) in ops {
-            map.insert(
-                name.to_owned(),
-                Operator {
-                    func: func.map(|s| s.to_owned()),
-                    left,
-                    right,
-                },
-            );
-        }
-        map
+        ops.into_iter()
+            .map(|&(name, func, left, right)| {
+                (
+                    name.to_owned(),
+                    Operator {
+                        func: func.map(|s| s.to_owned()),
+                        left,
+                        right,
+                    },
+                )
+            })
+            .collect()
     };
     let precedences: Precedences = &[
         (ops(&[(":", None, 1, 0)]), false),
