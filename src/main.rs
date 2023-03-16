@@ -8,7 +8,7 @@ use std::{
     env::args,
     fmt::{Display, Formatter, Result as FmtResult},
     fs::read_to_string,
-    iter::{Extend, IntoIterator, Iterator},
+    iter::{Extend, Iterator},
     ops::{Deref, DerefMut},
     option::{Option, Option::None, Option::Some},
     result::Result::Ok,
@@ -81,7 +81,7 @@ impl<T> DerefMut for Tree<T> {
 
 struct Context<'a> {
     tree: Tree<Token<'a>>,
-    precedences: Precedences<'a>,
+    precedences: Precedences,
 }
 
 impl<'a> Deref for Context<'a> {
@@ -127,7 +127,7 @@ fn main() {
     };
 
     let ops = |ops: &[(&str, Option<&str>, usize, usize)]| {
-        ops.into_iter()
+        ops.iter()
             .map(|&(name, func, left, right)| {
                 (
                     name.to_owned(),
@@ -140,7 +140,7 @@ fn main() {
             })
             .collect()
     };
-    let precedences: Precedences = &[
+    let precedences = [
         (ops(&[(":", None, 1, 0)]), false),
         (ops(&[("?", None, 1, 0)]), false),
         (ops(&[("~", None, 0, 1)]), true),
@@ -150,7 +150,8 @@ fn main() {
             true,
         ),
         (ops(&[("+", Some("add"), 1, 1)]), false),
-    ];
+    ]
+    .to_vec();
 
     let mut c: Context = Context {
         tree: Tree {
@@ -313,11 +314,11 @@ struct Operator {
 // a list of precedence levels, each of which contains
 // a map from strings to Operators
 // a bool for right associativity
-type Precedences<'a> = &'a [(HashMap<String, Operator>, bool)];
+type Precedences = Vec<(HashMap<String, Operator>, bool)>;
 
 fn group_operators(c: &mut Context) {
-    group_operators(&mut c.tree, c.precedences);
-    fn group_operators(tree: &mut Tree<Token>, precedences: Precedences) {
+    group_operators(&mut c.tree, &c.precedences);
+    fn group_operators(tree: &mut Tree<Token>, precedences: &Precedences) {
         for child in &mut tree.children {
             group_operators(child, precedences)
         }
