@@ -2,10 +2,12 @@
 extern crate std;
 
 use std::{
+    borrow::ToOwned,
     clone::Clone,
+    collections::HashMap,
     env::args,
     fs::read_to_string,
-    iter::Iterator,
+    iter::{Extend, Iterator},
     option::{Option::None, Option::Some},
     string::String,
     vec::Vec,
@@ -112,9 +114,9 @@ fn main() {
         remove_comments,
         group_tokens,
         remove_whitespace,
-        // // parse
+        // parse
         group_brackets,
-        // group_operators,
+        group_operators,
         // unroll_operators,
         // unroll_brackets,
         // // transform
@@ -230,5 +232,73 @@ fn group_brackets(c: &mut Context) {
             opener.as_str(),
             opener.location()
         )
+    }
+}
+
+#[derive(Clone)]
+struct Operator {
+    func: String,
+    left: usize,
+    right: usize,
+}
+// a list of precedence levels, each of which contains
+// a map from strings to Operators
+// a bool for right associativity
+type Precedences<'a> = &'a [(HashMap<String, Operator>, bool)];
+
+fn group_operators(c: &mut Context) {
+    for child in &mut c.children {
+        group_operators(child)
+    }
+
+    let ops = |ops: &[(&str, &str, usize, usize)]| {
+        let mut map = HashMap::new();
+        for &(name, func, left, right) in ops {
+            map.insert(
+                name.to_owned(),
+                Operator {
+                    func: func.to_owned(),
+                    left,
+                    right,
+                },
+            );
+        }
+        map
+    };
+    let precedences: Precedences = &[
+        (ops(&[(":", ":", 1, 0)]), false),
+        (ops(&[("?", "?", 1, 0)]), false),
+        (ops(&[("~", "~", 0, 1)]), true),
+        (ops(&[("$", "$", 0, 1)]), true),
+        (ops(&[("-", "neg", 0, 1), ("!", "not", 0, 1)]), true),
+        (ops(&[("+", "add", 1, 1)]), false),
+    ];
+
+    for (ops, right_assoc) in precedences {
+        let mut i = if *right_assoc {
+            c.children.len().wrapping_sub(1)
+        } else {
+            0
+        };
+        while i < c.children.len() {
+            if let Some(op) = ops.get(c.children[i].token.as_str()) {
+                if i < op.left || i + op.right >= c.children.len() {
+                    panic!(
+                        "{} is missing arguments at {}",
+                        c.children[i].token.as_str(),
+                        c.children[i].token.location()
+                    )
+                }
+                let mut cs: Vec<Context> = c.children.drain(i - op.left..i).collect();
+                i -= op.left;
+                cs.extend(c.children.drain(i + 1..=i + op.right));
+                c.children[i].children = cs;
+            }
+            i = if *right_assoc {
+                i.wrapping_sub(1)
+            } else {
+                i + 1
+            };
+        }
     }
 }

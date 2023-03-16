@@ -23,9 +23,6 @@ drop
 swap
 # 0 3
 
--(1 + 2) # operators with precedence and associativity
-add add
-
 # here is an if else statement
 if_end?
 1234
@@ -34,25 +31,5 @@ if_end:
 5678
 else_end:
 
-!0
-
-# these are macros
-# they can be used before they're defined
-macro not (neg 1 add)
-macro dup $0
-macro drop ~1
-macro swap ($1 ~3 $-2 $-2)
-# macros can be nested
-macro dup2 (dup dup)
-7 dup2
-
-# macros can be aliases for other macros
-macro level1 6
-macro level3 level2
-macro level2 level1
-level3
-
-# macro loops are detected
-# macro recursive1 recursive2
-# macro recursive2 recursive1
-# macro recursive recursive
+# operators with precedence and associativity
+-(1 + -(-2))
