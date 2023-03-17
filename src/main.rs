@@ -115,15 +115,6 @@ fn main() {
     }
 
     let mut data = Data(HashMap::new());
-    let precedences = vec![
-        Operators::new(&[(":", None, 1, 0)], false),
-        Operators::new(&[("?", None, 1, 0)], false),
-        Operators::new(&[("~", None, 0, 1)], true),
-        Operators::new(&[("$", None, 0, 1)], true),
-        Operators::new(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
-        Operators::new(&[("+", Some("add"), 1, 1)], false),
-    ];
-    data.insert("precedences", precedences);
 
     let passes = [
         // tokenize
@@ -132,6 +123,7 @@ fn main() {
         remove_whitespace,
         // parse
         group_brackets,
+        insert_default_operators,
         group_operators,
         // unroll_operators,
         // unroll_brackets,
@@ -285,6 +277,18 @@ impl Operators {
             .collect();
         Operators { ops, right_assoc }
     }
+}
+
+fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
+    let precedences = vec![
+        Operators::new(&[(":", None, 1, 0)], false),
+        Operators::new(&[("?", None, 1, 0)], false),
+        Operators::new(&[("~", None, 0, 1)], true),
+        Operators::new(&[("$", None, 0, 1)], true),
+        Operators::new(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
+        Operators::new(&[("+", Some("add"), 1, 1)], false),
+    ];
+    data.insert("precedences", precedences);
 }
 
 fn group_operators(tree: &mut Tree, data: &mut Data) {
