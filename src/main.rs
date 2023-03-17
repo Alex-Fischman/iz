@@ -133,8 +133,13 @@ fn main() {
         insert_default_operators,
         group_operators,
         // backend
-        // tokens_to_ops,
-        // collect_labels,
+        insert_code_map,
+        // translate_pushes,
+        // translate_moves,
+        // translate_copies,
+        translate_add_neg_ltz,
+        // translate_jumpzs,
+        // translate_labels,
         interpret,
     ];
     for pass in passes {
@@ -222,30 +227,17 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
                     tree.children[l].children = cs;
                     i = l;
                 }
-                Some((_, opener)) => panic!(
-                    "{} matched with {} at {} and {}\n",
-                    opener.deref(),
-                    tree.children[i].token.deref(),
-                    opener.location(),
-                    tree.children[i].token.location(),
-                ),
-                None => panic!(
-                    "extra {} at {}\n",
-                    tree.children[i].token.deref(),
-                    tree.children[i].token.location()
-                ),
+                Some((_, opener)) => {
+                    panic!("{} matched with {}\n", opener, tree.children[i].token,)
+                }
+                None => panic!("extra {}\n", tree.children[i].token,),
             },
             _ => {}
         }
         i += 1;
     }
     if let Some((_, opener)) = openers.last() {
-        panic!(
-            "no {} for the {} at {}\n",
-            match_opener(opener),
-            opener.deref(),
-            opener.location()
-        )
+        panic!("no {} for the {}\n", match_opener(opener), opener,)
     }
 }
 
@@ -307,11 +299,7 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
         while i < tree.children.len() {
             if let Some(op) = ops.get(tree.children[i].token.deref()) {
                 if i < op.left || i + op.right >= tree.children.len() {
-                    panic!(
-                        "{} is missing arguments at {}\n",
-                        tree.children[i].token.deref(),
-                        tree.children[i].token.location()
-                    )
+                    panic!("missing arguments for {}\n", tree.children[i].token,)
                 }
                 let mut cs: Vec<Tree> = tree.children.drain(i - op.left..i).collect();
                 i -= op.left;
@@ -354,10 +342,10 @@ trait Operation {
     fn run(&self, memory: &mut Memory, data: &Data);
 }
 
-mod op {
+mod operations {
     use crate::*;
 
-    struct Push(i64);
+    pub struct Push(i64);
     impl Operation for Push {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -366,14 +354,14 @@ mod op {
         }
     }
 
-    struct Move(i64);
+    pub struct Move(i64);
     impl Operation for Move {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             memory.sp -= self.0;
         }
     }
 
-    struct Copy(i64);
+    pub struct Copy(i64);
     impl Operation for Copy {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -382,7 +370,7 @@ mod op {
         }
     }
 
-    struct Add;
+    pub struct Add;
     impl Operation for Add {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -391,7 +379,7 @@ mod op {
         }
     }
 
-    struct Neg;
+    pub struct Neg;
     impl Operation for Neg {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -399,7 +387,7 @@ mod op {
         }
     }
 
-    struct Ltz;
+    pub struct Ltz;
     impl Operation for Ltz {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -407,7 +395,7 @@ mod op {
         }
     }
 
-    struct Jumpz(String);
+    pub struct Jumpz(String);
     impl Operation for Jumpz {
         fn run(&self, memory: &mut Memory, data: &Data) {
             match data.get::<HashMap<String, i64>>("labels").get(&self.0) {
@@ -422,9 +410,32 @@ mod op {
         }
     }
 
-    struct Label(String);
+    pub struct Label(String);
     impl Operation for Label {
         fn run(&self, _memory: &mut Memory, _data: &Data) {}
+    }
+}
+
+fn insert_code_map(_tree: &mut Tree, data: &mut Data) {
+    data.insert::<HashMap<Token, Box<dyn Operation>>>("code", HashMap::new());
+}
+
+fn translate_add_neg_ltz(tree: &mut Tree, data: &mut Data) {
+    for child in &mut tree.children {
+        translate_add_neg_ltz(child, data)
+    }
+
+    match tree.token.deref() {
+        "add" => {
+            data.insert(&tree.token, operations::Add);
+        }
+        "neg" => {
+            data.insert(&tree.token, operations::Neg);
+        }
+        "ltz" => {
+            data.insert(&tree.token, operations::Ltz);
+        }
+        _ => {}
     }
 }
 
@@ -439,7 +450,7 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
     while let Some(child) = tree.children.get(memory.pc as usize) {
         let op = code
             .get(&child.token)
-            .unwrap_or_else(|| panic!("no operation for {}", child.token));
+            .unwrap_or_else(|| panic!("no operation for {}\n", child.token));
         op.run(&mut memory, data);
         match memory.sp {
             -1 => println!(),
