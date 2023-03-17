@@ -20,7 +20,8 @@ Here is a list of things that should be possible for users of this programming l
 - “Lifetime analysis” or other memory safety guarantees
 - Proof system?
 
-Here are some thoughts on the future of the language
+Here are some more thoughts and plans for the future
+
 Macros:
 - a macro is just a function that runs at compile time
 - generics are macros that take types and return types
@@ -28,14 +29,17 @@ Macros:
 - all runtime functions are compile time functions
 - but some compile time functions will take compile-time-only args
 - compile passes are macros that take an AST and a Data object
+
 IR:
 - starting with a stack based thing for simplicity
 - but will also include weirder ops like moving the stack pointer for utility
+
 Syntax:
 - arbitrary operator definitions
 - operations get transformed into either a function call or a macro invocation
 - ()s are used for arbitrary grouping in parsing
 - {}s are used to quote code blocks and turn them into functions/macros
+
 Namespaces:
 - `use` imports any scope
 - all structs have a scope that contains their fields and methods
