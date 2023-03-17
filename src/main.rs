@@ -68,6 +68,14 @@ impl Token<'_> {
     }
 }
 
+// since Data can only hold 'static, we use this as keys for maps in Data
+type Key = (*const Source, usize, usize);
+impl Token<'_> {
+    fn key(&self) -> Key {
+        (self.source as *const Source, self.lo, self.hi)
+    }
+}
+
 impl Display for Token<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(f, "{} at {}", self.deref(), self.location())
@@ -104,6 +112,16 @@ impl Data {
             None => panic!("{} was not found in data\n", key),
         }
     }
+
+    fn get_mut<T: Any>(&mut self, key: &str) -> &mut T {
+        match self.0.get_mut(key) {
+            Some(value) => match value.downcast_mut::<T>() {
+                Some(value) => value,
+                None => panic!("{} had the wrong type in data\n", key),
+            },
+            None => panic!("{} was not found in data\n", key),
+        }
+    }
 }
 
 fn main() {
@@ -129,11 +147,12 @@ fn main() {
         group_tokens,
         remove_whitespace,
         // parse
+        // parse_int_literals,
         group_brackets,
         insert_default_operators,
         group_operators,
         // backend
-        insert_code_map,
+        insert_ops_map,
         // translate_push_move_copy,
         translate_add_neg_ltz,
         translate_jumpz_label,
@@ -414,21 +433,22 @@ mod operations {
     }
 }
 
-fn insert_code_map(_tree: &mut Tree, data: &mut Data) {
-    data.insert::<HashMap<Token, Box<dyn Operation>>>("code", HashMap::new());
+fn insert_ops_map(_tree: &mut Tree, data: &mut Data) {
+    data.insert::<HashMap<Key, Box<dyn Operation>>>("ops", HashMap::new());
 }
 
 fn translate_add_neg_ltz(tree: &mut Tree, data: &mut Data) {
+    let ops: &mut HashMap<Key, Box<dyn Operation>> = data.get_mut("ops");
     for child in &tree.children {
         match child.token.deref() {
             "add" => {
-                data.insert(&child.token, operations::Add);
+                ops.insert(child.token.key(), Box::new(operations::Add));
             }
             "neg" => {
-                data.insert(&child.token, operations::Neg);
+                ops.insert(child.token.key(), Box::new(operations::Neg));
             }
             "ltz" => {
-                data.insert(&child.token, operations::Ltz);
+                ops.insert(child.token.key(), Box::new(operations::Ltz));
             }
             _ => {}
         }
@@ -436,15 +456,16 @@ fn translate_add_neg_ltz(tree: &mut Tree, data: &mut Data) {
 }
 
 fn translate_jumpz_label(tree: &mut Tree, data: &mut Data) {
+    let ops: &mut HashMap<Key, Box<dyn Operation>> = data.get_mut("ops");
     for child in &mut tree.children {
         match child.token.deref() {
             "?" => {
                 let label = child.children.remove(0).token.deref().to_owned();
-                data.insert(&child.token, operations::Jumpz(label));
+                ops.insert(child.token.key(), Box::new(operations::Jumpz(label)));
             }
             ":" => {
                 let label = child.children.remove(0).token.deref().to_owned();
-                data.insert(&child.token, operations::Label(label));
+                ops.insert(child.token.key(), Box::new(operations::Label(label)));
             }
             _ => {}
         }
@@ -452,19 +473,19 @@ fn translate_jumpz_label(tree: &mut Tree, data: &mut Data) {
 }
 
 fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
-    let code: &HashMap<Token, Box<dyn Operation>> = data.get("code");
+    let ops: &HashMap<Key, Box<dyn Operation>> = data.get("ops");
     for child in &tree.children {
         if !child.children.is_empty() {
             panic!("found child of {}\n", child.token)
         }
-        if code.get(&child.token).is_none() {
+        if ops.get(&child.token.key()).is_none() {
             panic!("no operation for {}\n", child.token)
         }
     }
 }
 
 fn interpret(tree: &mut Tree, data: &mut Data) {
-    let code: &HashMap<Token, Box<dyn Operation>> = data.get("code");
+    let ops: &HashMap<Key, Box<dyn Operation>> = data.get("ops");
     let mut memory = Memory {
         pc: 0,
         sp: 0,
@@ -472,7 +493,7 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
     };
 
     while let Some(child) = tree.children.get(memory.pc as usize) {
-        code[&child.token].run(&mut memory, data);
+        ops[&child.token.key()].run(&mut memory, data);
         memory.pc += 1;
 
         match memory.sp {
