@@ -66,13 +66,13 @@ impl Token<'_> {
         }
         format!("{}:{}:{}", self.source.name, row, col)
     }
-}
 
-// since Data can only hold 'static, we use this as keys for maps in Data
-type Key = (*const Source, usize, usize);
-impl Token<'_> {
-    fn key(&self) -> Key {
-        (self.source as *const Source, self.lo, self.hi)
+    // since Data can only hold 'static, we can't use Token<'_>
+    // so instead we use a usize and intentionally forget the lifetime information
+    // apparantly this is safe? maybe because we never try to go backwards?
+    // this doesn't need to consider self.hi because tokens never overlap
+    fn key(&self) -> usize {
+        self.deref() as *const str as *const u8 as usize
     }
 }
 
@@ -224,7 +224,7 @@ fn parse_int_literals(tree: &mut Tree, data: &mut Data) {
                 .map(|int| (child.token.key(), int))
         })
         .collect();
-    data.insert::<HashMap<Key, i64>>("ints", ints);
+    data.insert::<HashMap<usize, i64>>("ints", ints);
 }
 
 fn group_brackets(tree: &mut Tree, _data: &mut Data) {
@@ -437,8 +437,8 @@ mod operations {
 }
 
 fn generate_ops(tree: &mut Tree, data: &mut Data) {
-    let ints: &HashMap<Key, i64> = data.get("ints");
-    let mut ops: HashMap<Key, Box<dyn Operation>> = HashMap::new();
+    let ints: &HashMap<usize, i64> = data.get("ints");
+    let mut ops: HashMap<usize, Box<dyn Operation>> = HashMap::new();
     let mut labels: HashMap<String, i64> = HashMap::new();
     for (i, child) in tree.children.iter_mut().enumerate() {
         if let Some(int) = ints.get(&child.token.key()) {
@@ -482,7 +482,7 @@ fn generate_ops(tree: &mut Tree, data: &mut Data) {
 }
 
 fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
-    let ops: &HashMap<Key, Box<dyn Operation>> = data.get("ops");
+    let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
     for child in &tree.children {
         if !child.children.is_empty() {
             panic!("found child of {}", child.token)
@@ -494,7 +494,7 @@ fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
 }
 
 fn interpret(tree: &mut Tree, data: &mut Data) {
-    let ops: &HashMap<Key, Box<dyn Operation>> = data.get("ops");
+    let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
     let mut memory = Memory {
         pc: 0,
         sp: -1,
