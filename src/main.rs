@@ -146,7 +146,6 @@ fn main() {
         // transformation
         generate_ops,
         // backend
-        ready_for_interpret,
         interpret,
     ];
     for pass in passes {
@@ -460,7 +459,7 @@ fn generate_ops(tree: &mut Tree, data: &mut Data) {
     data.insert("labels", labels);
 }
 
-fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
+fn interpret(tree: &mut Tree, data: &mut Data) {
     let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
     for child in &tree.children {
         if !child.children.is_empty() {
@@ -470,10 +469,7 @@ fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
             panic!("no operation for {}", child.token)
         }
     }
-}
 
-fn interpret(tree: &mut Tree, data: &mut Data) {
-    let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
     let mut pc = 0;
     let mut sp: i64 = -1;
     let mut stack = Stack(Vec::new());
