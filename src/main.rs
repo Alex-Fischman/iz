@@ -143,6 +143,7 @@ fn main() {
         group_brackets,
         insert_default_operators,
         group_operators,
+        unroll_brackets,
         // transformation
         generate_ops,
         // backend
@@ -252,7 +253,27 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
     }
 }
 
+fn unroll_brackets(tree: &mut Tree, _data: &mut Data) {
+    for child in &mut tree.children {
+        unroll_brackets(child, _data)
+    }
+
+    let mut i = 0;
+    while i < tree.children.len() {
+        if tree.children[i].token.deref() == "(" {
+            let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
+            let len = cs.len();
+            tree.children.splice(i..=i, cs);
+            i += len;
+        } else {
+            i += 1;
+        }
+    }
+}
+
 struct Operator {
+    // for now, Some is a function unroll and None is a macro invoke
+    // this will change once macro infrastructure is set up
     _func: Option<String>,
     left: usize,
     right: usize,

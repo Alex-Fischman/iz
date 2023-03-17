@@ -3,10 +3,10 @@
 # here is a while loop
 1
 while_start:
-$0 neg 6 add while_end?
+$0 neg 3 add while_end?
 # cond ends, body starts
 1 add
-0 while_start?
+(0 while_start?)
 while_end:
 # stack should just be 3 here
 
