@@ -15,7 +15,7 @@ use std::{
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {format, matches, println, write},
+    {matches, println, write},
 };
 
 macro_rules! panic {
@@ -49,9 +49,20 @@ impl Deref for Token<'_> {
 }
 
 impl Token<'_> {
-    // not stored directly because it's only useful in error messages
-    // so we only ever care about finding a few locations per compile
-    fn location(&self) -> String {
+    // since Data can only hold 'static, we can't use Token<'_>
+    // so instead we use a usize and intentionally forget the lifetime information
+    // apparantly this is safe? maybe because we never try to go backwards?
+    // this doesn't need to consider self.hi because tokens never overlap
+    fn key(&self) -> usize {
+        self.deref() as *const str as *const u8 as usize
+    }
+}
+
+impl Display for Token<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        if self.lo == self.hi {
+            return FmtResult::Ok(());
+        }
         let mut row = 1;
         let mut col = 1;
         for (i, c) in self.source.text.char_indices() {
@@ -64,21 +75,14 @@ impl Token<'_> {
                 col += 1;
             }
         }
-        format!("{}:{}:{}", self.source.name, row, col)
-    }
-
-    // since Data can only hold 'static, we can't use Token<'_>
-    // so instead we use a usize and intentionally forget the lifetime information
-    // apparantly this is safe? maybe because we never try to go backwards?
-    // this doesn't need to consider self.hi because tokens never overlap
-    fn key(&self) -> usize {
-        self.deref() as *const str as *const u8 as usize
-    }
-}
-
-impl Display for Token<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "{} at {}", self.deref(), self.location())
+        write!(
+            f,
+            "{} at {}:{}:{}",
+            self.deref(),
+            self.source.name,
+            row,
+            col
+        )
     }
 }
 
@@ -149,19 +153,6 @@ fn main() {
     ];
     for pass in passes {
         pass(&mut tree, &mut data)
-    }
-
-    print_tree(&tree, 0);
-    fn print_tree(tree: &Tree, indent: usize) {
-        println!(
-            "{}{}:\t{}",
-            "\t".repeat(indent),
-            tree.token.location(),
-            tree.token.deref(),
-        );
-        for child in &tree.children {
-            print_tree(child, indent + 1);
-        }
     }
 }
 
