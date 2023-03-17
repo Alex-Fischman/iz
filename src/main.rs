@@ -274,11 +274,10 @@ fn unroll_brackets(tree: &mut Tree, _data: &mut Data) {
 }
 
 struct Operator {
-    // for now, Some means unroll the function
-    // this will probably change once macro infrastructure is set up
-    func: Option<String>,
+    func: String,
     left: usize,
     right: usize,
+    unroll: bool,
 }
 
 enum Associativity {
@@ -292,12 +291,19 @@ struct Operators {
 }
 
 fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
-    fn ops(ops: &[(&str, Option<&str>, usize, usize)], associativity: Associativity) -> Operators {
+    fn ops(ops: &[(&str, &str, usize, usize, bool)], associativity: Associativity) -> Operators {
         let ops = ops
             .iter()
-            .map(|&(name, func, left, right)| {
-                let func = func.map(|s| s.to_owned());
-                (name.to_owned(), Operator { func, left, right })
+            .map(|&(name, func, left, right, unroll)| {
+                (
+                    name.to_owned(),
+                    Operator {
+                        func: func.to_owned(),
+                        left,
+                        right,
+                        unroll,
+                    },
+                )
             })
             .collect();
         Operators { ops, associativity }
@@ -305,13 +311,13 @@ fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
 
     use Associativity::{Left, Right};
     let precedences = [
-        ops(&[(":", None, 1, 0)], Left),
-        ops(&[("?", None, 1, 0)], Left),
-        ops(&[("~", None, 0, 1)], Right),
-        ops(&[("$", None, 0, 1)], Right),
-        ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], Right),
-        ops(&[("+", Some("add"), 1, 1)], Left),
-        ops(&[("=", None, 1, 1)], Right),
+        ops(&[(":", "label", 1, 0, false)], Left),
+        ops(&[("?", "jumpz", 1, 0, false)], Left),
+        ops(&[("~", "move", 0, 1, false)], Right),
+        ops(&[("$", "copy", 0, 1, false)], Right),
+        ops(&[("-", "neg", 0, 1, true), ("!", "not", 0, 1, true)], Right),
+        ops(&[("+", "add", 1, 1, true)], Left),
+        ops(&[("=", "assign", 1, 1, false)], Right),
     ];
     data.insert("precedences", precedences.into_iter().collect::<Vec<_>>());
 }
@@ -355,7 +361,7 @@ fn unroll_operators(tree: &mut Tree, data: &mut Data) {
     while i < tree.children.len() {
         let s = tree.children[i].token.deref();
         if let Some(op) = precedences.iter().find_map(|ops| ops.ops.get(s)) {
-            if let Some(_func) = &op.func {
+            if op.unroll {
                 let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
                 let len = cs.len();
                 tree.children.splice(i..i, cs);
@@ -472,15 +478,14 @@ fn generate_ops(tree: &mut Tree, data: &mut Data) {
             let s = precedences
                 .iter()
                 .find_map(|ops| ops.ops.get(s))
-                .and_then(|Operator { func, .. }| func.as_ref().map(|s| s.as_str()))
-                .unwrap_or(s);
+                .map_or(s, |op| op.func.as_str());
             match s {
-                "~" => {
+                "move" => {
                     let arg = child.children.pop().unwrap();
                     let arg = ints.get(&arg.token.key()).unwrap();
                     ops.insert(child.token.key(), Box::new(operations::Move(*arg)));
                 }
-                "$" => {
+                "copy" => {
                     let arg = child.children.pop().unwrap();
                     let arg = ints.get(&arg.token.key()).unwrap();
                     ops.insert(child.token.key(), Box::new(operations::Copy(*arg)));
@@ -494,11 +499,11 @@ fn generate_ops(tree: &mut Tree, data: &mut Data) {
                 "ltz" => {
                     ops.insert(child.token.key(), Box::new(operations::Ltz));
                 }
-                "?" => {
+                "jumpz" => {
                     let label = child.children.pop().unwrap().token.deref().to_owned();
                     ops.insert(child.token.key(), Box::new(operations::Jumpz(label)));
                 }
-                ":" => {
+                "label" => {
                     let label = child.children.pop().unwrap().token.deref().to_owned();
                     labels.insert(label.clone(), i as i64);
                     ops.insert(child.token.key(), Box::new(operations::Label(label)));
