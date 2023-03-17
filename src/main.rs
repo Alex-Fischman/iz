@@ -147,7 +147,7 @@ fn main() {
         group_tokens,
         remove_whitespace,
         // parse
-        // parse_int_literals,
+        parse_int_literals,
         group_brackets,
         insert_default_operators,
         group_operators,
@@ -222,6 +222,21 @@ fn group_tokens(tree: &mut Tree, _data: &mut Data) {
 fn remove_whitespace(tree: &mut Tree, _data: &mut Data) {
     tree.children
         .retain(|child| !child.token.chars().all(char::is_whitespace));
+}
+
+fn parse_int_literals(tree: &mut Tree, data: &mut Data) {
+    let ints = tree
+        .children
+        .iter()
+        .filter_map(|child| {
+            child
+                .token
+                .parse::<i64>()
+                .ok()
+                .map(|int| (child.token.key(), int))
+        })
+        .collect();
+    data.insert::<HashMap<Key, i64>>("ints", ints);
 }
 
 fn group_brackets(tree: &mut Tree, _data: &mut Data) {
