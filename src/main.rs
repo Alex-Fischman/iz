@@ -274,8 +274,8 @@ fn unroll_brackets(tree: &mut Tree, _data: &mut Data) {
 }
 
 struct Operator {
-    // for now, Some is a function unroll and None is a macro invoke
-    // this will change once macro infrastructure is set up
+    // for now, Some means unroll the function
+    // this will probably change once macro infrastructure is set up
     func: Option<String>,
     left: usize,
     right: usize,
@@ -311,6 +311,7 @@ fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
         ops(&[("$", None, 0, 1)], Right),
         ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], Right),
         ops(&[("+", Some("add"), 1, 1)], Left),
+        ops(&[("=", None, 1, 1)], Right),
     ];
     data.insert("precedences", precedences.into_iter().collect::<Vec<_>>());
 }
@@ -513,11 +514,11 @@ fn generate_ops(tree: &mut Tree, data: &mut Data) {
 fn interpret(tree: &mut Tree, data: &mut Data) {
     let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
     for child in &tree.children {
-        if !child.children.is_empty() {
-            panic!("found child of {}", child.token)
-        }
         if ops.get(&child.token.key()).is_none() {
             panic!("no operation for {}", child.token)
+        }
+        if !child.children.is_empty() {
+            panic!("found child of {}", child.token)
         }
     }
 
