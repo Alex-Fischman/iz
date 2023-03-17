@@ -8,14 +8,14 @@ use std::{
     clone::Clone,
     collections::HashMap,
     env::args,
-    fmt::{Display, Formatter, Result as FmtResult},
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
     fs::read_to_string,
     iter::{Extend, IntoIterator, Iterator},
     ops::{Deref, Index, IndexMut},
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {matches, println, write},
+    {format, matches, println, write},
 };
 
 macro_rules! panic {
@@ -349,13 +349,13 @@ impl IndexMut<i64> for Memory {
     }
 }
 
-trait Operation {
+trait Operation: Debug {
     fn run(&self, memory: &mut Memory, data: &Data);
 }
 
 mod operations {
     use crate::*;
-
+    #[derive(Debug)]
     pub struct Push(pub i64);
     impl Operation for Push {
         fn run(&self, memory: &mut Memory, _data: &Data) {
@@ -364,14 +364,14 @@ mod operations {
             memory.sp += 1;
         }
     }
-
+    #[derive(Debug)]
     pub struct Move(pub i64);
     impl Operation for Move {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             memory.sp -= self.0;
         }
     }
-
+    #[derive(Debug)]
     pub struct Copy(pub i64);
     impl Operation for Copy {
         fn run(&self, memory: &mut Memory, _data: &Data) {
@@ -380,7 +380,7 @@ mod operations {
             memory.sp += 1;
         }
     }
-
+    #[derive(Debug)]
     pub struct Add;
     impl Operation for Add {
         fn run(&self, memory: &mut Memory, _data: &Data) {
@@ -389,7 +389,7 @@ mod operations {
             memory.sp -= 1;
         }
     }
-
+    #[derive(Debug)]
     pub struct Neg;
     impl Operation for Neg {
         fn run(&self, memory: &mut Memory, _data: &Data) {
@@ -397,7 +397,7 @@ mod operations {
             memory[sp] = -memory[memory.sp];
         }
     }
-
+    #[derive(Debug)]
     pub struct Ltz;
     impl Operation for Ltz {
         fn run(&self, memory: &mut Memory, _data: &Data) {
@@ -405,7 +405,7 @@ mod operations {
             memory[sp] = (memory[memory.sp] < 0) as i64;
         }
     }
-
+    #[derive(Debug)]
     pub struct Jumpz(pub String);
     impl Operation for Jumpz {
         fn run(&self, memory: &mut Memory, data: &Data) {
@@ -420,7 +420,7 @@ mod operations {
             }
         }
     }
-
+    #[derive(Debug)]
     pub struct Label(pub String);
     impl Operation for Label {
         fn run(&self, _memory: &mut Memory, _data: &Data) {}
@@ -492,12 +492,16 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
         stack: Vec::new(),
     };
     while let Some(child) = tree.children.get(memory.pc as usize) {
-        ops[&child.token.key()].run(&mut memory, data);
+        let op = &ops[&child.token.key()];
+        op.run(&mut memory, data);
         memory.pc += 1;
-
         match memory.sp {
-            -1 => println!(),
-            sp => println!("{:?}", &memory.stack[0..=sp as usize]),
+            -1 => println!("{:<32}\t", format!("{:?}", op)),
+            sp => println!(
+                "{:<32}\t{:?}",
+                format!("{:?}", op),
+                &memory.stack[0..=sp as usize]
+            ),
         }
     }
 }
