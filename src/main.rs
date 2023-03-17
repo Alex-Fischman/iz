@@ -14,7 +14,7 @@ use std::{
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {format, matches, println},
+    {format, matches, println, vec},
 };
 
 macro_rules! panic {
@@ -84,17 +84,17 @@ impl Tree<'_> {
 struct Data(HashMap<String, Box<dyn Any>>);
 
 impl Data {
-    fn insert<V: Any>(&mut self, key: &str, value: V) -> Option<Box<dyn Any>> {
+    fn insert<T: Any>(&mut self, key: &str, value: T) -> Option<Box<dyn Any>> {
         self.0.insert(key.to_owned(), Box::new(value))
     }
 
-    fn get<T: 'static>(&self, key: &str) -> &T {
+    fn get<T: Any>(&self, key: &str) -> &T {
         match self.0.get(key) {
             Some(value) => match value.downcast_ref::<T>() {
                 Some(value) => value,
-                None => panic!("{} had the wrong type in data", key),
+                None => panic!("{} had the wrong type in data\n", key),
             },
-            None => panic!("{} not found in data", key),
+            None => panic!("{} was not found in data\n", key),
         }
     }
 }
@@ -104,43 +104,26 @@ fn main() {
     let file = args.get(1);
     let file = file.unwrap_or_else(|| panic!("expected command line argument\n"));
     let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}\n", file));
-    let source = Source {
-        name: file.clone(),
-        text,
-    };
-
-    let ops = |ops: &[(&str, Option<&str>, usize, usize)], unroll| {
-        let ops = ops.iter().map(|&(name, func, left, right)| {
-            (
-                name.to_owned(),
-                Operator {
-                    _func: func.map(|s| s.to_owned()),
-                    left,
-                    right,
-                },
-            )
-        });
-        (ops.collect(), unroll)
-    };
-    let precedences: Precedences = [
-        ops(&[(":", None, 1, 0)], false),
-        ops(&[("?", None, 1, 0)], false),
-        ops(&[("~", None, 0, 1)], true),
-        ops(&[("$", None, 0, 1)], true),
-        ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
-        ops(&[("+", Some("add"), 1, 1)], false),
-    ]
-    .to_vec();
+    let name = file.clone();
+    let source = Source { name, text };
 
     let mut tree = Tree::new(&source, 0, 0);
-    let mut data = Data(HashMap::new());
-    data.insert("precedences", precedences);
-
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
         tree.children.push(Tree::new(&source, i, j));
     }
+
+    let mut data = Data(HashMap::new());
+    let precedences = vec![
+        Operators::new(&[(":", None, 1, 0)], false),
+        Operators::new(&[("?", None, 1, 0)], false),
+        Operators::new(&[("~", None, 0, 1)], true),
+        Operators::new(&[("$", None, 0, 1)], true),
+        Operators::new(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
+        Operators::new(&[("+", Some("add"), 1, 1)], false),
+    ];
+    data.insert("precedences", precedences);
 
     let passes = [
         // tokenize
@@ -169,7 +152,7 @@ fn main() {
     print_tree(&tree, 0);
     fn print_tree(tree: &Tree, indent: usize) {
         println!(
-            "{}at {}:\t{}",
+            "{}{}:\t{}",
             "\t".repeat(indent),
             tree.token.location(),
             tree.token.deref(),
@@ -197,18 +180,12 @@ fn remove_comments(tree: &mut Tree, _data: &mut Data) {
 
 fn group_tokens(tree: &mut Tree, _data: &mut Data) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
-    let token_type = |s: &str| {
-        if s.chars()
-            .all(|c| matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
-        {
-            0
-        } else if s.chars().all(char::is_whitespace) {
-            1
-        } else if is_bracket(s) {
-            2
-        } else {
-            3
-        }
+    let is_ident_char = |c: char| matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9');
+    let token_type = |s: &str| match s {
+        _ if s.chars().all(is_ident_char) => 0,
+        _ if s.chars().all(char::is_whitespace) => 1,
+        _ if is_bracket(s) => 2,
+        _ => 3,
     };
 
     let mut i = 1;
@@ -240,10 +217,10 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
         "[" => "]",
         s => panic!("{} is not a bracket\n", s),
     };
+
     let mut openers: Vec<(usize, Token)> = Vec::new();
     let mut i = 0;
     while i < tree.children.len() {
-        #[allow(clippy::needless_borrow)]
         match tree.children[i].token.deref() {
             "(" | "{" | "[" => openers.push((i, tree.children[i].token.clone())),
             ")" | "}" | "]" => match openers.pop() {
@@ -272,7 +249,7 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
     }
     if let Some((_, opener)) = openers.last() {
         panic!(
-            "no {} for {} at {}\n",
+            "no {} for the {} at {}\n",
             match_opener(opener),
             opener.deref(),
             opener.location()
@@ -280,23 +257,43 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
     }
 }
 
-#[derive(Clone)]
 struct Operator {
     _func: Option<String>,
     left: usize,
     right: usize,
 }
-// a list of precedence levels, each of which contains
-// a map from strings to Operators
-// a bool for right associativity
-type Precedences = Vec<(HashMap<String, Operator>, bool)>;
+
+struct Operators {
+    ops: HashMap<String, Operator>,
+    right_assoc: bool,
+}
+
+impl Operators {
+    fn new(ops: &[(&str, Option<&str>, usize, usize)], right_assoc: bool) -> Operators {
+        let ops = ops
+            .iter()
+            .map(|&(name, func, left, right)| {
+                (
+                    name.to_owned(),
+                    Operator {
+                        _func: func.map(|s| s.to_owned()),
+                        left,
+                        right,
+                    },
+                )
+            })
+            .collect();
+        Operators { ops, right_assoc }
+    }
+}
 
 fn group_operators(tree: &mut Tree, data: &mut Data) {
     for child in &mut tree.children {
         group_operators(child, data)
     }
-    let precedences: &Precedences = data.get("precedences");
-    for (ops, right_assoc) in precedences {
+
+    let precedences = data.get::<Vec<_>>("precedences");
+    for Operators { ops, right_assoc } in precedences {
         let mut i = if *right_assoc {
             tree.children.len().wrapping_sub(1)
         } else {
@@ -306,7 +303,7 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
             if let Some(op) = ops.get(tree.children[i].token.deref()) {
                 if i < op.left || i + op.right >= tree.children.len() {
                     panic!(
-                        "{} is missing arguments at {}",
+                        "{} is missing arguments at {}\n",
                         tree.children[i].token.deref(),
                         tree.children[i].token.location()
                     )
