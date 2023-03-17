@@ -391,8 +391,14 @@ impl IndexMut<i64> for Stack {
     }
 }
 
+struct Memory {
+    pc: i64,
+    sp: i64,
+    stack: Stack,
+}
+
 trait Operation: Debug {
-    fn run(&self, pc: &mut i64, sp: &mut i64, stack: &mut Stack, data: &Data);
+    fn run(&self, memory: &mut Memory, data: &Data);
 }
 
 mod operations {
@@ -400,59 +406,59 @@ mod operations {
     #[derive(Debug)]
     pub struct Push(pub i64);
     impl Operation for Push {
-        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
-            stack[*sp + 1] = self.0;
-            *sp += 1;
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.stack[memory.sp + 1] = self.0;
+            memory.sp += 1;
         }
     }
     #[derive(Debug)]
     pub struct Move(pub i64);
     impl Operation for Move {
-        fn run(&self, _pc: &mut i64, sp: &mut i64, _stack: &mut Stack, _data: &Data) {
-            *sp -= self.0;
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.sp -= self.0;
         }
     }
     #[derive(Debug)]
     pub struct Copy(pub i64);
     impl Operation for Copy {
-        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
-            stack[*sp + 1] = stack[*sp - self.0];
-            *sp += 1;
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.stack[memory.sp + 1] = memory.stack[memory.sp - self.0];
+            memory.sp += 1;
         }
     }
     #[derive(Debug)]
     pub struct Add;
     impl Operation for Add {
-        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
-            stack[*sp - 1] += stack[*sp];
-            *sp -= 1;
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.stack[memory.sp - 1] += memory.stack[memory.sp];
+            memory.sp -= 1;
         }
     }
     #[derive(Debug)]
     pub struct Neg;
     impl Operation for Neg {
-        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
-            stack[*sp] = -stack[*sp];
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.stack[memory.sp] = -memory.stack[memory.sp];
         }
     }
     #[derive(Debug)]
     pub struct Ltz;
     impl Operation for Ltz {
-        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
-            stack[*sp] = (stack[*sp] < 0) as i64;
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.stack[memory.sp] = (memory.stack[memory.sp] < 0) as i64;
         }
     }
     #[derive(Debug)]
     pub struct Jumpz(pub String);
     impl Operation for Jumpz {
-        fn run(&self, pc: &mut i64, sp: &mut i64, stack: &mut Stack, data: &Data) {
+        fn run(&self, memory: &mut Memory, data: &Data) {
             let labels: &HashMap<String, i64> = data.get("labels");
             match labels.get(&self.0) {
                 Some(i) => {
-                    if stack[*sp] == 0 {
-                        *pc = *i;
+                    if memory.stack[memory.sp] == 0 {
+                        memory.pc = *i;
                     }
-                    *sp -= 1;
+                    memory.sp -= 1;
                 }
                 None => panic!("could not find label {}", self.0),
             }
@@ -461,7 +467,7 @@ mod operations {
     #[derive(Debug)]
     pub struct Label(pub String);
     impl Operation for Label {
-        fn run(&self, _pc: &mut i64, _sp: &mut i64, _stack: &mut Stack, _data: &Data) {}
+        fn run(&self, _memory: &mut Memory, _data: &Data) {}
     }
 }
 
@@ -527,19 +533,21 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
         }
     }
 
-    let mut pc = 0;
-    let mut sp: i64 = -1;
-    let mut stack = Stack(Vec::new());
-    while let Some(child) = tree.children.get(pc as usize) {
+    let mut memory = Memory {
+        pc: 0,
+        sp: -1,
+        stack: Stack(Vec::new()),
+    };
+    while let Some(child) = tree.children.get(memory.pc as usize) {
         let op = &ops[&child.token.key()];
-        op.run(&mut pc, &mut sp, &mut stack, data);
-        pc += 1;
-        match sp {
+        op.run(&mut memory, data);
+        memory.pc += 1;
+        match memory.sp {
             -1 => println!("{:<32}\t", format!("{:?}", op)),
             sp => println!(
                 "{:<32}\t{:?}",
                 format!("{:?}", op),
-                &stack.0[0..=sp as usize]
+                &memory.stack.0[0..=sp as usize]
             ),
         }
     }
