@@ -125,15 +125,8 @@ fn main() {
         group_brackets,
         insert_default_operators,
         group_operators,
-        // unroll_operators,
-        // unroll_brackets,
-        // // transform
-        // collect_macros,
-        // sort_macros,
-        // substitute_macros,
-        // strings_to_ops,
-        // // backend
-        // check_nodes_are_ops,
+        // backend
+        // tokens_to_ops,
         // collect_labels,
         // interpret,
     ];

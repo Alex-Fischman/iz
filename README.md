@@ -19,3 +19,19 @@ Here is a list of things that should be possible for users of this programming l
 - Shader restrictions
 - “Lifetime analysis” or other memory safety guarantees
 - Proof system?
+
+Here are some thoughts on the future of the language
+Macros:
+- a macro is just a function that runs at compile time
+- generics are macros that take types and return types
+- Rust macros are macros that take ASTs and return ASTs
+- syntax will be extremely similar to regular functions, just `=>` vs. `->`
+- compile passes are macros that take an AST and a Data object
+IR:
+- starting with a stack based thing for simplicity
+- but will also include weirder ops like moving the stack pointer for utility
+Syntax: Arbitrary operator definitions and overloading
+Namespaces:
+- `use` imports any scope
+- all structs have a scope that contains their fields and methods
+- can be used for faking inheritance with nice syntax for composition
