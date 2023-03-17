@@ -134,12 +134,10 @@ fn main() {
         group_operators,
         // backend
         insert_code_map,
-        // translate_pushes,
-        // translate_moves,
-        // translate_copies,
+        // translate_push_move_copy,
         translate_add_neg_ltz,
-        // translate_jumpzs,
-        // translate_labels,
+        translate_jumpz_label,
+        ready_for_interpret,
         interpret,
     ];
     for pass in passes {
@@ -395,7 +393,7 @@ mod operations {
         }
     }
 
-    pub struct Jumpz(String);
+    pub struct Jumpz(pub String);
     impl Operation for Jumpz {
         fn run(&self, memory: &mut Memory, data: &Data) {
             match data.get::<HashMap<String, i64>>("labels").get(&self.0) {
@@ -410,7 +408,7 @@ mod operations {
         }
     }
 
-    pub struct Label(String);
+    pub struct Label(pub String);
     impl Operation for Label {
         fn run(&self, _memory: &mut Memory, _data: &Data) {}
     }
@@ -421,21 +419,47 @@ fn insert_code_map(_tree: &mut Tree, data: &mut Data) {
 }
 
 fn translate_add_neg_ltz(tree: &mut Tree, data: &mut Data) {
-    for child in &mut tree.children {
-        translate_add_neg_ltz(child, data)
+    for child in &tree.children {
+        match child.token.deref() {
+            "add" => {
+                data.insert(&child.token, operations::Add);
+            }
+            "neg" => {
+                data.insert(&child.token, operations::Neg);
+            }
+            "ltz" => {
+                data.insert(&child.token, operations::Ltz);
+            }
+            _ => {}
+        }
     }
+}
 
-    match tree.token.deref() {
-        "add" => {
-            data.insert(&tree.token, operations::Add);
+fn translate_jumpz_label(tree: &mut Tree, data: &mut Data) {
+    for child in &mut tree.children {
+        match child.token.deref() {
+            "?" => {
+                let label = child.children.remove(0).token.deref().to_owned();
+                data.insert(&child.token, operations::Jumpz(label));
+            }
+            ":" => {
+                let label = child.children.remove(0).token.deref().to_owned();
+                data.insert(&child.token, operations::Label(label));
+            }
+            _ => {}
         }
-        "neg" => {
-            data.insert(&tree.token, operations::Neg);
+    }
+}
+
+fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
+    let code: &HashMap<Token, Box<dyn Operation>> = data.get("code");
+    for child in &tree.children {
+        if !child.children.is_empty() {
+            panic!("found child of {}\n", child.token)
         }
-        "ltz" => {
-            data.insert(&tree.token, operations::Ltz);
+        if code.get(&child.token).is_none() {
+            panic!("no operation for {}\n", child.token)
         }
-        _ => {}
     }
 }
 
@@ -448,14 +472,12 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
     };
 
     while let Some(child) = tree.children.get(memory.pc as usize) {
-        let op = code
-            .get(&child.token)
-            .unwrap_or_else(|| panic!("no operation for {}\n", child.token));
-        op.run(&mut memory, data);
+        code[&child.token].run(&mut memory, data);
+        memory.pc += 1;
+
         match memory.sp {
             -1 => println!(),
             sp => println!("{:?}", &memory.stack[0..=sp as usize]),
         }
-        memory.pc += 1;
     }
 }
