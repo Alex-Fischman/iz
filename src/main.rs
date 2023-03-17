@@ -20,8 +20,8 @@ use std::{
 
 macro_rules! panic {
     () => {{ std::process::exit(-1); }};
-    ($fmt:literal) => {{ std::eprint!($fmt); std::process::exit(-1); }};
-    ($fmt:literal, $($arg:tt)*) => {{ std::eprint!($fmt, $($arg)*); std::process::exit(-1); }};
+    ($fmt:literal) => {{ std::eprintln!($fmt); std::process::exit(-1); }};
+    ($fmt:literal, $($arg:tt)*) => {{ std::eprintln!($fmt, $($arg)*); std::process::exit(-1); }};
 }
 
 // these can't go inside Token for a few reasons:
@@ -107,9 +107,9 @@ impl Data {
         match self.0.get(key) {
             Some(value) => match value.downcast_ref::<T>() {
                 Some(value) => value,
-                None => panic!("{} had the wrong type in data\n", key),
+                None => panic!("{} had the wrong type in data", key),
             },
-            None => panic!("{} was not found in data\n", key),
+            None => panic!("{} was not found in data", key),
         }
     }
 }
@@ -117,8 +117,8 @@ impl Data {
 fn main() {
     let args: Vec<String> = args().collect();
     let file = args.get(1);
-    let file = file.unwrap_or_else(|| panic!("expected command line argument\n"));
-    let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}\n", file));
+    let file = file.unwrap_or_else(|| panic!("expected command line argument"));
+    let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
     let name = file.clone();
     let source = Source { name, text };
 
@@ -232,7 +232,7 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
         "(" => ")",
         "{" => "}",
         "[" => "]",
-        s => panic!("{} is not a bracket\n", s),
+        s => panic!("{} is not a bracket", s),
     };
 
     let mut openers: Vec<(usize, Token)> = Vec::new();
@@ -248,16 +248,16 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
                     i = l;
                 }
                 Some((_, opener)) => {
-                    panic!("{} matched with {}\n", opener, tree.children[i].token,)
+                    panic!("{} matched with {}", opener, tree.children[i].token,)
                 }
-                None => panic!("extra {}\n", tree.children[i].token,),
+                None => panic!("extra {}", tree.children[i].token,),
             },
             _ => {}
         }
         i += 1;
     }
     if let Some((_, opener)) = openers.last() {
-        panic!("no {} for the {}\n", match_opener(opener), opener,)
+        panic!("no {} for the {}", match_opener(opener), opener,)
     }
 }
 
@@ -319,7 +319,7 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
         while i < tree.children.len() {
             if let Some(op) = ops.get(tree.children[i].token.deref()) {
                 if i < op.left || i + op.right >= tree.children.len() {
-                    panic!("missing arguments for {}\n", tree.children[i].token,)
+                    panic!("missing arguments for {}", tree.children[i].token,)
                 }
                 let mut cs: Vec<Tree> = tree.children.drain(i - op.left..i).collect();
                 i -= op.left;
@@ -485,10 +485,10 @@ fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
     let ops: &HashMap<Key, Box<dyn Operation>> = data.get("ops");
     for child in &tree.children {
         if !child.children.is_empty() {
-            panic!("found child of {}\n", child.token)
+            panic!("found child of {}", child.token)
         }
         if ops.get(&child.token.key()).is_none() {
-            panic!("no operation for {}\n", child.token)
+            panic!("no operation for {}", child.token)
         }
     }
 }
