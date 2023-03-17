@@ -3,7 +3,7 @@
 # here is a while loop
 1
 while_start:
-dup neg 3 add while_end?
+$0 neg 6 add while_end?
 # cond ends, body starts
 1 add
 0 while_start?
@@ -17,11 +17,6 @@ $0 # $ copies the nth-from-top element
 # both $ and ~ can take negative arguments
 
 0
-# 3 0
-dup
-drop
-swap
-# 0 3
 
 # here is an if else statement
 if_end?
@@ -32,4 +27,4 @@ if_end:
 else_end:
 
 # operators with precedence and associativity
--(1 + -(-2))
+# -(1 + -(-2))

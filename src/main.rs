@@ -112,16 +112,6 @@ impl Data {
             None => panic!("{} was not found in data\n", key),
         }
     }
-
-    fn get_mut<T: Any>(&mut self, key: &str) -> &mut T {
-        match self.0.get_mut(key) {
-            Some(value) => match value.downcast_mut::<T>() {
-                Some(value) => value,
-                None => panic!("{} had the wrong type in data\n", key),
-            },
-            None => panic!("{} was not found in data\n", key),
-        }
-    }
 }
 
 fn main() {
@@ -151,11 +141,9 @@ fn main() {
         group_brackets,
         insert_default_operators,
         group_operators,
+        // transformation
+        generate_ops,
         // backend
-        insert_ops_map,
-        // translate_push_move_copy,
-        translate_add_neg_ltz,
-        translate_jumpz_label,
         ready_for_interpret,
         interpret,
     ];
@@ -377,7 +365,7 @@ trait Operation {
 mod operations {
     use crate::*;
 
-    pub struct Push(i64);
+    pub struct Push(pub i64);
     impl Operation for Push {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -386,14 +374,14 @@ mod operations {
         }
     }
 
-    pub struct Move(i64);
+    pub struct Move(pub i64);
     impl Operation for Move {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             memory.sp -= self.0;
         }
     }
 
-    pub struct Copy(i64);
+    pub struct Copy(pub i64);
     impl Operation for Copy {
         fn run(&self, memory: &mut Memory, _data: &Data) {
             let sp = memory.sp;
@@ -448,43 +436,49 @@ mod operations {
     }
 }
 
-fn insert_ops_map(_tree: &mut Tree, data: &mut Data) {
-    data.insert::<HashMap<Key, Box<dyn Operation>>>("ops", HashMap::new());
-}
-
-fn translate_add_neg_ltz(tree: &mut Tree, data: &mut Data) {
-    let ops: &mut HashMap<Key, Box<dyn Operation>> = data.get_mut("ops");
-    for child in &tree.children {
-        match child.token.deref() {
-            "add" => {
-                ops.insert(child.token.key(), Box::new(operations::Add));
+fn generate_ops(tree: &mut Tree, data: &mut Data) {
+    let ints: &HashMap<Key, i64> = data.get("ints");
+    let mut ops: HashMap<Key, Box<dyn Operation>> = HashMap::new();
+    let mut labels: HashMap<String, i64> = HashMap::new();
+    for (i, child) in tree.children.iter_mut().enumerate() {
+        if let Some(int) = ints.get(&child.token.key()) {
+            ops.insert(child.token.key(), Box::new(operations::Push(*int)));
+        } else {
+            match child.token.deref() {
+                "~" => {
+                    let arg = child.children.pop().unwrap();
+                    let arg = ints.get(&arg.token.key()).unwrap();
+                    ops.insert(child.token.key(), Box::new(operations::Move(*arg)));
+                }
+                "$" => {
+                    let arg = child.children.pop().unwrap();
+                    let arg = ints.get(&arg.token.key()).unwrap();
+                    ops.insert(child.token.key(), Box::new(operations::Copy(*arg)));
+                }
+                "add" => {
+                    ops.insert(child.token.key(), Box::new(operations::Add));
+                }
+                "neg" => {
+                    ops.insert(child.token.key(), Box::new(operations::Neg));
+                }
+                "ltz" => {
+                    ops.insert(child.token.key(), Box::new(operations::Ltz));
+                }
+                "?" => {
+                    let label = child.children.pop().unwrap().token.deref().to_owned();
+                    ops.insert(child.token.key(), Box::new(operations::Jumpz(label)));
+                }
+                ":" => {
+                    let label = child.children.pop().unwrap().token.deref().to_owned();
+                    labels.insert(label.clone(), i as i64);
+                    ops.insert(child.token.key(), Box::new(operations::Label(label)));
+                }
+                _ => {}
             }
-            "neg" => {
-                ops.insert(child.token.key(), Box::new(operations::Neg));
-            }
-            "ltz" => {
-                ops.insert(child.token.key(), Box::new(operations::Ltz));
-            }
-            _ => {}
         }
     }
-}
-
-fn translate_jumpz_label(tree: &mut Tree, data: &mut Data) {
-    let ops: &mut HashMap<Key, Box<dyn Operation>> = data.get_mut("ops");
-    for child in &mut tree.children {
-        match child.token.deref() {
-            "?" => {
-                let label = child.children.remove(0).token.deref().to_owned();
-                ops.insert(child.token.key(), Box::new(operations::Jumpz(label)));
-            }
-            ":" => {
-                let label = child.children.remove(0).token.deref().to_owned();
-                ops.insert(child.token.key(), Box::new(operations::Label(label)));
-            }
-            _ => {}
-        }
-    }
+    data.insert("ops", ops);
+    data.insert("labels", labels);
 }
 
 fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
@@ -503,10 +497,9 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
     let ops: &HashMap<Key, Box<dyn Operation>> = data.get("ops");
     let mut memory = Memory {
         pc: 0,
-        sp: 0,
+        sp: -1,
         stack: Vec::new(),
     };
-
     while let Some(child) = tree.children.get(memory.pc as usize) {
         ops[&child.token.key()].run(&mut memory, data);
         memory.pc += 1;
