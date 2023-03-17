@@ -8,13 +8,14 @@ use std::{
     clone::Clone,
     collections::HashMap,
     env::args,
+    fmt::{Display, Formatter, Result as FmtResult},
     fs::read_to_string,
-    iter::{Extend, Iterator},
-    ops::Deref,
+    iter::{Extend, IntoIterator, Iterator},
+    ops::{Deref, Index, IndexMut},
     option::{Option, Option::None, Option::Some},
     string::String,
     vec::Vec,
-    {format, matches, println, vec},
+    {format, matches, println, write},
 };
 
 macro_rules! panic {
@@ -27,13 +28,13 @@ macro_rules! panic {
 // - Token should be as small as possible
 // - Token needs a reference to the beginning of the file for location
 // - Token needs a reference to the file name for location as well
-#[derive(PartialEq)]
+#[derive(Hash, PartialEq, Eq)]
 struct Source {
     name: String,
     text: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 struct Token<'a> {
     source: &'a Source,
     lo: usize,
@@ -64,6 +65,12 @@ impl Token<'_> {
             }
         }
         format!("{}:{}:{}", self.source.name, row, col)
+    }
+}
+
+impl Display for Token<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        write!(f, "{} at {}", self.deref(), self.location())
     }
 }
 
@@ -128,7 +135,7 @@ fn main() {
         // backend
         // tokens_to_ops,
         // collect_labels,
-        // interpret,
+        interpret,
     ];
     for pass in passes {
         pass(&mut tree, &mut data)
@@ -273,7 +280,7 @@ impl Operators {
 }
 
 fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
-    let precedences = vec![
+    let precedences = [
         Operators::new(&[(":", None, 1, 0)], false),
         Operators::new(&[("?", None, 1, 0)], false),
         Operators::new(&[("~", None, 0, 1)], true),
@@ -281,6 +288,7 @@ fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
         Operators::new(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
         Operators::new(&[("+", Some("add"), 1, 1)], false),
     ];
+    let precedences: Vec<_> = precedences.into_iter().collect();
     data.insert("precedences", precedences);
 }
 
@@ -316,5 +324,62 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
                 i + 1
             };
         }
+    }
+}
+
+struct Memory {
+    pc: i64,
+    sp: i64,
+    stack: Vec<i64>,
+}
+
+impl Index<i64> for Memory {
+    type Output = i64;
+    fn index(&self, i: i64) -> &i64 {
+        &self.stack[i as usize]
+    }
+}
+
+impl IndexMut<i64> for Memory {
+    fn index_mut(&mut self, i: i64) -> &mut i64 {
+        let i = i as usize;
+        if self.stack.len() <= i {
+            self.stack.resize(i + 1, 0);
+        }
+        &mut self.stack[i]
+    }
+}
+
+trait Operation {
+    fn run(&self, memory: &mut Memory, data: &Data);
+}
+
+struct Push(i64);
+impl Operation for Push {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        let i = memory.sp + 1;
+        memory[i] = self.0;
+        memory.sp = i;
+    }
+}
+
+fn interpret(tree: &mut Tree, data: &mut Data) {
+    let code: &HashMap<Token, Box<dyn Operation>> = data.get("code");
+    let mut memory = Memory {
+        pc: 0,
+        sp: 0,
+        stack: Vec::new(),
+    };
+
+    while let Some(child) = tree.children.get(memory.pc as usize) {
+        let op = code
+            .get(&child.token)
+            .unwrap_or_else(|| panic!("no operation for {}", child.token));
+        op.run(&mut memory, data);
+        match memory.sp {
+            -1 => println!(),
+            sp => println!("{:?}", &memory.stack[0..=sp as usize]),
+        }
+        memory.pc += 1;
     }
 }
