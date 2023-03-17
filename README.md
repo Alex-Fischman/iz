@@ -30,7 +30,9 @@ Macros:
 IR:
 - starting with a stack based thing for simplicity
 - but will also include weirder ops like moving the stack pointer for utility
-Syntax: Arbitrary operator definitions and overloading
+Syntax:
+- arbitrary operator definitions
+- operations get transformed into either a function call or a macro invocation
 Namespaces:
 - `use` imports any scope
 - all structs have a scope that contains their fields and methods

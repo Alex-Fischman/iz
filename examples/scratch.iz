@@ -27,4 +27,4 @@ if_end:
 else_end:
 
 # operators with precedence and associativity
-# -(1 + -(-2))
+-(1 + -(-2))

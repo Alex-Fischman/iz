@@ -143,6 +143,8 @@ fn main() {
         group_brackets,
         insert_default_operators,
         group_operators,
+        // flatten
+        unroll_operators,
         unroll_brackets,
         // transformation
         generate_ops,
@@ -274,7 +276,7 @@ fn unroll_brackets(tree: &mut Tree, _data: &mut Data) {
 struct Operator {
     // for now, Some is a function unroll and None is a macro invoke
     // this will change once macro infrastructure is set up
-    _func: Option<String>,
+    func: Option<String>,
     left: usize,
     right: usize,
 }
@@ -294,8 +296,8 @@ fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
         let ops = ops
             .iter()
             .map(|&(name, func, left, right)| {
-                let _func = func.map(|s| s.to_owned());
-                (name.to_owned(), Operator { _func, left, right })
+                let func = func.map(|s| s.to_owned());
+                (name.to_owned(), Operator { func, left, right })
             })
             .collect();
         Operators { ops, associativity }
@@ -339,6 +341,27 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
                 Associativity::Right => i.wrapping_sub(1),
             };
         }
+    }
+}
+
+fn unroll_operators(tree: &mut Tree, data: &mut Data) {
+    for child in &mut tree.children {
+        unroll_operators(child, data)
+    }
+
+    let precedences: &Vec<Operators> = data.get("precedences");
+    let mut i = 0;
+    while i < tree.children.len() {
+        let s = tree.children[i].token.deref();
+        if let Some(op) = precedences.iter().find_map(|ops| ops.ops.get(s)) {
+            if let Some(_func) = &op.func {
+                let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
+                let len = cs.len();
+                tree.children.splice(i..i, cs);
+                i += len;
+            }
+        }
+        i += 1;
     }
 }
 
@@ -437,13 +460,20 @@ mod operations {
 
 fn generate_ops(tree: &mut Tree, data: &mut Data) {
     let ints: &HashMap<usize, i64> = data.get("ints");
+    let precedences: &Vec<Operators> = data.get("precedences");
     let mut ops: HashMap<usize, Box<dyn Operation>> = HashMap::new();
     let mut labels: HashMap<String, i64> = HashMap::new();
     for (i, child) in tree.children.iter_mut().enumerate() {
         if let Some(int) = ints.get(&child.token.key()) {
             ops.insert(child.token.key(), Box::new(operations::Push(*int)));
         } else {
-            match child.token.deref() {
+            let s = child.token.deref();
+            let s = precedences
+                .iter()
+                .find_map(|ops| ops.ops.get(s))
+                .and_then(|Operator { func, .. }| func.as_ref().map(|s| s.as_str()))
+                .unwrap_or(s);
+            match s {
                 "~" => {
                     let arg = child.children.pop().unwrap();
                     let arg = ints.get(&arg.token.key()).unwrap();
