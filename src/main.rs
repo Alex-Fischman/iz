@@ -354,12 +354,77 @@ trait Operation {
     fn run(&self, memory: &mut Memory, data: &Data);
 }
 
-struct Push(i64);
-impl Operation for Push {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
-        let i = memory.sp + 1;
-        memory[i] = self.0;
-        memory.sp = i;
+mod op {
+    use crate::*;
+
+    struct Push(i64);
+    impl Operation for Push {
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            let sp = memory.sp;
+            memory[sp + 1] = self.0;
+            memory.sp += 1;
+        }
+    }
+
+    struct Move(i64);
+    impl Operation for Move {
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            memory.sp -= self.0;
+        }
+    }
+
+    struct Copy(i64);
+    impl Operation for Copy {
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            let sp = memory.sp;
+            memory[sp + 1] = memory[memory.sp - self.0];
+            memory.sp += 1;
+        }
+    }
+
+    struct Add;
+    impl Operation for Add {
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            let sp = memory.sp;
+            memory[sp - 1] += memory[memory.sp];
+            memory.sp -= 1;
+        }
+    }
+
+    struct Neg;
+    impl Operation for Neg {
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            let sp = memory.sp;
+            memory[sp] = -memory[memory.sp];
+        }
+    }
+
+    struct Ltz;
+    impl Operation for Ltz {
+        fn run(&self, memory: &mut Memory, _data: &Data) {
+            let sp = memory.sp;
+            memory[sp] = (memory[memory.sp] < 0) as i64;
+        }
+    }
+
+    struct Jumpz(String);
+    impl Operation for Jumpz {
+        fn run(&self, memory: &mut Memory, data: &Data) {
+            match data.get::<HashMap<String, i64>>("labels").get(&self.0) {
+                Some(i) => {
+                    if memory[memory.sp] == 0 {
+                        memory.pc = *i;
+                    }
+                    memory.sp -= 1;
+                }
+                None => panic!("could not find label {}", self.0),
+            }
+        }
+    }
+
+    struct Label(String);
+    impl Operation for Label {
+        fn run(&self, _memory: &mut Memory, _data: &Data) {}
     }
 }
 
