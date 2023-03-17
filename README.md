@@ -25,7 +25,8 @@ Macros:
 - a macro is just a function that runs at compile time
 - generics are macros that take types and return types
 - Rust macros are macros that take ASTs and return ASTs
-- syntax will be extremely similar to regular functions, just `=>` vs. `->`
+- all runtime functions are compile time functions
+- but some compile time functions will take compile-time-only args
 - compile passes are macros that take an AST and a Data object
 IR:
 - starting with a stack based thing for simplicity
@@ -33,6 +34,8 @@ IR:
 Syntax:
 - arbitrary operator definitions
 - operations get transformed into either a function call or a macro invocation
+- ()s are used for arbitrary grouping in parsing
+- {}s are used to quote code blocks and turn them into functions/macros
 Namespaces:
 - `use` imports any scope
 - all structs have a scope that contains their fields and methods
