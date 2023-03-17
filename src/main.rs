@@ -108,13 +108,11 @@ impl Data {
     }
 
     fn get<T: Any>(&self, key: &str) -> &T {
-        match self.0.get(key) {
-            Some(value) => match value.downcast_ref::<T>() {
-                Some(value) => value,
-                None => panic!("{} had the wrong type in data", key),
-            },
-            None => panic!("{} was not found in data", key),
-        }
+        self.0
+            .get(key)
+            .unwrap_or_else(|| panic!("{} was not found in data", key))
+            .downcast_ref::<T>()
+            .unwrap_or_else(|| panic!("{} had the wrong type in data", key))
     }
 }
 
@@ -204,7 +202,7 @@ fn remove_whitespace(tree: &mut Tree, _data: &mut Data) {
 }
 
 fn parse_int_literals(tree: &mut Tree, data: &mut Data) {
-    let ints = tree
+    let ints: HashMap<usize, i64> = tree
         .children
         .iter()
         .filter_map(|child| {
@@ -215,7 +213,7 @@ fn parse_int_literals(tree: &mut Tree, data: &mut Data) {
                 .map(|int| (child.token.key(), int))
         })
         .collect();
-    data.insert::<HashMap<usize, i64>>("ints", ints);
+    data.insert("ints", ints);
 }
 
 fn group_brackets(tree: &mut Tree, _data: &mut Data) {
@@ -226,29 +224,32 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
         s => panic!("{} is not a bracket", s),
     };
 
-    let mut openers: Vec<(usize, Token)> = Vec::new();
+    let mut openers = Vec::new();
     let mut i = 0;
     while i < tree.children.len() {
         match tree.children[i].token.deref() {
-            "(" | "{" | "[" => openers.push((i, tree.children[i].token.clone())),
+            "(" | "{" | "[" => openers.push(i),
             ")" | "}" | "]" => match openers.pop() {
-                Some((l, opener)) if match_opener(&opener) == tree.children[i].token.deref() => {
-                    let mut cs: Vec<Tree> = tree.children.drain(l + 1..=i).collect();
-                    cs.pop(); // remove closing bracket
-                    tree.children[l].children = cs;
-                    i = l;
+                None => panic!("extra {}", tree.children[i].token),
+                Some(l) => {
+                    let opener = &tree.children[l].token;
+                    if match_opener(opener) == tree.children[i].token.deref() {
+                        let mut cs: Vec<Tree> = tree.children.drain(l + 1..=i).collect();
+                        cs.pop(); // remove closing bracket
+                        tree.children[l].children = cs;
+                        i = l;
+                    } else {
+                        panic!("{} matched with {}", opener, tree.children[i].token)
+                    }
                 }
-                Some((_, opener)) => {
-                    panic!("{} matched with {}", opener, tree.children[i].token,)
-                }
-                None => panic!("extra {}", tree.children[i].token,),
             },
             _ => {}
         }
         i += 1;
     }
-    if let Some((_, opener)) = openers.last() {
-        panic!("no {} for the {}", match_opener(opener), opener,)
+    if let Some(l) = openers.pop() {
+        let opener = &tree.children[l].token;
+        panic!("no {} for the {}", match_opener(opener), opener)
     }
 }
 
@@ -258,41 +259,38 @@ struct Operator {
     right: usize,
 }
 
-struct Operators {
-    ops: HashMap<String, Operator>,
-    right_assoc: bool,
+enum Associativity {
+    Left,
+    Right,
 }
 
-impl Operators {
-    fn new(ops: &[(&str, Option<&str>, usize, usize)], right_assoc: bool) -> Operators {
-        let ops = ops
-            .iter()
-            .map(|&(name, func, left, right)| {
-                (
-                    name.to_owned(),
-                    Operator {
-                        _func: func.map(|s| s.to_owned()),
-                        left,
-                        right,
-                    },
-                )
-            })
-            .collect();
-        Operators { ops, right_assoc }
-    }
+struct Operators {
+    ops: HashMap<String, Operator>,
+    associativity: Associativity,
 }
 
 fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
+    fn ops(ops: &[(&str, Option<&str>, usize, usize)], associativity: Associativity) -> Operators {
+        let ops = ops
+            .iter()
+            .map(|&(name, func, left, right)| {
+                let _func = func.map(|s| s.to_owned());
+                (name.to_owned(), Operator { _func, left, right })
+            })
+            .collect();
+        Operators { ops, associativity }
+    }
+
+    use Associativity::{Left, Right};
     let precedences = [
-        Operators::new(&[(":", None, 1, 0)], false),
-        Operators::new(&[("?", None, 1, 0)], false),
-        Operators::new(&[("~", None, 0, 1)], true),
-        Operators::new(&[("$", None, 0, 1)], true),
-        Operators::new(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], true),
-        Operators::new(&[("+", Some("add"), 1, 1)], false),
+        ops(&[(":", None, 1, 0)], Left),
+        ops(&[("?", None, 1, 0)], Left),
+        ops(&[("~", None, 0, 1)], Right),
+        ops(&[("$", None, 0, 1)], Right),
+        ops(&[("-", Some("neg"), 0, 1), ("!", Some("not"), 0, 1)], Right),
+        ops(&[("+", Some("add"), 1, 1)], Left),
     ];
-    let precedences: Vec<_> = precedences.into_iter().collect();
-    data.insert("precedences", precedences);
+    data.insert("precedences", precedences.into_iter().collect::<Vec<_>>());
 }
 
 fn group_operators(tree: &mut Tree, data: &mut Data) {
@@ -300,12 +298,11 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
         group_operators(child, data)
     }
 
-    let precedences = data.get::<Vec<_>>("precedences");
-    for Operators { ops, right_assoc } in precedences {
-        let mut i = if *right_assoc {
-            tree.children.len().wrapping_sub(1)
-        } else {
-            0
+    let precedences: &Vec<_> = data.get("precedences");
+    for Operators { ops, associativity } in precedences {
+        let mut i = match associativity {
+            Associativity::Left => 0,
+            Associativity::Right => tree.children.len().wrapping_sub(1),
         };
         while i < tree.children.len() {
             if let Some(op) = ops.get(tree.children[i].token.deref()) {
@@ -317,40 +314,35 @@ fn group_operators(tree: &mut Tree, data: &mut Data) {
                 cs.extend(tree.children.drain(i + 1..=i + op.right));
                 tree.children[i].children = cs;
             }
-            i = if *right_assoc {
-                i.wrapping_sub(1)
-            } else {
-                i + 1
+            i = match associativity {
+                Associativity::Left => i + 1,
+                Associativity::Right => i.wrapping_sub(1),
             };
         }
     }
 }
 
-struct Memory {
-    pc: i64,
-    sp: i64,
-    stack: Vec<i64>,
-}
+struct Stack(Vec<i64>);
 
-impl Index<i64> for Memory {
+impl Index<i64> for Stack {
     type Output = i64;
     fn index(&self, i: i64) -> &i64 {
-        &self.stack[i as usize]
+        &self.0[i as usize]
     }
 }
 
-impl IndexMut<i64> for Memory {
+impl IndexMut<i64> for Stack {
     fn index_mut(&mut self, i: i64) -> &mut i64 {
         let i = i as usize;
-        if self.stack.len() <= i {
-            self.stack.resize(i + 1, 0);
+        if self.0.len() <= i {
+            self.0.resize(i + 1, 0);
         }
-        &mut self.stack[i]
+        &mut self.0[i]
     }
 }
 
 trait Operation: Debug {
-    fn run(&self, memory: &mut Memory, data: &Data);
+    fn run(&self, pc: &mut i64, sp: &mut i64, stack: &mut Stack, data: &Data);
 }
 
 mod operations {
@@ -358,63 +350,59 @@ mod operations {
     #[derive(Debug)]
     pub struct Push(pub i64);
     impl Operation for Push {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            let sp = memory.sp;
-            memory[sp + 1] = self.0;
-            memory.sp += 1;
+        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
+            stack[*sp + 1] = self.0;
+            *sp += 1;
         }
     }
     #[derive(Debug)]
     pub struct Move(pub i64);
     impl Operation for Move {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.sp -= self.0;
+        fn run(&self, _pc: &mut i64, sp: &mut i64, _stack: &mut Stack, _data: &Data) {
+            *sp -= self.0;
         }
     }
     #[derive(Debug)]
     pub struct Copy(pub i64);
     impl Operation for Copy {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            let sp = memory.sp;
-            memory[sp + 1] = memory[memory.sp - self.0];
-            memory.sp += 1;
+        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
+            stack[*sp + 1] = stack[*sp - self.0];
+            *sp += 1;
         }
     }
     #[derive(Debug)]
     pub struct Add;
     impl Operation for Add {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            let sp = memory.sp;
-            memory[sp - 1] += memory[memory.sp];
-            memory.sp -= 1;
+        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
+            stack[*sp - 1] += stack[*sp];
+            *sp -= 1;
         }
     }
     #[derive(Debug)]
     pub struct Neg;
     impl Operation for Neg {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            let sp = memory.sp;
-            memory[sp] = -memory[memory.sp];
+        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
+            stack[*sp] = -stack[*sp];
         }
     }
     #[derive(Debug)]
     pub struct Ltz;
     impl Operation for Ltz {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            let sp = memory.sp;
-            memory[sp] = (memory[memory.sp] < 0) as i64;
+        fn run(&self, _pc: &mut i64, sp: &mut i64, stack: &mut Stack, _data: &Data) {
+            stack[*sp] = (stack[*sp] < 0) as i64;
         }
     }
     #[derive(Debug)]
     pub struct Jumpz(pub String);
     impl Operation for Jumpz {
-        fn run(&self, memory: &mut Memory, data: &Data) {
-            match data.get::<HashMap<String, i64>>("labels").get(&self.0) {
+        fn run(&self, pc: &mut i64, sp: &mut i64, stack: &mut Stack, data: &Data) {
+            let labels: &HashMap<String, i64> = data.get("labels");
+            match labels.get(&self.0) {
                 Some(i) => {
-                    if memory[memory.sp] == 0 {
-                        memory.pc = *i;
+                    if stack[*sp] == 0 {
+                        *pc = *i;
                     }
-                    memory.sp -= 1;
+                    *sp -= 1;
                 }
                 None => panic!("could not find label {}", self.0),
             }
@@ -423,7 +411,7 @@ mod operations {
     #[derive(Debug)]
     pub struct Label(pub String);
     impl Operation for Label {
-        fn run(&self, _memory: &mut Memory, _data: &Data) {}
+        fn run(&self, _pc: &mut i64, _sp: &mut i64, _stack: &mut Stack, _data: &Data) {}
     }
 }
 
@@ -486,21 +474,19 @@ fn ready_for_interpret(tree: &mut Tree, data: &mut Data) {
 
 fn interpret(tree: &mut Tree, data: &mut Data) {
     let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
-    let mut memory = Memory {
-        pc: 0,
-        sp: -1,
-        stack: Vec::new(),
-    };
-    while let Some(child) = tree.children.get(memory.pc as usize) {
+    let mut pc = 0;
+    let mut sp: i64 = -1;
+    let mut stack = Stack(Vec::new());
+    while let Some(child) = tree.children.get(pc as usize) {
         let op = &ops[&child.token.key()];
-        op.run(&mut memory, data);
-        memory.pc += 1;
-        match memory.sp {
+        op.run(&mut pc, &mut sp, &mut stack, data);
+        pc += 1;
+        match sp {
             -1 => println!("{:<32}\t", format!("{:?}", op)),
             sp => println!(
                 "{:<32}\t{:?}",
                 format!("{:?}", op),
-                &memory.stack[0..=sp as usize]
+                &stack.0[0..=sp as usize]
             ),
         }
     }
