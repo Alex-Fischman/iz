@@ -13,6 +13,7 @@ use std::{
     iter::{Extend, IntoIterator, Iterator},
     ops::{Deref, Index, IndexMut},
     option::{Option, Option::None, Option::Some},
+    rc::Rc,
     string::String,
     vec::Vec,
     {format, matches, println, write},
@@ -35,20 +36,20 @@ struct Source {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
-struct Token<'a> {
-    source: &'a Source,
+struct Token {
+    source: Rc<Source>,
     lo: usize,
     hi: usize,
 }
 
-impl Deref for Token<'_> {
+impl Deref for Token {
     type Target = str;
     fn deref(&self) -> &str {
         &self.source.text[self.lo..self.hi]
     }
 }
 
-impl Token<'_> {
+impl Token {
     // since Data can only hold 'static, we can't use Token<'_>
     // so instead we use a usize and intentionally forget the lifetime information
     // apparantly this is safe? maybe because we never try to go backwards?
@@ -58,7 +59,7 @@ impl Token<'_> {
     }
 }
 
-impl Display for Token<'_> {
+impl Display for Token {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         if self.lo == self.hi {
             return FmtResult::Ok(());
@@ -86,13 +87,13 @@ impl Display for Token<'_> {
     }
 }
 
-struct Tree<'a> {
-    token: Token<'a>,
-    children: Vec<Tree<'a>>,
+struct Tree {
+    token: Token,
+    children: Vec<Tree>,
 }
 
-impl Tree<'_> {
-    fn new(source: &Source, lo: usize, hi: usize) -> Tree {
+impl Tree {
+    fn new(source: Rc<Source>, lo: usize, hi: usize) -> Tree {
         Tree {
             token: Token { source, lo, hi },
             children: Vec::new(),
@@ -122,13 +123,13 @@ fn main() {
     let file = file.unwrap_or_else(|| panic!("expected command line argument"));
     let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
     let name = file.clone();
-    let source = Source { name, text };
+    let source = Rc::new(Source { name, text });
 
-    let mut tree = Tree::new(&source, 0, 0);
+    let mut tree = Tree::new(source.clone(), 0, 0);
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        tree.children.push(Tree::new(&source, i, j));
+        tree.children.push(Tree::new(source.clone(), i, j));
     }
 
     let mut data = Data(HashMap::new());
