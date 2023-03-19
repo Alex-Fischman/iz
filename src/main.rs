@@ -167,42 +167,25 @@ fn main() {
         }
     }
 
-    let _interpret = || {
-        let mut memory = Memory {
-            pc: 0,
-            sp: -1,
-            stack: Stack(Vec::new()),
-            data: &c.data,
-        };
-        while let Some(child) = c.tree.children.get(memory.pc as usize) {
-            let op = c.data.get::<Op>(child.id).unwrap();
-            op.interpret(&mut memory);
-            memory.pc += 1;
-            match memory.sp {
-                -1 => println!("{:<32}\t", format!("{:?}", op)),
-                sp => println!(
-                    "{:<32}\t{:?}",
-                    format!("{:?}", op),
-                    &memory.stack.0[0..=sp as usize]
-                ),
-            }
+    let mut memory = Memory {
+        pc: 0,
+        sp: -1,
+        stack: Stack(Vec::new()),
+        data: &c.data,
+    };
+    while let Some(child) = c.tree.children.get(memory.pc as usize) {
+        let op = c.data.get::<Op>(child.id).unwrap();
+        op.interpret(&mut memory);
+        memory.pc += 1;
+        match memory.sp {
+            -1 => println!("{:<32}\t", format!("{:?}", op)),
+            sp => println!(
+                "{:<32}\t{:?}",
+                format!("{:?}", op),
+                &memory.stack.0[0..=sp as usize]
+            ),
         }
-    };
-
-    let compile = || {
-        let text: String = c
-            .tree
-            .children
-            .iter()
-            .map(|child| c.data.get::<Op>(child.id).unwrap())
-            .map(|op| op.compile(&Target::As))
-            .collect();
-        std::fs::write("out.s", text).unwrap_or_else(|_| panic!("could not write file"));
-        std::process::Command::new("pwd").output().unwrap();
-        std::process::Command::new("as out.s").output().unwrap();
-    };
-
-    compile();
+    }
 }
 
 fn remove_comments(c: &mut Context) {
@@ -531,13 +514,8 @@ struct Memory<'a> {
     data: &'a Data,
 }
 
-enum Target {
-    As, // AS - the portable GNU assembler
-}
-
 trait Operation: Debug {
     fn interpret(&self, memory: &mut Memory);
-    fn compile(&self, target: &Target) -> String;
 }
 
 type Op = Box<dyn Operation>;
@@ -550,22 +528,12 @@ impl Operation for Push {
         memory.stack[memory.sp + 1] = self.0;
         memory.sp += 1;
     }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => format!("push ${}\n", self.0),
-        }
-    }
 }
 #[derive(Debug)]
 pub struct Move(pub i64);
 impl Operation for Move {
     fn interpret(&self, memory: &mut Memory) {
         memory.sp -= self.0;
-    }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => format!("add ${} %rsp\n", self.0 * 8),
-        }
     }
 }
 #[derive(Debug)]
@@ -575,11 +543,6 @@ impl Operation for Copy {
         memory.stack[memory.sp + 1] = memory.stack[memory.sp - self.0];
         memory.sp += 1;
     }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => format!("push {}(%rsp)\n", self.0 * 8),
-        }
-    }
 }
 #[derive(Debug)]
 pub struct Add;
@@ -588,11 +551,6 @@ impl Operation for Add {
         memory.stack[memory.sp - 1] += memory.stack[memory.sp];
         memory.sp -= 1;
     }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => "add 8(%rsp) %rsp\nadd $8 %rsp\n".to_owned(),
-        }
-    }
 }
 #[derive(Debug)]
 pub struct Neg;
@@ -600,22 +558,12 @@ impl Operation for Neg {
     fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp] = -memory.stack[memory.sp];
     }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => "neg (%rsp)\n".to_owned(),
-        }
-    }
 }
 #[derive(Debug)]
 pub struct Ltz;
 impl Operation for Ltz {
     fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp] = (memory.stack[memory.sp] < 0) as i64;
-    }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => "; ltz not yet implemented\n".to_owned(),
-        }
     }
 }
 #[derive(Debug)]
@@ -632,21 +580,11 @@ impl Operation for Jumpz {
         }
         memory.sp -= 1;
     }
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => "; jumpz not yet implemented\n".to_owned(),
-        }
-    }
 }
 #[derive(Debug)]
 pub struct Label(pub String);
 impl Operation for Label {
     fn interpret(&self, _memory: &mut Memory) {}
-    fn compile(&self, target: &Target) -> String {
-        match target {
-            Target::As => format!("{}:\n", self.0),
-        }
-    }
 }
 
 fn generate_ops(c: &mut Context) {
