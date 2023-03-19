@@ -66,11 +66,11 @@ impl Display for Token {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Id(usize);
 const GLOBAL: Id = Id(usize::MAX);
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Tree {
     id: Id,
     children: Vec<Tree>,
@@ -393,6 +393,7 @@ fn unroll_operators(c: &mut Context) {
     }
 }
 
+#[derive(Debug)]
 struct Namespace {
     parent: Id,
     trees: HashMap<String, Tree>,
@@ -400,9 +401,9 @@ struct Namespace {
 
 impl Namespace {
     fn get<'a>(&'a self, data: &'a Data, key: &str) -> Option<&Tree> {
-        self.trees.get(key)?;
-        data.get::<Namespace>(self.parent)
-            .and_then(|namespace| namespace.get(data, key))
+        self.trees
+            .get(key)
+            .or_else(|| data.get::<Namespace>(self.parent)?.get(data, key))
     }
 }
 
@@ -414,13 +415,13 @@ fn gather_assignments(c: &mut Context) {
         while i < tree.children.len() {
             gather_assignments(&mut tree.children[i], data, tree.id);
 
-            let s = data.get::<Token>(tree.children[i].id).unwrap().deref();
+            let token = data.get::<Token>(tree.children[i].id).unwrap();
             let s = data
                 .get::<Precendences>(GLOBAL)
                 .unwrap()
                 .iter()
-                .find_map(|ops| ops.ops.get(s))
-                .map_or(s, |op| op.func.as_str());
+                .find_map(|ops| ops.ops.get(token.deref()))
+                .map_or(token.deref(), |op| op.func.as_str());
 
             if s == "assign" {
                 let mut assignment = tree.children.remove(i);
@@ -436,8 +437,7 @@ fn gather_assignments(c: &mut Context) {
     }
 }
 
-// this is bad because it only works for the simplest possible macros
-// in all other cases (stack vars, function calls, macros with arguments) this won't work
+// this is bad because it should actually call the macro, not just copy-paste it's contents
 fn substitute_assignments_bad(c: &mut Context) {
     substitute_assignments_bad(&mut c.tree, &mut c.data);
     fn substitute_assignments_bad(tree: &mut Tree, data: &mut Data) {
@@ -445,11 +445,13 @@ fn substitute_assignments_bad(c: &mut Context) {
         while i < tree.children.len() {
             substitute_assignments_bad(&mut tree.children[i], data);
 
-            let s = data.get::<Token>(tree.children[i].id).unwrap().deref();
-            if let Some(replacement) = data.get::<Namespace>(tree.id).unwrap().get(data, s) {
+            let token = data.get::<Token>(tree.children[i].id).unwrap();
+            let namespace = data.get::<Namespace>(tree.children[i].id).unwrap();
+            if let Some(replacement) = namespace.get(data, token.deref()) {
                 tree.children[i] = replacement.clone();
+            } else {
+                i += 1;
             }
-            i += 1;
         }
     }
 }
@@ -560,14 +562,14 @@ fn generate_ops(c: &mut Context) {
         if let Some(int) = c.data.get::<i64>(child.id) {
             c.data.insert::<Op>(child.id, Box::new(Push(*int)));
         } else {
-            let s = c.data.get::<Token>(child.id).unwrap().deref();
+            let token = c.data.get::<Token>(child.id).unwrap();
             let s = c
                 .data
                 .get::<Precendences>(GLOBAL)
                 .unwrap()
                 .iter()
-                .find_map(|ops| ops.ops.get(s))
-                .map_or(s, |op| op.func.as_str());
+                .find_map(|ops| ops.ops.get(token.deref()))
+                .map_or(token.deref(), |op| op.func.as_str());
             match s {
                 "move" => {
                     let arg = c.data.get::<i64>(child.children.pop().unwrap().id).unwrap();
