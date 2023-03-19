@@ -153,8 +153,8 @@ fn main() {
         group_brackets,
         insert_default_operators,
         group_operators,
-        // // analysis
-        // gather_assignments,
+        // analysis
+        gather_assignments,
         // flatten
         unroll_operators,
         unroll_brackets,
@@ -397,16 +397,39 @@ fn unroll_operators(c: &mut Context) {
     }
 }
 
-// struct Assignments()
-// fn gather_assignments(c: &mut Context) {
-//     gather_assignments(&mut c.tree, &mut c.data);
-//     fn gather_assignments(tree: &mut Tree, data: &mut Data) {
-//         let mut assignments =
-//         for child in &mut tree.children {
-//             gather_assignments(child, data)
-//         }
-//     }
-// }
+struct Namespace {
+    parent: Id,
+    trees: HashMap<String, Tree>,
+}
+
+fn gather_assignments(c: &mut Context) {
+    gather_assignments(&mut c.tree, &mut c.data, GLOBAL);
+    fn gather_assignments(tree: &mut Tree, data: &mut Data, parent: Id) {
+        let mut trees = HashMap::new();
+        let mut i = 0;
+        while i < tree.children.len() {
+            gather_assignments(&mut tree.children[i], data, tree.id);
+
+            let s = data.get::<Token>(tree.children[i].id).deref();
+            let s = data
+                .get::<Precendences>(GLOBAL)
+                .iter()
+                .find_map(|ops| ops.ops.get(s))
+                .map_or(s, |op| op.func.as_str());
+
+            if s == "assign" {
+                let mut assignment = tree.children.remove(i);
+                let key = assignment.children.remove(0);
+                let key = data.get::<Token>(key.id).deref().to_owned();
+                let value = assignment.children.pop().unwrap();
+                trees.insert(key, value);
+            } else {
+                i += 1;
+            }
+        }
+        data.insert(tree.id, Namespace { parent, trees });
+    }
+}
 
 struct Stack(Vec<i64>);
 

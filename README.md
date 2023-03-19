@@ -36,7 +36,7 @@ IR:
 
 Syntax:
 - arbitrary operator definitions
-- operations get transformed into either a function call or a macro invocation
+- operators call macros when parsed, which usually just unroll the arguments but can do anything
 - ()s are used for arbitrary grouping in parsing
 - {}s are used to quote code blocks and turn them into functions/macros
 
