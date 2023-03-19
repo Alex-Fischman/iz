@@ -152,12 +152,57 @@ fn main() {
         unroll_brackets,
         // transformation
         generate_ops,
-        // backend
-        interpret,
     ];
     for pass in passes {
         pass(&mut c)
     }
+
+    for child in &c.tree.children {
+        let token = c.data.get::<Token>(child.id).unwrap();
+        if c.data.get::<Op>(child.id).is_none() {
+            panic!("no operation for {}", token)
+        }
+        if !child.children.is_empty() {
+            panic!("found child of {}", token)
+        }
+    }
+
+    let _interpret = || {
+        let mut memory = Memory {
+            pc: 0,
+            sp: -1,
+            stack: Stack(Vec::new()),
+            data: &c.data,
+        };
+        while let Some(child) = c.tree.children.get(memory.pc as usize) {
+            let op = c.data.get::<Op>(child.id).unwrap();
+            op.interpret(&mut memory);
+            memory.pc += 1;
+            match memory.sp {
+                -1 => println!("{:<32}\t", format!("{:?}", op)),
+                sp => println!(
+                    "{:<32}\t{:?}",
+                    format!("{:?}", op),
+                    &memory.stack.0[0..=sp as usize]
+                ),
+            }
+        }
+    };
+
+    let compile = || {
+        let text: String = c
+            .tree
+            .children
+            .iter()
+            .map(|child| c.data.get::<Op>(child.id).unwrap())
+            .map(|op| op.compile(&Target::As))
+            .collect();
+        std::fs::write("out.s", text).unwrap_or_else(|_| panic!("could not write file"));
+        std::process::Command::new("pwd").output().unwrap();
+        std::process::Command::new("as out.s").output().unwrap();
+    };
+
+    compile();
 }
 
 fn remove_comments(c: &mut Context) {
@@ -486,8 +531,13 @@ struct Memory<'a> {
     data: &'a Data,
 }
 
+enum Target {
+    As, // AS - the portable GNU assembler
+}
+
 trait Operation: Debug {
-    fn run(&self, memory: &mut Memory);
+    fn interpret(&self, memory: &mut Memory);
+    fn compile(&self, target: &Target) -> String;
 }
 
 type Op = Box<dyn Operation>;
@@ -496,68 +546,107 @@ struct Labels(HashMap<String, i64>);
 #[derive(Debug)]
 pub struct Push(pub i64);
 impl Operation for Push {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp + 1] = self.0;
         memory.sp += 1;
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => format!("push ${}\n", self.0),
+        }
     }
 }
 #[derive(Debug)]
 pub struct Move(pub i64);
 impl Operation for Move {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         memory.sp -= self.0;
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => format!("add ${} %rsp\n", self.0 * 8),
+        }
     }
 }
 #[derive(Debug)]
 pub struct Copy(pub i64);
 impl Operation for Copy {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp + 1] = memory.stack[memory.sp - self.0];
         memory.sp += 1;
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => format!("push {}(%rsp)\n", self.0 * 8),
+        }
     }
 }
 #[derive(Debug)]
 pub struct Add;
 impl Operation for Add {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp - 1] += memory.stack[memory.sp];
         memory.sp -= 1;
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => "add 8(%rsp) %rsp\nadd $8 %rsp\n".to_owned(),
+        }
     }
 }
 #[derive(Debug)]
 pub struct Neg;
 impl Operation for Neg {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp] = -memory.stack[memory.sp];
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => "neg (%rsp)\n".to_owned(),
+        }
     }
 }
 #[derive(Debug)]
 pub struct Ltz;
 impl Operation for Ltz {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         memory.stack[memory.sp] = (memory.stack[memory.sp] < 0) as i64;
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => "; ltz not yet implemented\n".to_owned(),
+        }
     }
 }
 #[derive(Debug)]
 pub struct Jumpz(pub String);
 impl Operation for Jumpz {
-    fn run(&self, memory: &mut Memory) {
+    fn interpret(&self, memory: &mut Memory) {
         let labels = memory.data.get::<Labels>(GLOBAL).unwrap();
-        match labels.0.get(&self.0) {
-            Some(i) => {
-                if memory.stack[memory.sp] == 0 {
-                    memory.pc = *i;
-                }
-                memory.sp -= 1;
-            }
-            None => panic!("could not find label {}", self.0),
+        let target = labels
+            .0
+            .get(&self.0)
+            .unwrap_or_else(|| panic!("could not find label {}", self.0));
+        if memory.stack[memory.sp] == 0 {
+            memory.pc = *target;
+        }
+        memory.sp -= 1;
+    }
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => "; jumpz not yet implemented\n".to_owned(),
         }
     }
 }
 #[derive(Debug)]
 pub struct Label(pub String);
 impl Operation for Label {
-    fn run(&self, _memory: &mut Memory) {}
+    fn interpret(&self, _memory: &mut Memory) {}
+    fn compile(&self, target: &Target) -> String {
+        match target {
+            Target::As => format!("{}:\n", self.0),
+        }
+    }
 }
 
 fn generate_ops(c: &mut Context) {
@@ -608,36 +697,4 @@ fn generate_ops(c: &mut Context) {
         }
     }
     c.data.insert::<Labels>(GLOBAL, Labels(labels));
-}
-
-fn interpret(c: &mut Context) {
-    for child in &c.tree.children {
-        let token = c.data.get::<Token>(child.id).unwrap();
-        if c.data.get::<Op>(child.id).is_none() {
-            panic!("no operation for {}", token)
-        }
-        if !child.children.is_empty() {
-            panic!("found child of {}", token)
-        }
-    }
-
-    let mut memory = Memory {
-        pc: 0,
-        sp: -1,
-        stack: Stack(Vec::new()),
-        data: &c.data,
-    };
-    while let Some(child) = c.tree.children.get(memory.pc as usize) {
-        let op = c.data.get::<Op>(child.id).unwrap();
-        op.run(&mut memory);
-        memory.pc += 1;
-        match memory.sp {
-            -1 => println!("{:<32}\t", format!("{:?}", op)),
-            sp => println!(
-                "{:<32}\t{:?}",
-                format!("{:?}", op),
-                &memory.stack.0[0..=sp as usize]
-            ),
-        }
-    }
 }
