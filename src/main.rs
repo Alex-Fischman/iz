@@ -152,6 +152,8 @@ fn main() {
         group_brackets,
         insert_default_operators,
         group_operators,
+        // // analysis
+        // gather_assignments,
         // flatten
         unroll_operators,
         unroll_brackets,
@@ -411,14 +413,15 @@ impl IndexMut<i64> for Stack {
     }
 }
 
-struct Memory {
+struct Memory<'a> {
     pc: i64,
     sp: i64,
     stack: Stack,
+    data: &'a Data,
 }
 
 trait Operation: Debug {
-    fn run(&self, memory: &mut Memory, data: &Data);
+    fn run(&self, memory: &mut Memory);
 }
 
 type Op = Box<dyn Operation>;
@@ -427,7 +430,7 @@ struct Labels(HashMap<String, i64>);
 #[derive(Debug)]
 pub struct Push(pub i64);
 impl Operation for Push {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
+    fn run(&self, memory: &mut Memory) {
         memory.stack[memory.sp + 1] = self.0;
         memory.sp += 1;
     }
@@ -435,14 +438,14 @@ impl Operation for Push {
 #[derive(Debug)]
 pub struct Move(pub i64);
 impl Operation for Move {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
+    fn run(&self, memory: &mut Memory) {
         memory.sp -= self.0;
     }
 }
 #[derive(Debug)]
 pub struct Copy(pub i64);
 impl Operation for Copy {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
+    fn run(&self, memory: &mut Memory) {
         memory.stack[memory.sp + 1] = memory.stack[memory.sp - self.0];
         memory.sp += 1;
     }
@@ -450,7 +453,7 @@ impl Operation for Copy {
 #[derive(Debug)]
 pub struct Add;
 impl Operation for Add {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
+    fn run(&self, memory: &mut Memory) {
         memory.stack[memory.sp - 1] += memory.stack[memory.sp];
         memory.sp -= 1;
     }
@@ -458,22 +461,22 @@ impl Operation for Add {
 #[derive(Debug)]
 pub struct Neg;
 impl Operation for Neg {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
+    fn run(&self, memory: &mut Memory) {
         memory.stack[memory.sp] = -memory.stack[memory.sp];
     }
 }
 #[derive(Debug)]
 pub struct Ltz;
 impl Operation for Ltz {
-    fn run(&self, memory: &mut Memory, _data: &Data) {
+    fn run(&self, memory: &mut Memory) {
         memory.stack[memory.sp] = (memory.stack[memory.sp] < 0) as i64;
     }
 }
 #[derive(Debug)]
 pub struct Jumpz(pub String);
 impl Operation for Jumpz {
-    fn run(&self, memory: &mut Memory, data: &Data) {
-        let labels = data.get::<Labels>(GLOBAL);
+    fn run(&self, memory: &mut Memory) {
+        let labels = memory.data.get::<Labels>(GLOBAL);
         match labels.0.get(&self.0) {
             Some(i) => {
                 if memory.stack[memory.sp] == 0 {
@@ -488,7 +491,7 @@ impl Operation for Jumpz {
 #[derive(Debug)]
 pub struct Label(pub String);
 impl Operation for Label {
-    fn run(&self, _memory: &mut Memory, _data: &Data) {}
+    fn run(&self, _memory: &mut Memory) {}
 }
 
 fn generate_ops(c: &mut Context) {
@@ -556,10 +559,11 @@ fn interpret(c: &mut Context) {
         pc: 0,
         sp: -1,
         stack: Stack(Vec::new()),
+        data: &c.data,
     };
     while let Some(child) = c.tree.children.get(memory.pc as usize) {
         let op = c.data.get::<Op>(child.id);
-        op.run(&mut memory, &c.data);
+        op.run(&mut memory);
         memory.pc += 1;
         match memory.sp {
             -1 => println!("{:<32}\t", format!("{:?}", op)),
