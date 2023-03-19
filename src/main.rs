@@ -1,6 +1,6 @@
 extern crate std;
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::ops::{Deref, Index, IndexMut};
@@ -23,6 +23,7 @@ struct Source {
     text: String,
 }
 
+// Rc is used instead of a reference because Any can only be 'static
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct Token {
     source: Rc<Source>,
@@ -75,29 +76,31 @@ struct Tree {
 }
 
 // this is separate from Context because we don't want these methods to borrow Context.tree
-struct Data(HashMap<(String, Id), Box<dyn Any>>);
+struct Data(HashMap<(TypeId, Id), Box<dyn Any>>);
 
 impl Data {
-    fn insert<T: Any>(&mut self, key: &str, id: Id, value: T) -> Option<Box<dyn Any>> {
-        self.0.insert((key.to_owned(), id), Box::new(value))
+    fn insert<T: Any>(&mut self, id: Id, value: T) -> Option<Box<dyn Any>> {
+        self.0.insert((TypeId::of::<T>(), id), Box::new(value))
     }
 
-    fn get<T: Any>(&self, key: &str, id: Id) -> &T {
-        let any = self.0.get(&(key.to_owned(), id));
-        let any = any.unwrap_or_else(|| panic!("data did not contain {} for {}", key, id.0));
-        any.downcast_ref::<T>()
-            .unwrap_or_else(|| panic!("data had the wrong type in {} for {}", key, id.0))
+    fn get<T: Any>(&self, id: Id) -> &T {
+        self.0
+            .get(&(TypeId::of::<T>(), id))
+            .unwrap()
+            .downcast_ref::<T>()
+            .unwrap()
     }
 
-    fn get_mut<T: Any>(&mut self, key: &str, id: Id) -> &mut T {
-        let any = self.0.get_mut(&(key.to_owned(), id));
-        let any = any.unwrap_or_else(|| panic!("data did not contain {} for {}", key, id.0));
-        any.downcast_mut::<T>()
-            .unwrap_or_else(|| panic!("data had the wrong type in {} for {}", key, id.0))
+    fn get_mut<T: Any>(&mut self, id: Id) -> &mut T {
+        self.0
+            .get_mut(&(TypeId::of::<T>(), id))
+            .unwrap()
+            .downcast_mut::<T>()
+            .unwrap()
     }
 
-    fn contains(&self, key: &str, id: Id) -> bool {
-        self.0.contains_key(&(key.to_owned(), id))
+    fn contains<T: Any>(&self, id: Id) -> bool {
+        self.0.contains_key(&(TypeId::of::<T>(), id))
     }
 }
 
@@ -129,18 +132,14 @@ fn main() {
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
         let id = c.next;
         c.next.0 += 1;
+        let token = Token {
+            source: source.clone(),
+            lo: i,
+            hi: j,
+        };
+        c.data.insert(id, token);
         let children = Vec::new();
-        let tree = Tree { id, children };
-        c.data.insert(
-            "tokens",
-            tree.id,
-            Token {
-                source: source.clone(),
-                lo: i,
-                hi: j,
-            },
-        );
-        c.tree.children.push(tree);
+        c.tree.children.push(Tree { id, children });
     }
 
     let passes = [
@@ -169,10 +168,10 @@ fn main() {
 fn remove_comments(c: &mut Context) {
     let mut i = 0;
     while i < c.tree.children.len() {
-        if c.data.get::<Token>("tokens", c.tree.children[i].id).deref() == "#" {
+        if c.data.get::<Token>(c.tree.children[i].id).deref() == "#" {
             let mut j = i;
             while j < c.tree.children.len()
-                && c.data.get::<Token>("tokens", c.tree.children[j].id).deref() != "\n"
+                && c.data.get::<Token>(c.tree.children[j].id).deref() != "\n"
             {
                 j += 1;
             }
@@ -195,16 +194,14 @@ fn group_tokens(c: &mut Context) {
 
     let mut i = 1;
     while i < c.tree.children.len() {
-        let curr = c.data.get::<Token>("tokens", c.tree.children[i].id);
-        let prev = c.data.get::<Token>("tokens", c.tree.children[i - 1].id);
+        let curr = c.data.get::<Token>(c.tree.children[i].id);
+        let prev = c.data.get::<Token>(c.tree.children[i - 1].id);
         if !is_bracket(curr)
             && token_type(curr) == token_type(prev)
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            c.data
-                .get_mut::<Token>("tokens", c.tree.children[i - 1].id)
-                .hi = curr.hi;
+            c.data.get_mut::<Token>(c.tree.children[i - 1].id).hi = curr.hi;
             c.tree.children.remove(i);
         } else {
             i += 1;
@@ -215,7 +212,7 @@ fn group_tokens(c: &mut Context) {
 fn remove_whitespace(c: &mut Context) {
     c.tree.children.retain(|child| {
         !c.data
-            .get::<Token>("tokens", child.id)
+            .get::<Token>(child.id)
             .chars()
             .all(char::is_whitespace)
     });
@@ -223,8 +220,8 @@ fn remove_whitespace(c: &mut Context) {
 
 fn parse_int_literals(c: &mut Context) {
     for child in &c.tree.children {
-        if let Ok(int) = c.data.get::<Token>("tokens", child.id).parse::<i64>() {
-            c.data.insert("ints", child.id, int);
+        if let Ok(int) = c.data.get::<Token>(child.id).parse::<i64>() {
+            c.data.insert::<i64>(child.id, int);
         }
     }
 }
@@ -240,13 +237,13 @@ fn group_brackets(c: &mut Context) {
     let mut openers = Vec::new();
     let mut i = 0;
     while i < c.tree.children.len() {
-        let token = c.data.get::<Token>("tokens", c.tree.children[i].id);
+        let token = c.data.get::<Token>(c.tree.children[i].id);
         match token.deref() {
             "(" | "{" | "[" => openers.push(i),
             ")" | "}" | "]" => match openers.pop() {
                 None => panic!("extra {}", token),
                 Some(l) => {
-                    let opener = c.data.get::<Token>("tokens", c.tree.children[l].id);
+                    let opener = c.data.get::<Token>(c.tree.children[l].id);
                     if match_opener(opener) == token.deref() {
                         let mut cs: Vec<Tree> = c.tree.children.drain(l + 1..=i).collect();
                         cs.pop(); // remove closing bracket
@@ -262,7 +259,7 @@ fn group_brackets(c: &mut Context) {
         i += 1;
     }
     if let Some(l) = openers.pop() {
-        let opener = c.data.get::<Token>("tokens", c.tree.children[l].id);
+        let opener = c.data.get::<Token>(c.tree.children[l].id);
         panic!("no {} for the {}", match_opener(opener), opener)
     }
 }
@@ -276,7 +273,7 @@ fn unroll_brackets(c: &mut Context) {
 
         let mut i = 0;
         while i < tree.children.len() {
-            if data.get::<Token>("tokens", tree.children[i].id).deref() == "(" {
+            if data.get::<Token>(tree.children[i].id).deref() == "(" {
                 let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
                 let len = cs.len();
                 tree.children.splice(i..=i, cs);
@@ -334,11 +331,8 @@ fn insert_default_operators(c: &mut Context) {
         ops(&[("+", "add", 1, 1, true)], Left),
         ops(&[("=", "assign", 1, 1, false)], Right),
     ];
-    c.data.insert(
-        "precedences",
-        GLOBAL,
-        precedences.into_iter().collect::<Vec<_>>(),
-    );
+    c.data
+        .insert::<Vec<_>>(GLOBAL, precedences.into_iter().collect());
 }
 
 fn group_operators(c: &mut Context) {
@@ -348,14 +342,14 @@ fn group_operators(c: &mut Context) {
             group_operators(child, data)
         }
 
-        let precedences: &Vec<_> = data.get("precedences", GLOBAL);
+        let precedences = data.get::<Vec<Operators>>(GLOBAL);
         for Operators { ops, associativity } in precedences {
             let mut i = match associativity {
                 Associativity::Left => 0,
                 Associativity::Right => tree.children.len().wrapping_sub(1),
             };
             while i < tree.children.len() {
-                let token = data.get::<Token>("tokens", tree.children[i].id);
+                let token = data.get::<Token>(tree.children[i].id);
                 if let Some(op) = ops.get(token.deref()) {
                     if i < op.left || i + op.right >= tree.children.len() {
                         panic!("missing arguments for {}", token)
@@ -381,10 +375,10 @@ fn unroll_operators(c: &mut Context) {
             unroll_operators(child, data)
         }
 
-        let precedences: &Vec<Operators> = data.get("precedences", GLOBAL);
+        let precedences = data.get::<Vec<Operators>>(GLOBAL);
         let mut i = 0;
         while i < tree.children.len() {
-            let s = data.get::<Token>("tokens", tree.children[i].id).deref();
+            let s = data.get::<Token>(tree.children[i].id).deref();
             if let Some(op) = precedences.iter().find_map(|ops| ops.ops.get(s)) {
                 if op.unroll {
                     let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
@@ -426,6 +420,9 @@ struct Memory {
 trait Operation: Debug {
     fn run(&self, memory: &mut Memory, data: &Data);
 }
+
+type Op = Box<dyn Operation>;
+struct Labels(HashMap<String, i64>);
 
 #[derive(Debug)]
 pub struct Push(pub i64);
@@ -476,8 +473,8 @@ impl Operation for Ltz {
 pub struct Jumpz(pub String);
 impl Operation for Jumpz {
     fn run(&self, memory: &mut Memory, data: &Data) {
-        let labels: &HashMap<String, i64> = data.get("labels", GLOBAL);
-        match labels.get(&self.0) {
+        let labels = data.get::<Labels>(GLOBAL);
+        match labels.0.get(&self.0) {
             Some(i) => {
                 if memory.stack[memory.sp] == 0 {
                     memory.pc = *i;
@@ -494,67 +491,60 @@ impl Operation for Label {
     fn run(&self, _memory: &mut Memory, _data: &Data) {}
 }
 
-fn as_trait<Op: Operation + 'static>(op: Op) -> Box<dyn Operation> {
-    Box::new(op) as Box<dyn Operation>
-}
-
 fn generate_ops(c: &mut Context) {
     let mut labels: HashMap<String, i64> = HashMap::new();
     for (i, child) in c.tree.children.iter_mut().enumerate() {
-        if c.data.contains("ints", child.id) {
-            c.data.insert(
-                "ops",
-                child.id,
-                as_trait(Push(*c.data.get("ints", child.id))),
-            );
+        if c.data.contains::<i64>(child.id) {
+            let int = c.data.get::<i64>(child.id);
+            c.data.insert::<Op>(child.id, Box::new(Push(*int)));
         } else {
-            let s = c.data.get::<Token>("tokens", child.id).deref();
+            let s = c.data.get::<Token>(child.id).deref();
             let s = c
                 .data
-                .get::<Vec<Operators>>("precedences", GLOBAL)
+                .get::<Vec<Operators>>(GLOBAL)
                 .iter()
                 .find_map(|ops| ops.ops.get(s))
                 .map_or(s, |op| op.func.as_str());
             match s {
                 "move" => {
-                    let arg = c.data.get::<i64>("ints", child.children.pop().unwrap().id);
-                    c.data.insert("ops", child.id, as_trait(Move(*arg)));
+                    let arg = c.data.get::<i64>(child.children.pop().unwrap().id);
+                    c.data.insert::<Op>(child.id, Box::new(Move(*arg)));
                 }
                 "copy" => {
-                    let arg = c.data.get::<i64>("ints", child.children.pop().unwrap().id);
-                    c.data.insert("ops", child.id, as_trait(Copy(*arg)));
+                    let arg = c.data.get::<i64>(child.children.pop().unwrap().id);
+                    c.data.insert::<Op>(child.id, Box::new(Copy(*arg)));
                 }
                 "add" => {
-                    c.data.insert("ops", child.id, as_trait(Add));
+                    c.data.insert::<Op>(child.id, Box::new(Add));
                 }
                 "neg" => {
-                    c.data.insert("ops", child.id, as_trait(Neg));
+                    c.data.insert::<Op>(child.id, Box::new(Neg));
                 }
                 "ltz" => {
-                    c.data.insert("ops", child.id, as_trait(Ltz));
+                    c.data.insert::<Op>(child.id, Box::new(Ltz));
                 }
                 "jumpz" => {
                     let arg = child.children.pop().unwrap().id;
-                    let label = c.data.get::<Token>("tokens", arg).deref().to_owned();
-                    c.data.insert("ops", child.id, as_trait(Jumpz(label)));
+                    let label = c.data.get::<Token>(arg).deref().to_owned();
+                    c.data.insert::<Op>(child.id, Box::new(Jumpz(label)));
                 }
                 "label" => {
                     let arg = child.children.pop().unwrap().id;
-                    let label = c.data.get::<Token>("tokens", arg).deref().to_owned();
+                    let label = c.data.get::<Token>(arg).deref().to_owned();
                     labels.insert(label.clone(), i as i64);
-                    c.data.insert("ops", child.id, as_trait(Label(label)));
+                    c.data.insert::<Op>(child.id, Box::new(Label(label)));
                 }
                 _ => {}
             }
         }
     }
-    c.data.insert("labels", GLOBAL, labels);
+    c.data.insert::<Labels>(GLOBAL, Labels(labels));
 }
 
 fn interpret(c: &mut Context) {
     for child in &c.tree.children {
-        let token = c.data.get::<Token>("tokens", child.id);
-        if !c.data.contains("ops", child.id) {
+        let token = c.data.get::<Token>(child.id);
+        if !c.data.contains::<Op>(child.id) {
             panic!("no operation for {}", token)
         }
         if !child.children.is_empty() {
@@ -568,7 +558,7 @@ fn interpret(c: &mut Context) {
         stack: Stack(Vec::new()),
     };
     while let Some(child) = c.tree.children.get(memory.pc as usize) {
-        let op = c.data.get::<Box<dyn Operation>>("ops", child.id);
+        let op = c.data.get::<Op>(child.id);
         op.run(&mut memory, &c.data);
         memory.pc += 1;
         match memory.sp {
