@@ -77,7 +77,8 @@ struct Tree {
 
 // this is separate from Context because we don't want these methods to borrow Context.tree
 struct Data(HashMap<(TypeId, Id), Box<dyn Any>>);
-
+// when using these methods, use a type alias if it contains a custom type
+// otherwise, use a wrapper struct to avoid future TypeId conflicts
 impl Data {
     fn insert<T: Any>(&mut self, id: Id, value: T) -> Option<Box<dyn Any>> {
         self.0.insert((TypeId::of::<T>(), id), Box::new(value))
@@ -304,6 +305,8 @@ struct Operators {
     associativity: Associativity,
 }
 
+type Precendences = Vec<Operators>;
+
 fn insert_default_operators(c: &mut Context) {
     fn ops(ops: &[(&str, &str, usize, usize, bool)], associativity: Associativity) -> Operators {
         let ops = ops
@@ -334,7 +337,7 @@ fn insert_default_operators(c: &mut Context) {
         ops(&[("=", "assign", 1, 1, false)], Right),
     ];
     c.data
-        .insert::<Vec<_>>(GLOBAL, precedences.into_iter().collect());
+        .insert::<Precendences>(GLOBAL, precedences.into_iter().collect());
 }
 
 fn group_operators(c: &mut Context) {
@@ -344,7 +347,7 @@ fn group_operators(c: &mut Context) {
             group_operators(child, data)
         }
 
-        let precedences = data.get::<Vec<Operators>>(GLOBAL);
+        let precedences = data.get::<Precendences>(GLOBAL);
         for Operators { ops, associativity } in precedences {
             let mut i = match associativity {
                 Associativity::Left => 0,
@@ -377,7 +380,7 @@ fn unroll_operators(c: &mut Context) {
             unroll_operators(child, data)
         }
 
-        let precedences = data.get::<Vec<Operators>>(GLOBAL);
+        let precedences = data.get::<Precendences>(GLOBAL);
         let mut i = 0;
         while i < tree.children.len() {
             let s = data.get::<Token>(tree.children[i].id).deref();
@@ -393,6 +396,17 @@ fn unroll_operators(c: &mut Context) {
         }
     }
 }
+
+// struct Assignments()
+// fn gather_assignments(c: &mut Context) {
+//     gather_assignments(&mut c.tree, &mut c.data);
+//     fn gather_assignments(tree: &mut Tree, data: &mut Data) {
+//         let mut assignments =
+//         for child in &mut tree.children {
+//             gather_assignments(child, data)
+//         }
+//     }
+// }
 
 struct Stack(Vec<i64>);
 
@@ -504,7 +518,7 @@ fn generate_ops(c: &mut Context) {
             let s = c.data.get::<Token>(child.id).deref();
             let s = c
                 .data
-                .get::<Vec<Operators>>(GLOBAL)
+                .get::<Precendences>(GLOBAL)
                 .iter()
                 .find_map(|ops| ops.ops.get(s))
                 .map_or(s, |op| op.func.as_str());
