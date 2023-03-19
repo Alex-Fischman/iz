@@ -1,29 +1,17 @@
-#![no_implicit_prelude]
 extern crate std;
 
-use std::{
-    any::Any,
-    borrow::ToOwned,
-    boxed::Box,
-    clone::Clone,
-    collections::HashMap,
-    env::args,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
-    fs::read_to_string,
-    iter::{Extend, IntoIterator, Iterator},
-    ops::{Deref, Index, IndexMut},
-    option::{Option, Option::None, Option::Some},
-    rc::Rc,
-    string::String,
-    vec::Vec,
-    {format, matches, println, write},
-};
+use std::any::Any;
+use std::collections::HashMap;
+use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::ops::{Deref, Index, IndexMut};
+use std::rc::Rc;
 
-macro_rules! panic {
-    () => {{ std::process::exit(-1); }};
-    ($fmt:literal) => {{ std::eprintln!($fmt); std::process::exit(-1); }};
-    ($fmt:literal, $($arg:tt)*) => {{ std::eprintln!($fmt, $($arg)*); std::process::exit(-1); }};
-}
+// override for panic macro, comment this out if you need a stack trace of the compiler
+// macro_rules! panic {
+//     () => {{ std::process::exit(-1); }};
+//     ($fmt:literal) => {{ std::eprintln!($fmt); std::process::exit(-1); }};
+//     ($fmt:literal, $($arg:tt)*) => {{ std::eprintln!($fmt, $($arg)*); std::process::exit(-1); }};
+// }
 
 // these can't go inside Token for a few reasons:
 // - Token should be as small as possible
@@ -46,16 +34,6 @@ impl Deref for Token {
     type Target = str;
     fn deref(&self) -> &str {
         &self.source.text[self.lo..self.hi]
-    }
-}
-
-impl Token {
-    // since Data can only hold 'static, we can't use Token<'_>
-    // so instead we use a usize and intentionally forget the lifetime information
-    // apparantly this is safe? maybe because we never try to go backwards?
-    // this doesn't need to consider self.hi because tokens never overlap
-    fn key(&self) -> usize {
-        self.deref() as *const str as *const u8 as usize
     }
 }
 
@@ -87,52 +65,83 @@ impl Display for Token {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct Id(usize);
+const GLOBAL: Id = Id(usize::MAX);
+
 struct Tree {
-    token: Token,
+    id: Id,
     children: Vec<Tree>,
 }
 
-impl Tree {
-    fn new(source: Rc<Source>, lo: usize, hi: usize) -> Tree {
-        Tree {
-            token: Token { source, lo, hi },
-            children: Vec::new(),
-        }
+// this is separate from Context because we don't want these methods to borrow Context.tree
+struct Data(HashMap<(String, Id), Box<dyn Any>>);
+
+impl Data {
+    fn insert<T: Any>(&mut self, key: &str, id: Id, value: T) -> Option<Box<dyn Any>> {
+        self.0.insert((key.to_owned(), id), Box::new(value))
+    }
+
+    fn get<T: Any>(&self, key: &str, id: Id) -> &T {
+        let any = self.0.get(&(key.to_owned(), id));
+        let any = any.unwrap_or_else(|| panic!("data did not contain {} for {}", key, id.0));
+        any.downcast_ref::<T>()
+            .unwrap_or_else(|| panic!("data had the wrong type in {} for {}", key, id.0))
+    }
+
+    fn get_mut<T: Any>(&mut self, key: &str, id: Id) -> &mut T {
+        let any = self.0.get_mut(&(key.to_owned(), id));
+        let any = any.unwrap_or_else(|| panic!("data did not contain {} for {}", key, id.0));
+        any.downcast_mut::<T>()
+            .unwrap_or_else(|| panic!("data had the wrong type in {} for {}", key, id.0))
+    }
+
+    fn contains(&self, key: &str, id: Id) -> bool {
+        self.0.contains_key(&(key.to_owned(), id))
     }
 }
 
-struct Data(HashMap<String, Box<dyn Any>>);
-
-impl Data {
-    fn insert<T: Any>(&mut self, key: &str, value: T) -> Option<Box<dyn Any>> {
-        self.0.insert(key.to_owned(), Box::new(value))
-    }
-
-    fn get<T: Any>(&self, key: &str) -> &T {
-        self.0
-            .get(key)
-            .unwrap_or_else(|| panic!("{} was not found in data", key))
-            .downcast_ref::<T>()
-            .unwrap_or_else(|| panic!("{} had the wrong type in data", key))
-    }
+struct Context {
+    next: Id,
+    tree: Tree,
+    data: Data,
 }
 
 fn main() {
-    let args: Vec<String> = args().collect();
+    let args: Vec<String> = std::env::args().collect();
     let file = args.get(1);
     let file = file.unwrap_or_else(|| panic!("expected command line argument"));
-    let text = read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
+    let text = std::fs::read_to_string(file).unwrap_or_else(|_| panic!("could not read {}", file));
     let name = file.clone();
     let source = Rc::new(Source { name, text });
 
-    let mut tree = Tree::new(source.clone(), 0, 0);
+    let mut c = Context {
+        next: Id(1),
+        tree: Tree {
+            id: Id(0),
+            children: Vec::new(),
+        },
+        data: Data(HashMap::new()),
+    };
+
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        tree.children.push(Tree::new(source.clone(), i, j));
+        let id = c.next;
+        c.next.0 += 1;
+        let children = Vec::new();
+        let tree = Tree { id, children };
+        c.data.insert(
+            "tokens",
+            tree.id,
+            Token {
+                source: source.clone(),
+                lo: i,
+                hi: j,
+            },
+        );
+        c.tree.children.push(tree);
     }
-
-    let mut data = Data(HashMap::new());
 
     let passes = [
         // tokenize
@@ -153,26 +162,28 @@ fn main() {
         interpret,
     ];
     for pass in passes {
-        pass(&mut tree, &mut data)
+        pass(&mut c)
     }
 }
 
-fn remove_comments(tree: &mut Tree, _data: &mut Data) {
+fn remove_comments(c: &mut Context) {
     let mut i = 0;
-    while i < tree.children.len() {
-        if tree.children[i].token.deref() == "#" {
+    while i < c.tree.children.len() {
+        if c.data.get::<Token>("tokens", c.tree.children[i].id).deref() == "#" {
             let mut j = i;
-            while j < tree.children.len() && tree.children[j].token.deref() != "\n" {
+            while j < c.tree.children.len()
+                && c.data.get::<Token>("tokens", c.tree.children[j].id).deref() != "\n"
+            {
                 j += 1;
             }
-            tree.children.drain(i..=j);
+            c.tree.children.drain(i..=j);
         } else {
             i += 1;
         }
     }
 }
 
-fn group_tokens(tree: &mut Tree, _data: &mut Data) {
+fn group_tokens(c: &mut Context) {
     let is_bracket = |s: &str| matches!(s, "(" | ")" | "{" | "}" | "[" | "]");
     let is_ident_char = |c: char| matches!(c, '-' | '_' | 'a'..='z' | 'A'..='Z' | '0'..='9');
     let token_type = |s: &str| match s {
@@ -183,43 +194,42 @@ fn group_tokens(tree: &mut Tree, _data: &mut Data) {
     };
 
     let mut i = 1;
-    while i < tree.children.len() {
-        let curr = &tree.children[i].token;
-        let prev = &tree.children[i - 1].token;
+    while i < c.tree.children.len() {
+        let curr = c.data.get::<Token>("tokens", c.tree.children[i].id);
+        let prev = c.data.get::<Token>("tokens", c.tree.children[i - 1].id);
         if !is_bracket(curr)
             && token_type(curr) == token_type(prev)
             && curr.source == prev.source
             && prev.hi == curr.lo
         {
-            tree.children[i - 1].token.hi = curr.hi;
-            tree.children.remove(i);
+            c.data
+                .get_mut::<Token>("tokens", c.tree.children[i - 1].id)
+                .hi = curr.hi;
+            c.tree.children.remove(i);
         } else {
             i += 1;
         }
     }
 }
 
-fn remove_whitespace(tree: &mut Tree, _data: &mut Data) {
-    tree.children
-        .retain(|child| !child.token.chars().all(char::is_whitespace));
+fn remove_whitespace(c: &mut Context) {
+    c.tree.children.retain(|child| {
+        !c.data
+            .get::<Token>("tokens", child.id)
+            .chars()
+            .all(char::is_whitespace)
+    });
 }
 
-fn parse_int_literals(tree: &mut Tree, data: &mut Data) {
-    let ints: HashMap<usize, i64> = tree
-        .children
-        .iter()
-        .filter_map(|child| {
-            child
-                .token
-                .parse::<i64>()
-                .ok()
-                .map(|int| (child.token.key(), int))
-        })
-        .collect();
-    data.insert("ints", ints);
+fn parse_int_literals(c: &mut Context) {
+    for child in &c.tree.children {
+        if let Ok(int) = c.data.get::<Token>("tokens", child.id).parse::<i64>() {
+            c.data.insert("ints", child.id, int);
+        }
+    }
 }
 
-fn group_brackets(tree: &mut Tree, _data: &mut Data) {
+fn group_brackets(c: &mut Context) {
     let match_opener = |token: &str| match token {
         "(" => ")",
         "{" => "}",
@@ -229,20 +239,21 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
 
     let mut openers = Vec::new();
     let mut i = 0;
-    while i < tree.children.len() {
-        match tree.children[i].token.deref() {
+    while i < c.tree.children.len() {
+        let token = c.data.get::<Token>("tokens", c.tree.children[i].id);
+        match token.deref() {
             "(" | "{" | "[" => openers.push(i),
             ")" | "}" | "]" => match openers.pop() {
-                None => panic!("extra {}", tree.children[i].token),
+                None => panic!("extra {}", token),
                 Some(l) => {
-                    let opener = &tree.children[l].token;
-                    if match_opener(opener) == tree.children[i].token.deref() {
-                        let mut cs: Vec<Tree> = tree.children.drain(l + 1..=i).collect();
+                    let opener = c.data.get::<Token>("tokens", c.tree.children[l].id);
+                    if match_opener(opener) == token.deref() {
+                        let mut cs: Vec<Tree> = c.tree.children.drain(l + 1..=i).collect();
                         cs.pop(); // remove closing bracket
-                        tree.children[l].children = cs;
+                        c.tree.children[l].children = cs;
                         i = l;
                     } else {
-                        panic!("{} matched with {}", opener, tree.children[i].token)
+                        panic!("{} matched with {}", opener, token)
                     }
                 }
             },
@@ -251,25 +262,28 @@ fn group_brackets(tree: &mut Tree, _data: &mut Data) {
         i += 1;
     }
     if let Some(l) = openers.pop() {
-        let opener = &tree.children[l].token;
+        let opener = c.data.get::<Token>("tokens", c.tree.children[l].id);
         panic!("no {} for the {}", match_opener(opener), opener)
     }
 }
 
-fn unroll_brackets(tree: &mut Tree, _data: &mut Data) {
-    for child in &mut tree.children {
-        unroll_brackets(child, _data)
-    }
+fn unroll_brackets(c: &mut Context) {
+    unroll_brackets(&mut c.tree, &mut c.data);
+    fn unroll_brackets(tree: &mut Tree, data: &mut Data) {
+        for child in &mut tree.children {
+            unroll_brackets(child, data)
+        }
 
-    let mut i = 0;
-    while i < tree.children.len() {
-        if tree.children[i].token.deref() == "(" {
-            let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
-            let len = cs.len();
-            tree.children.splice(i..=i, cs);
-            i += len;
-        } else {
-            i += 1;
+        let mut i = 0;
+        while i < tree.children.len() {
+            if data.get::<Token>("tokens", tree.children[i].id).deref() == "(" {
+                let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
+                let len = cs.len();
+                tree.children.splice(i..=i, cs);
+                i += len;
+            } else {
+                i += 1;
+            }
         }
     }
 }
@@ -291,7 +305,7 @@ struct Operators {
     associativity: Associativity,
 }
 
-fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
+fn insert_default_operators(c: &mut Context) {
     fn ops(ops: &[(&str, &str, usize, usize, bool)], associativity: Associativity) -> Operators {
         let ops = ops
             .iter()
@@ -320,56 +334,67 @@ fn insert_default_operators(_tree: &mut Tree, data: &mut Data) {
         ops(&[("+", "add", 1, 1, true)], Left),
         ops(&[("=", "assign", 1, 1, false)], Right),
     ];
-    data.insert("precedences", precedences.into_iter().collect::<Vec<_>>());
+    c.data.insert(
+        "precedences",
+        GLOBAL,
+        precedences.into_iter().collect::<Vec<_>>(),
+    );
 }
 
-fn group_operators(tree: &mut Tree, data: &mut Data) {
-    for child in &mut tree.children {
-        group_operators(child, data)
-    }
+fn group_operators(c: &mut Context) {
+    group_operators(&mut c.tree, &mut c.data);
+    fn group_operators(tree: &mut Tree, data: &mut Data) {
+        for child in &mut tree.children {
+            group_operators(child, data)
+        }
 
-    let precedences: &Vec<_> = data.get("precedences");
-    for Operators { ops, associativity } in precedences {
-        let mut i = match associativity {
-            Associativity::Left => 0,
-            Associativity::Right => tree.children.len().wrapping_sub(1),
-        };
-        while i < tree.children.len() {
-            if let Some(op) = ops.get(tree.children[i].token.deref()) {
-                if i < op.left || i + op.right >= tree.children.len() {
-                    panic!("missing arguments for {}", tree.children[i].token,)
-                }
-                let mut cs: Vec<Tree> = tree.children.drain(i - op.left..i).collect();
-                i -= op.left;
-                cs.extend(tree.children.drain(i + 1..=i + op.right));
-                tree.children[i].children = cs;
-            }
-            i = match associativity {
-                Associativity::Left => i + 1,
-                Associativity::Right => i.wrapping_sub(1),
+        let precedences: &Vec<_> = data.get("precedences", GLOBAL);
+        for Operators { ops, associativity } in precedences {
+            let mut i = match associativity {
+                Associativity::Left => 0,
+                Associativity::Right => tree.children.len().wrapping_sub(1),
             };
+            while i < tree.children.len() {
+                let token = data.get::<Token>("tokens", tree.children[i].id);
+                if let Some(op) = ops.get(token.deref()) {
+                    if i < op.left || i + op.right >= tree.children.len() {
+                        panic!("missing arguments for {}", token)
+                    }
+                    let mut cs: Vec<Tree> = tree.children.drain(i - op.left..i).collect();
+                    i -= op.left;
+                    cs.extend(tree.children.drain(i + 1..=i + op.right));
+                    tree.children[i].children = cs;
+                }
+                i = match associativity {
+                    Associativity::Left => i + 1,
+                    Associativity::Right => i.wrapping_sub(1),
+                };
+            }
         }
     }
 }
 
-fn unroll_operators(tree: &mut Tree, data: &mut Data) {
-    for child in &mut tree.children {
-        unroll_operators(child, data)
-    }
-
-    let precedences: &Vec<Operators> = data.get("precedences");
-    let mut i = 0;
-    while i < tree.children.len() {
-        let s = tree.children[i].token.deref();
-        if let Some(op) = precedences.iter().find_map(|ops| ops.ops.get(s)) {
-            if op.unroll {
-                let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
-                let len = cs.len();
-                tree.children.splice(i..i, cs);
-                i += len;
-            }
+fn unroll_operators(c: &mut Context) {
+    unroll_operators(&mut c.tree, &mut c.data);
+    fn unroll_operators(tree: &mut Tree, data: &mut Data) {
+        for child in &mut tree.children {
+            unroll_operators(child, data)
         }
-        i += 1;
+
+        let precedences: &Vec<Operators> = data.get("precedences", GLOBAL);
+        let mut i = 0;
+        while i < tree.children.len() {
+            let s = data.get::<Token>("tokens", tree.children[i].id).deref();
+            if let Some(op) = precedences.iter().find_map(|ops| ops.ops.get(s)) {
+                if op.unroll {
+                    let cs: Vec<Tree> = tree.children[i].children.drain(..).collect();
+                    let len = cs.len();
+                    tree.children.splice(i..i, cs);
+                    i += len;
+                }
+            }
+            i += 1;
+        }
     }
 }
 
@@ -402,135 +427,138 @@ trait Operation: Debug {
     fn run(&self, memory: &mut Memory, data: &Data);
 }
 
-mod operations {
-    use crate::*;
-    #[derive(Debug)]
-    pub struct Push(pub i64);
-    impl Operation for Push {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.stack[memory.sp + 1] = self.0;
-            memory.sp += 1;
-        }
-    }
-    #[derive(Debug)]
-    pub struct Move(pub i64);
-    impl Operation for Move {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.sp -= self.0;
-        }
-    }
-    #[derive(Debug)]
-    pub struct Copy(pub i64);
-    impl Operation for Copy {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.stack[memory.sp + 1] = memory.stack[memory.sp - self.0];
-            memory.sp += 1;
-        }
-    }
-    #[derive(Debug)]
-    pub struct Add;
-    impl Operation for Add {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.stack[memory.sp - 1] += memory.stack[memory.sp];
-            memory.sp -= 1;
-        }
-    }
-    #[derive(Debug)]
-    pub struct Neg;
-    impl Operation for Neg {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.stack[memory.sp] = -memory.stack[memory.sp];
-        }
-    }
-    #[derive(Debug)]
-    pub struct Ltz;
-    impl Operation for Ltz {
-        fn run(&self, memory: &mut Memory, _data: &Data) {
-            memory.stack[memory.sp] = (memory.stack[memory.sp] < 0) as i64;
-        }
-    }
-    #[derive(Debug)]
-    pub struct Jumpz(pub String);
-    impl Operation for Jumpz {
-        fn run(&self, memory: &mut Memory, data: &Data) {
-            let labels: &HashMap<String, i64> = data.get("labels");
-            match labels.get(&self.0) {
-                Some(i) => {
-                    if memory.stack[memory.sp] == 0 {
-                        memory.pc = *i;
-                    }
-                    memory.sp -= 1;
-                }
-                None => panic!("could not find label {}", self.0),
-            }
-        }
-    }
-    #[derive(Debug)]
-    pub struct Label(pub String);
-    impl Operation for Label {
-        fn run(&self, _memory: &mut Memory, _data: &Data) {}
+#[derive(Debug)]
+pub struct Push(pub i64);
+impl Operation for Push {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        memory.stack[memory.sp + 1] = self.0;
+        memory.sp += 1;
     }
 }
+#[derive(Debug)]
+pub struct Move(pub i64);
+impl Operation for Move {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        memory.sp -= self.0;
+    }
+}
+#[derive(Debug)]
+pub struct Copy(pub i64);
+impl Operation for Copy {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        memory.stack[memory.sp + 1] = memory.stack[memory.sp - self.0];
+        memory.sp += 1;
+    }
+}
+#[derive(Debug)]
+pub struct Add;
+impl Operation for Add {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        memory.stack[memory.sp - 1] += memory.stack[memory.sp];
+        memory.sp -= 1;
+    }
+}
+#[derive(Debug)]
+pub struct Neg;
+impl Operation for Neg {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        memory.stack[memory.sp] = -memory.stack[memory.sp];
+    }
+}
+#[derive(Debug)]
+pub struct Ltz;
+impl Operation for Ltz {
+    fn run(&self, memory: &mut Memory, _data: &Data) {
+        memory.stack[memory.sp] = (memory.stack[memory.sp] < 0) as i64;
+    }
+}
+#[derive(Debug)]
+pub struct Jumpz(pub String);
+impl Operation for Jumpz {
+    fn run(&self, memory: &mut Memory, data: &Data) {
+        let labels: &HashMap<String, i64> = data.get("labels", GLOBAL);
+        match labels.get(&self.0) {
+            Some(i) => {
+                if memory.stack[memory.sp] == 0 {
+                    memory.pc = *i;
+                }
+                memory.sp -= 1;
+            }
+            None => panic!("could not find label {}", self.0),
+        }
+    }
+}
+#[derive(Debug)]
+pub struct Label(pub String);
+impl Operation for Label {
+    fn run(&self, _memory: &mut Memory, _data: &Data) {}
+}
 
-fn generate_ops(tree: &mut Tree, data: &mut Data) {
-    let ints: &HashMap<usize, i64> = data.get("ints");
-    let precedences: &Vec<Operators> = data.get("precedences");
-    let mut ops: HashMap<usize, Box<dyn Operation>> = HashMap::new();
+fn as_trait<Op: Operation + 'static>(op: Op) -> Box<dyn Operation> {
+    Box::new(op) as Box<dyn Operation>
+}
+
+fn generate_ops(c: &mut Context) {
     let mut labels: HashMap<String, i64> = HashMap::new();
-    for (i, child) in tree.children.iter_mut().enumerate() {
-        if let Some(int) = ints.get(&child.token.key()) {
-            ops.insert(child.token.key(), Box::new(operations::Push(*int)));
+    for (i, child) in c.tree.children.iter_mut().enumerate() {
+        if c.data.contains("ints", child.id) {
+            c.data.insert(
+                "ops",
+                child.id,
+                as_trait(Push(*c.data.get("ints", child.id))),
+            );
         } else {
-            let s = child.token.deref();
-            let s = precedences
+            let s = c.data.get::<Token>("tokens", child.id).deref();
+            let s = c
+                .data
+                .get::<Vec<Operators>>("precedences", GLOBAL)
                 .iter()
                 .find_map(|ops| ops.ops.get(s))
                 .map_or(s, |op| op.func.as_str());
             match s {
                 "move" => {
-                    let arg = child.children.pop().unwrap();
-                    let arg = ints.get(&arg.token.key()).unwrap();
-                    ops.insert(child.token.key(), Box::new(operations::Move(*arg)));
+                    let arg = c.data.get::<i64>("ints", child.children.pop().unwrap().id);
+                    c.data.insert("ops", child.id, as_trait(Move(*arg)));
                 }
                 "copy" => {
-                    let arg = child.children.pop().unwrap();
-                    let arg = ints.get(&arg.token.key()).unwrap();
-                    ops.insert(child.token.key(), Box::new(operations::Copy(*arg)));
+                    let arg = c.data.get::<i64>("ints", child.children.pop().unwrap().id);
+                    c.data.insert("ops", child.id, as_trait(Copy(*arg)));
                 }
                 "add" => {
-                    ops.insert(child.token.key(), Box::new(operations::Add));
+                    c.data.insert("ops", child.id, as_trait(Add));
                 }
                 "neg" => {
-                    ops.insert(child.token.key(), Box::new(operations::Neg));
+                    c.data.insert("ops", child.id, as_trait(Neg));
                 }
                 "ltz" => {
-                    ops.insert(child.token.key(), Box::new(operations::Ltz));
+                    c.data.insert("ops", child.id, as_trait(Ltz));
                 }
                 "jumpz" => {
-                    let label = child.children.pop().unwrap().token.deref().to_owned();
-                    ops.insert(child.token.key(), Box::new(operations::Jumpz(label)));
+                    let arg = child.children.pop().unwrap().id;
+                    let label = c.data.get::<Token>("tokens", arg).deref().to_owned();
+                    c.data.insert("ops", child.id, as_trait(Jumpz(label)));
                 }
                 "label" => {
-                    let label = child.children.pop().unwrap().token.deref().to_owned();
+                    let arg = child.children.pop().unwrap().id;
+                    let label = c.data.get::<Token>("tokens", arg).deref().to_owned();
                     labels.insert(label.clone(), i as i64);
-                    ops.insert(child.token.key(), Box::new(operations::Label(label)));
+                    c.data.insert("ops", child.id, as_trait(Label(label)));
                 }
                 _ => {}
             }
         }
     }
-    data.insert("ops", ops);
-    data.insert("labels", labels);
+    c.data.insert("labels", GLOBAL, labels);
 }
 
-fn interpret(tree: &mut Tree, data: &mut Data) {
-    let ops: &HashMap<usize, Box<dyn Operation>> = data.get("ops");
-    for child in &tree.children {
-        if ops.get(&child.token.key()).is_none() {
-            panic!("no operation for {}", child.token)
+fn interpret(c: &mut Context) {
+    for child in &c.tree.children {
+        let token = c.data.get::<Token>("tokens", child.id);
+        if !c.data.contains("ops", child.id) {
+            panic!("no operation for {}", token)
         }
         if !child.children.is_empty() {
-            panic!("found child of {}", child.token)
+            panic!("found child of {}", token)
         }
     }
 
@@ -539,9 +567,9 @@ fn interpret(tree: &mut Tree, data: &mut Data) {
         sp: -1,
         stack: Stack(Vec::new()),
     };
-    while let Some(child) = tree.children.get(memory.pc as usize) {
-        let op = &ops[&child.token.key()];
-        op.run(&mut memory, data);
+    while let Some(child) = c.tree.children.get(memory.pc as usize) {
+        let op = c.data.get::<Box<dyn Operation>>("ops", child.id);
+        op.run(&mut memory, &c.data);
         memory.pc += 1;
         match memory.sp {
             -1 => println!("{:<32}\t", format!("{:?}", op)),
