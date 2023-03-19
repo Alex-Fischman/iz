@@ -437,7 +437,7 @@ fn gather_assignments(c: &mut Context) {
     }
 }
 
-// this is bad because it should actually call the macro, not just copy-paste it's contents
+// this is bad because it should actually call the macro, not just copy-paste its contents
 fn substitute_assignments_bad(c: &mut Context) {
     substitute_assignments_bad(&mut c.tree, &mut c.data);
     fn substitute_assignments_bad(tree: &mut Tree, data: &mut Data) {
@@ -448,7 +448,11 @@ fn substitute_assignments_bad(c: &mut Context) {
             let token = data.get::<Token>(tree.children[i].id).unwrap();
             let namespace = data.get::<Namespace>(tree.children[i].id).unwrap();
             if let Some(replacement) = namespace.get(data, token.deref()) {
-                tree.children[i] = replacement.clone();
+                if data.get::<Token>(replacement.id).unwrap().deref() == "{" {
+                    tree.children.splice(i..=i, replacement.children.clone());
+                } else {
+                    panic!("substitute_assignments_bad should be replaced")
+                }
             } else {
                 i += 1;
             }
