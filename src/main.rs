@@ -70,6 +70,7 @@ impl Display for Token {
 struct Id(usize);
 const GLOBAL: Id = Id(usize::MAX);
 
+#[derive(Clone)]
 struct Tree {
     id: Id,
     children: Vec<Tree>,
@@ -155,6 +156,7 @@ fn main() {
         group_operators,
         // analysis
         gather_assignments,
+        substitute_assignments_bad,
         // flatten
         unroll_operators,
         unroll_brackets,
@@ -402,6 +404,16 @@ struct Namespace {
     trees: HashMap<String, Tree>,
 }
 
+impl Namespace {
+    fn get<'a>(&'a self, data: &'a Data, key: &str) -> Option<&Tree> {
+        self.trees.get(key)?;
+        match data.contains::<Namespace>(self.parent) {
+            true => data.get::<Namespace>(self.parent).get(data, key),
+            false => None,
+        }
+    }
+}
+
 fn gather_assignments(c: &mut Context) {
     gather_assignments(&mut c.tree, &mut c.data, GLOBAL);
     fn gather_assignments(tree: &mut Tree, data: &mut Data, parent: Id) {
@@ -428,6 +440,24 @@ fn gather_assignments(c: &mut Context) {
             }
         }
         data.insert(tree.id, Namespace { parent, trees });
+    }
+}
+
+// this is bad because it only works for the simplest possible macros
+// in all other cases (stack vars, function calls, macros with arguments) this won't work
+fn substitute_assignments_bad(c: &mut Context) {
+    substitute_assignments_bad(&mut c.tree, &mut c.data);
+    fn substitute_assignments_bad(tree: &mut Tree, data: &mut Data) {
+        let mut i = 0;
+        while i < tree.children.len() {
+            substitute_assignments_bad(&mut tree.children[i], data);
+
+            let s = data.get::<Token>(tree.children[i].id).deref();
+            if let Some(replacement) = data.get::<Namespace>(tree.id).get(data, s) {
+                tree.children[i] = replacement.clone();
+            }
+            i += 1;
+        }
     }
 }
 
