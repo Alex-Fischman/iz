@@ -1,7 +1,0 @@
-[package]
-name = "iz"
-version = "0.9.0"
-authors = ["Alex Fischman <alexdfischman@gmail.com>"]
-edition = "2021"
-
-[dependencies]
