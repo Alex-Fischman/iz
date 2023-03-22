@@ -8,6 +8,26 @@ const Source = struct { name: []const u8, text: []const u8 };
 const Token = struct {
     slice: []const u8,
     source: *const Source,
+
+    const Type = enum { identifier, whitespace, bracket, operator };
+
+    fn tokenType(token: Token) Type {
+        var result: ?Type = null;
+        const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
+        var chars = view.iterator();
+        while (chars.nextCodepoint()) |char| {
+            const t = switch (char) {
+                '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => Type.identifier,
+                ' ', '\n', '\t' => Type.whitespace,
+                '(', ')', '{', '}', '[', ']' => Type.bracket,
+                else => Type.operator,
+            };
+            if (result) |r| {
+                if (r != t) panic("token {s} had chars of different types", .{token.slice});
+            } else result = t;
+        }
+        if (result) |r| return r else panic("cannot type empty token", .{});
+    }
 };
 
 const Tree = struct {
@@ -79,13 +99,14 @@ pub fn main() void {
         tree.children.append(child) catch unreachable;
     }
 
-    remove_comments(&tree);
-    group_tokens(&tree);
+    removeComments(&tree);
+    groupTokens(&tree);
+    removeWhitespace(&tree);
 
     printTree(tree, 0);
 }
 
-fn remove_comments(tree: *Tree) void {
+fn removeComments(tree: *Tree) void {
     var i: usize = 0;
     while (i < tree.children.items.len) : (i +%= 1) {
         if (std.mem.eql(u8, tree.children.items[i].get(Token).?.slice, "#")) {
@@ -101,42 +122,29 @@ fn remove_comments(tree: *Tree) void {
     }
 }
 
-const TokenType = enum { identifier, whitespace, bracket, operator };
-
-fn char_type(char: u21) TokenType {
-    return switch (char) {
-        '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => TokenType.identifier,
-        ' ', '\n', '\t' => TokenType.whitespace,
-        '(', ')', '{', '}', '[', ']' => TokenType.bracket,
-        else => TokenType.operator,
-    };
-}
-
-fn token_type(token: Token) TokenType {
-    var result: ?TokenType = null;
-    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
-    var chars = view.iterator();
-    while (chars.nextCodepoint()) |char| {
-        const t = char_type(char);
-        if (result) |r| {
-            if (r != t) panic("token {s} had chars of different types", .{token.slice});
-        } else result = t;
-    }
-    if (result) |r| return r else panic("cannot type empty token", .{});
-}
-
-fn group_tokens(tree: *Tree) void {
+fn groupTokens(tree: *Tree) void {
     var i: usize = 1;
     while (i < tree.children.items.len) : (i += 1) {
         const curr = tree.children.items[i].get(Token).?.*;
         const prev = tree.children.items[i - 1].get(Token).?.*;
-        if (token_type(curr) != TokenType.bracket and token_type(curr) == token_type(prev)) {
+        if (curr.tokenType() != Token.Type.bracket and curr.tokenType() == prev.tokenType()) {
             if (curr.source == prev.source and prev.slice.ptr + prev.slice.len == curr.slice.ptr) {
                 tree.children.items[i - 1].get(Token).?.slice.len += curr.slice.len;
                 var child = tree.children.orderedRemove(i);
                 child.deinit();
                 i -= 1;
             }
+        }
+    }
+}
+
+fn removeWhitespace(tree: *Tree) void {
+    var i: usize = 1;
+    while (i < tree.children.items.len) : (i +%= 1) {
+        if (tree.children.items[i].get(Token).?.tokenType() == Token.Type.whitespace) {
+            var child = tree.children.orderedRemove(i);
+            child.deinit();
+            i -%= 1;
         }
     }
 }
