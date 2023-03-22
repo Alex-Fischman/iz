@@ -71,15 +71,16 @@ pub fn main() void {
     var tree = Tree.init(allocator);
     defer tree.deinit();
 
-    const utf8View = std.unicode.Utf8View.init(text) catch panic("{s} was not UTF8", .{name});
-    var utf8Iterator = utf8View.iterator();
-    while (utf8Iterator.nextCodepointSlice()) |slice| {
+    const view = std.unicode.Utf8View.init(text) catch panic("{s} was not UTF8", .{name});
+    var chars = view.iterator();
+    while (chars.nextCodepointSlice()) |slice| {
         var child = Tree.init(allocator);
         child.put(Token, Token{ .slice = slice, .source = &source });
         tree.children.append(child) catch unreachable;
     }
 
     remove_comments(&tree);
+    group_tokens(&tree);
 
     printTree(tree, 0);
 }
@@ -96,6 +97,46 @@ fn remove_comments(tree: *Tree) void {
 
             tree.children.replaceRange(i, j - i + 1, &[0]Tree{}) catch unreachable;
             i -%= 1;
+        }
+    }
+}
+
+const TokenType = enum { identifier, whitespace, bracket, operator };
+
+fn char_type(char: u21) TokenType {
+    return switch (char) {
+        '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => TokenType.identifier,
+        ' ', '\n', '\t' => TokenType.whitespace,
+        '(', ')', '{', '}', '[', ']' => TokenType.bracket,
+        else => TokenType.operator,
+    };
+}
+
+fn token_type(token: Token) TokenType {
+    var result: ?TokenType = null;
+    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
+    var chars = view.iterator();
+    while (chars.nextCodepoint()) |char| {
+        const t = char_type(char);
+        if (result) |r| {
+            if (r != t) panic("token {s} had chars of different types", .{token.slice});
+        } else result = t;
+    }
+    if (result) |r| return r else panic("cannot type empty token", .{});
+}
+
+fn group_tokens(tree: *Tree) void {
+    var i: usize = 1;
+    while (i < tree.children.items.len) : (i += 1) {
+        const curr = tree.children.items[i].get(Token).?.*;
+        const prev = tree.children.items[i - 1].get(Token).?.*;
+        if (token_type(curr) != TokenType.bracket and token_type(curr) == token_type(prev)) {
+            if (curr.source == prev.source and prev.slice.ptr + prev.slice.len == curr.slice.ptr) {
+                tree.children.items[i - 1].get(Token).?.slice.len += curr.slice.len;
+                var child = tree.children.orderedRemove(i);
+                child.deinit();
+                i -= 1;
+            }
         }
     }
 }
