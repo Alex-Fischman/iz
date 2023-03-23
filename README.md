@@ -6,7 +6,7 @@ No one can predict what will be needed in a programming language in a decade. Th
 
 For a truly adaptable language to be complete, the programmer must be able to define the language to almost the same degree that the compiler writer did. Relatedly, since it seems impossible to me for the compiler to always work if the programmer can remove phases, it follows that the compiler itself must be as minimal as possible and have most of its features come from a default prelude. This would give the user the most flexibility because the prelude could then be swapped for a custom one.
 
-A minimal compiler will be an almost direct translation from text to bytecode. The base bytecode will be stack-based. I believe that this is the best compromise between portability, usability, and simplicity. My evidence for portability comes from the fact that I can’t name any non-stack-based languages except for HDLs. My evidence for usability comes from Forth. Finally, my evidence for simplicity comes from a previous prototype of iz.
+A minimal compiler will be an almost direct translation from text to bytecode. The base bytecode will model a machine that has a program counter and stack pointer but no other registers. I believe that this is the closest that we can get to the hardware without sacrificing too much portablility.
 
 Should there be a difference between macros and compiler passes?
 
@@ -30,10 +30,6 @@ Macros:
 - but some compile time functions will take compile-time-only args
 - compile passes are macros that take an AST and a Data object
 
-IR:
-- starting with a stack based thing for simplicity
-- but will also include weirder ops like moving the stack pointer for utility
-
 Syntax:
 - arbitrary operator definitions
 - operators call macros when parsed, which usually just unroll the arguments but can do anything
@@ -43,4 +39,9 @@ Syntax:
 Namespaces:
 - `use` imports any scope
 - all structs have a scope that contains their fields and methods
-- can be used for faking inheritance with nice syntax for composition
+- can be used for faking inheritance with composition
+
+Colorability:
+- const, mut, async, comptime, etc. are all things that end up coloring functions
+- the only solution that I know of is to choose a default and auto-convert from it
+- for example, all pointers are const pointers, all async functions can be called synchronously (by blocking), all values can be used at compile time, etc.
