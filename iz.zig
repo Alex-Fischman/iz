@@ -5,30 +5,7 @@ fn panic(comptime format: []const u8, args: anytype) noreturn {
 }
 
 const Source = struct { name: []const u8, text: []const u8 };
-const Token = struct {
-    slice: []const u8,
-    source: *const Source,
-
-    const Type = enum { identifier, whitespace, bracket, operator };
-
-    fn tokenType(token: Token) Type {
-        var result: ?Type = null;
-        const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
-        var chars = view.iterator();
-        while (chars.nextCodepoint()) |char| {
-            const t = switch (char) {
-                '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => Type.identifier,
-                ' ', '\n', '\t' => Type.whitespace,
-                '(', ')', '{', '}', '[', ']' => Type.bracket,
-                else => Type.operator,
-            };
-            if (result) |r| {
-                if (r != t) panic("token {s} had chars of different types", .{token.slice});
-            } else result = t;
-        }
-        if (result) |r| return r else panic("cannot type empty token", .{});
-    }
-};
+const Token = struct { slice: []const u8, source: *const Source };
 
 const Tree = struct {
     data: std.StringHashMap([]u8),
@@ -122,12 +99,32 @@ fn removeComments(tree: *Tree) void {
     }
 }
 
+const TokenType = enum { identifier, whitespace, bracket, operator };
+
+fn tokenType(token: Token) TokenType {
+    var result: ?TokenType = null;
+    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
+    var chars = view.iterator();
+    while (chars.nextCodepoint()) |char| {
+        const t = switch (char) {
+            '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => TokenType.identifier,
+            ' ', '\n', '\t' => TokenType.whitespace,
+            '(', ')', '{', '}', '[', ']' => TokenType.bracket,
+            else => TokenType.operator,
+        };
+        if (result) |r| {
+            if (r != t) panic("token {s} had chars of different types", .{token.slice});
+        } else result = t;
+    }
+    if (result) |r| return r else panic("cannot type empty token", .{});
+}
+
 fn groupTokens(tree: *Tree) void {
     var i: usize = 1;
     while (i < tree.children.items.len) : (i += 1) {
         const curr = tree.children.items[i].get(Token).?.*;
         const prev = tree.children.items[i - 1].get(Token).?.*;
-        if (curr.tokenType() != Token.Type.bracket and curr.tokenType() == prev.tokenType()) {
+        if (tokenType(curr) != TokenType.bracket and tokenType(curr) == tokenType(prev)) {
             if (curr.source == prev.source and prev.slice.ptr + prev.slice.len == curr.slice.ptr) {
                 tree.children.items[i - 1].get(Token).?.slice.len += curr.slice.len;
                 var child = tree.children.orderedRemove(i);
@@ -141,7 +138,7 @@ fn groupTokens(tree: *Tree) void {
 fn removeWhitespace(tree: *Tree) void {
     var i: usize = 1;
     while (i < tree.children.items.len) : (i +%= 1) {
-        if (tree.children.items[i].get(Token).?.tokenType() == Token.Type.whitespace) {
+        if (tokenType(tree.children.items[i].get(Token).?.*) == TokenType.whitespace) {
             var child = tree.children.orderedRemove(i);
             child.deinit();
             i -%= 1;
