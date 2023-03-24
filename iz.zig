@@ -99,24 +99,41 @@ fn removeComments(tree: *Tree) void {
     }
 }
 
-const TokenType = enum { identifier, whitespace, bracket, operator };
-
-fn tokenType(token: Token) TokenType {
-    var result: ?TokenType = null;
+fn isIdentifier(token: Token) bool {
     const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
     var chars = view.iterator();
-    while (chars.nextCodepoint()) |char| {
-        const t = switch (char) {
-            '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => TokenType.identifier,
-            ' ', '\n', '\t' => TokenType.whitespace,
-            '(', ')', '{', '}', '[', ']' => TokenType.bracket,
-            else => TokenType.operator,
-        };
-        if (result) |r| {
-            if (r != t) panic("token {s} had chars of different types", .{token.slice});
-        } else result = t;
+    while (chars.nextCodepoint()) |char| switch (char) {
+        '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => {},
+        else => return false,
+    };
+    return true;
+}
+
+fn isWhitespace(token: Token) bool {
+    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
+    var chars = view.iterator();
+    while (chars.nextCodepoint()) |char| switch (char) {
+        ' ', '\n', '\t' => {},
+        else => return false,
+    };
+    return true;
+}
+
+fn isBracket(token: Token) bool {
+    return if (token.slice.len != 1) false else switch (token.slice[0]) {
+        '(', ')', '{', '}', '[', ']' => true,
+        else => false,
+    };
+}
+
+fn isOperator(token: Token) bool {
+    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
+    var chars = view.iterator();
+    while (chars.nextCodepointSlice()) |slice| {
+        const t = Token{ .slice = slice, .source = token.source };
+        if (isIdentifier(t) or isWhitespace(t) or isBracket(t)) return false;
     }
-    if (result) |r| return r else panic("cannot type empty token", .{});
+    return true;
 }
 
 fn groupTokens(tree: *Tree) void {
@@ -124,7 +141,7 @@ fn groupTokens(tree: *Tree) void {
     while (i < tree.children.items.len) : (i += 1) {
         const curr = tree.children.items[i].get(Token).?.*;
         const prev = tree.children.items[i - 1].get(Token).?.*;
-        if (tokenType(curr) != TokenType.bracket and tokenType(curr) == tokenType(prev)) {
+        if ((isIdentifier(curr) and isIdentifier(prev)) or (isOperator(curr) and isOperator(prev))) {
             if (curr.source == prev.source and prev.slice.ptr + prev.slice.len == curr.slice.ptr) {
                 tree.children.items[i - 1].get(Token).?.slice.len += curr.slice.len;
                 var child = tree.children.orderedRemove(i);
@@ -138,7 +155,7 @@ fn groupTokens(tree: *Tree) void {
 fn removeWhitespace(tree: *Tree) void {
     var i: usize = 1;
     while (i < tree.children.items.len) : (i +%= 1) {
-        if (tokenType(tree.children.items[i].get(Token).?.*) == TokenType.whitespace) {
+        if (isWhitespace(tree.children.items[i].get(Token).?.*)) {
             var child = tree.children.orderedRemove(i);
             child.deinit();
             i -%= 1;
