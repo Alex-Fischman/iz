@@ -43,6 +43,7 @@ const Tree = struct {
 fn printTree(tree: Tree, indent: usize) void {
     var i: usize = 0;
     while (i < indent) : (i += 1) std.debug.print("\t", .{});
+    if (tree.get(i64)) |int| std.debug.print("{d}\t", .{int.*});
     if (tree.get(Token)) |token| std.debug.print("{s}\n", .{token.slice});
     for (tree.children.items) |child| printTree(child, indent + 1);
 }
@@ -68,8 +69,7 @@ pub fn main() void {
     var tree = Tree.init(allocator);
     defer tree.deinit();
 
-    const view = std.unicode.Utf8View.init(text) catch panic("{s} was not UTF8", .{name});
-    var chars = view.iterator();
+    var chars = (std.unicode.Utf8View.init(text) catch panic("{s} was not UTF8", .{name})).iterator();
     while (chars.nextCodepointSlice()) |slice| {
         var child = Tree.init(allocator);
         child.put(Token, Token{ .slice = slice, .source = &source });
@@ -79,6 +79,7 @@ pub fn main() void {
     removeComments(&tree);
     groupTokens(&tree);
     removeWhitespace(&tree);
+    parseIntLiterals(&tree);
 
     printTree(tree, 0);
 }
@@ -100,8 +101,7 @@ fn removeComments(tree: *Tree) void {
 }
 
 fn isIdentifier(token: Token) bool {
-    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
-    var chars = view.iterator();
+    var chars = (std.unicode.Utf8View.init(token.slice) catch unreachable).iterator();
     while (chars.nextCodepoint()) |char| switch (char) {
         '-', '_', 'a'...'z', 'A'...'Z', '0'...'9' => {},
         else => return false,
@@ -110,8 +110,7 @@ fn isIdentifier(token: Token) bool {
 }
 
 fn isWhitespace(token: Token) bool {
-    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
-    var chars = view.iterator();
+    var chars = (std.unicode.Utf8View.init(token.slice) catch unreachable).iterator();
     while (chars.nextCodepoint()) |char| switch (char) {
         ' ', '\n', '\t' => {},
         else => return false,
@@ -127,8 +126,7 @@ fn isBracket(token: Token) bool {
 }
 
 fn isOperator(token: Token) bool {
-    const view = std.unicode.Utf8View.init(token.slice) catch unreachable;
-    var chars = view.iterator();
+    var chars = (std.unicode.Utf8View.init(token.slice) catch unreachable).iterator();
     while (chars.nextCodepointSlice()) |slice| {
         const t = Token{ .slice = slice, .source = token.source };
         if (isIdentifier(t) or isWhitespace(t) or isBracket(t)) return false;
@@ -160,5 +158,36 @@ fn removeWhitespace(tree: *Tree) void {
             child.deinit();
             i -%= 1;
         }
+    }
+}
+
+fn parseIntLiterals(tree: *Tree) void {
+    var i: usize = 1;
+    children: while (i < tree.children.items.len) : (i += 1) {
+        const s = tree.children.items[i].get(Token).?.slice;
+        var chars = (std.unicode.Utf8View.init(s) catch unreachable).iterator();
+        var value: i64 = 0;
+        var negative = false;
+        if (s[0] == '-') {
+            if (s.len > 1) {
+                _ = chars.nextCodepoint();
+                negative = true;
+            } else continue :children;
+        }
+        while (chars.nextCodepoint()) |char| switch (char) {
+            '0' => value = value * 10 + 0,
+            '1' => value = value * 10 + 1,
+            '2' => value = value * 10 + 2,
+            '3' => value = value * 10 + 3,
+            '4' => value = value * 10 + 4,
+            '5' => value = value * 10 + 5,
+            '6' => value = value * 10 + 6,
+            '7' => value = value * 10 + 7,
+            '8' => value = value * 10 + 8,
+            '9' => value = value * 10 + 9,
+            '_' => {},
+            else => continue :children,
+        };
+        tree.children.items[i].put(i64, if (negative) -value else value);
     }
 }
