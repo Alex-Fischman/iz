@@ -105,12 +105,27 @@ fn main() {
     }
 
     let mut passes: Vec<&dyn Fn(&mut Tree)> = Vec::new();
+
+    passes.push(&remove_comments);
     passes.push(&remove_whitespace);
+    
     for pass in passes {
         pass(&mut tree);
     }
 
     tree.print(0);
+}
+
+fn remove_comments(tree: &mut Tree) {
+    let mut in_comment = false;
+    tree.children.retain(|child| {
+        match child.data.get::<Token>().unwrap().deref() {
+            "#" if !in_comment => in_comment = true,
+            "\n" if in_comment => in_comment = false,
+            _ => {},
+        }
+        !in_comment
+    });
 }
 
 fn remove_whitespace(tree: &mut Tree) {
