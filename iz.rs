@@ -104,10 +104,12 @@ fn main() {
         tree.children.push(child);
     }
 
-    let mut passes: Vec<&dyn Fn(&mut Tree)> = Vec::new();
+    let mut passes: Vec<Box<dyn Fn(&mut Tree)>> = Vec::new();
 
-    passes.push(&remove_comments);
-    passes.push(&remove_whitespace);
+    passes.push(Box::new(remove_comments));
+    passes.push(Box::new(concat_alike_tokens(is_identifier)));
+    passes.push(Box::new(concat_alike_tokens(is_operator)));
+    passes.push(Box::new(remove_whitespace));
     
     for pass in passes {
         pass(&mut tree);
@@ -128,7 +130,30 @@ fn remove_comments(tree: &mut Tree) {
     });
 }
 
+fn is_identifier(s: &str) -> bool { s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') }
+
+fn is_whitespace(s: &str) -> bool { s.chars().all(char::is_whitespace) }
+
+fn is_operator(s: &str) -> bool {
+    s.chars().all(|c| !(c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c)))
+}
+
+fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
+    move |tree: &mut Tree| {
+        let mut i = 1;
+        while i < tree.children.len() {
+            let curr = tree.children[i].data.get::<Token>().unwrap();
+            let prev = tree.children[i - 1].data.get::<Token>().unwrap();
+            if alike(curr) && alike(prev) && curr.source == prev.source && curr.lo == prev.hi {
+                let curr = tree.children.remove(i).data.remove::<Token>().unwrap();
+                tree.children[i - 1].data.get_mut::<Token>().unwrap().hi = curr.hi;
+            } else {
+                i += 1;
+            }
+        }
+    }
+}
+
 fn remove_whitespace(tree: &mut Tree) {
-    tree.children
-        .retain(|child| !child.data.get::<Token>().unwrap().chars().all(char::is_whitespace));
+    tree.children.retain(|child| !is_whitespace(child.data.get::<Token>().unwrap()));
 }
