@@ -113,6 +113,7 @@ fn main() {
     // parsing
     passes.push(Box::new(match_brackets("(", ")")));
     passes.push(Box::new(match_brackets("{", "}")));
+    // passes.push(Box::new(flatten_parens));
     
     for pass in passes {
         pass(&mut tree);
@@ -183,6 +184,23 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
         }
         if let Some(j) = indices.pop() {
             panic!("extra {}", tree.children[j].data.get::<Token>().unwrap())
+        }
+    }
+}
+
+fn flatten_parens(tree: &mut Tree) {
+    for child in &mut tree.children {
+        flatten_parens(child)
+    }
+    let mut i = 0;
+    while i < tree.children.len() {
+        if tree.children[i].data.get::<Token>().unwrap().deref() == "(" {
+            let cs: Vec<_> = tree.children[i].children.drain(..).collect();
+            let l = cs.len();
+            tree.children.splice(i..=i, cs);
+            i += l;
+        } else {
+            i += 1;
         }
     }
 }
