@@ -79,12 +79,20 @@ impl Tree {
     fn new() -> Tree {
         Tree { data: Data(Map::new()), children: Vec::new() }
     }
+
+    fn print(&self, indent: usize) {
+        print!("{}", "\t".repeat(indent));
+        self.data.get::<Token>().map(|token| print!("{}", token));
+        println!();
+        self.children.iter().for_each(|child| child.print(indent + 1));
+    }
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let name = args.get(1).unwrap_or_else(|| panic!("missing .iz file")).to_owned();
-    let text = std::fs::read_to_string(&name).unwrap_or_else(|_| panic!("could not read {}", name));
+    let text = std::fs::read_to_string(&name)
+        .unwrap_or_else(|_| panic!("could not read {}", name));
     let source = Rc::new(Source { name, text });
 
     let mut tree = Tree::new();
@@ -96,5 +104,16 @@ fn main() {
         tree.children.push(child);
     }
 
-    println!("{}", source.text);
+    let mut passes: Vec<&dyn Fn(&mut Tree)> = Vec::new();
+    passes.push(&remove_whitespace);
+    for pass in passes {
+        pass(&mut tree);
+    }
+
+    tree.print(0);
+}
+
+fn remove_whitespace(tree: &mut Tree) {
+    tree.children
+        .retain(|child| !child.data.get::<Token>().unwrap().chars().all(char::is_whitespace));
 }
