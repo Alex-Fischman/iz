@@ -105,11 +105,14 @@ fn main() {
     }
 
     let mut passes: Vec<Box<dyn Fn(&mut Tree)>> = Vec::new();
-
+    // tokenizing
     passes.push(Box::new(remove_comments));
     passes.push(Box::new(concat_alike_tokens(is_identifier)));
     passes.push(Box::new(concat_alike_tokens(is_operator)));
     passes.push(Box::new(remove_whitespace));
+    // parsing
+    passes.push(Box::new(match_brackets("(", ")")));
+    passes.push(Box::new(match_brackets("{", "}")));
     
     for pass in passes {
         pass(&mut tree);
@@ -156,4 +159,30 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
 
 fn remove_whitespace(tree: &mut Tree) {
     tree.children.retain(|child| !is_whitespace(child.data.get::<Token>().unwrap()));
+}
+
+fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        for child in &mut tree.children {
+            match_brackets(open, close)(child)
+        }
+        let mut indices = Vec::new(); // stack of open bracket indices
+        let mut i = 0;
+        while i < tree.children.len() {
+            let curr = tree.children[i].data.get::<Token>().unwrap();
+            if curr.deref() == open {
+                indices.push(i);
+            } else if curr.deref() == close {
+                let j = indices.pop().unwrap_or_else(|| panic!("extra {}", curr));
+                let mut cs: Vec<Tree> = tree.children.drain(j + 1 ..= i).collect();
+                cs.pop(); // remove closing bracket
+                tree.children[j].children.append(&mut cs);
+                i = j;
+            }
+            i += 1;
+        }
+        if let Some(j) = indices.pop() {
+            panic!("extra {}", tree.children[j].data.get::<Token>().unwrap())
+        }
+    }
 }
