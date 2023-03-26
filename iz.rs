@@ -113,6 +113,11 @@ fn main() {
     // parsing
     passes.push(Box::new(match_brackets("(", ")")));
     passes.push(Box::new(match_brackets("{", "}")));
+    passes.push(Box::new(unary_postfix("?")));
+    passes.push(Box::new(unary_postfix(":")));
+    passes.push(Box::new(unary_prefix("~")));
+    passes.push(Box::new(unary_prefix("$")));
+    passes.push(Box::new(unary_prefix("-")));
     // passes.push(Box::new(flatten_parens));
     
     for pass in passes {
@@ -184,6 +189,47 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
         }
         if let Some(j) = indices.pop() {
             panic!("extra {}", tree.children[j].data.get::<Token>().unwrap())
+        }
+    }
+}
+
+fn unary_postfix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        for child in &mut tree.children {
+            unary_postfix(name)(child)
+        }
+        let mut i = 0;
+        while i < tree.children.len() {
+            let curr = tree.children[i].data.get::<Token>().unwrap();
+            if curr.deref() == name {
+                if i == 0 {
+                    panic!("no argument for {}", curr)
+                }
+                let c = tree.children.remove(i - 1);
+                i -= 1;
+                tree.children[i].children.push(c);
+            }
+            i += 1;
+        }
+    }
+}
+
+fn unary_prefix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        for child in &mut tree.children {
+            unary_prefix(name)(child)
+        }
+        let mut i = tree.children.len().wrapping_sub(1);
+        while i < tree.children.len() {
+            let curr = tree.children[i].data.get::<Token>().unwrap();
+            if curr.deref() == name {
+                if i + 1 == tree.children.len() {
+                    panic!("no argument for {}", curr)
+                }
+                let c = tree.children.remove(i + 1);
+                tree.children[i].children.push(c);
+            }
+            i = i.wrapping_sub(1);
         }
     }
 }
