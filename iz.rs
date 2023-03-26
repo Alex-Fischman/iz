@@ -155,10 +155,10 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
             let prev = tree.children[i - 1].data.get::<Token>().unwrap();
             if alike(curr) && alike(prev) && curr.source == prev.source && curr.lo == prev.hi {
                 let curr = tree.children.remove(i).data.remove::<Token>().unwrap();
-                tree.children[i - 1].data.get_mut::<Token>().unwrap().hi = curr.hi;
-            } else {
-                i += 1;
+                i -= 1;
+                tree.children[i].data.get_mut::<Token>().unwrap().hi = curr.hi;
             }
+            i += 1;
         }
     }
 }
@@ -169,9 +169,7 @@ fn remove_whitespace(tree: &mut Tree) {
 
 fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        for child in &mut tree.children {
-            match_brackets(open, close)(child)
-        }
+        tree.children.iter_mut().for_each(|child| match_brackets(open, close)(child));
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
         while i < tree.children.len() {
@@ -195,9 +193,7 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
 
 fn unary_postfix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        for child in &mut tree.children {
-            unary_postfix(name)(child)
-        }
+        tree.children.iter_mut().for_each(|child| unary_postfix(name)(child));
         let mut i = 0;
         while i < tree.children.len() {
             let curr = tree.children[i].data.get::<Token>().unwrap();
@@ -216,9 +212,7 @@ fn unary_postfix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
 
 fn unary_prefix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        for child in &mut tree.children {
-            unary_prefix(name)(child)
-        }
+        tree.children.iter_mut().for_each(|child| unary_prefix(name)(child));
         let mut i = tree.children.len().wrapping_sub(1);
         while i < tree.children.len() {
             let curr = tree.children[i].data.get::<Token>().unwrap();
@@ -235,9 +229,7 @@ fn unary_prefix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
 }
 
 fn flatten_parens(tree: &mut Tree) {
-    for child in &mut tree.children {
-        flatten_parens(child)
-    }
+    tree.children.iter_mut().for_each(|child| flatten_parens(child));
     let mut i = 0;
     while i < tree.children.len() {
         if tree.children[i].data.get::<Token>().unwrap().deref() == "(" {
