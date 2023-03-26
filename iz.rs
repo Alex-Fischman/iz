@@ -113,13 +113,13 @@ fn main() {
     // parsing
     passes.push(Box::new(match_brackets("(", ")")));
     passes.push(Box::new(match_brackets("{", "}")));
-    passes.push(Box::new(unary_postfix("?")));
-    passes.push(Box::new(unary_postfix(":")));
-    passes.push(Box::new(unary_prefix("~")));
-    passes.push(Box::new(unary_prefix("$")));
-    passes.push(Box::new(unary_prefix("-")));
-    // passes.push(Box::new(flatten_parens));
-    
+    passes.push(Box::new(parse_operator("?", Postfix)));
+    passes.push(Box::new(parse_operator(":", Postfix)));
+    passes.push(Box::new(parse_operator("~", Prefix)));
+    passes.push(Box::new(parse_operator("$", Prefix)));
+    passes.push(Box::new(parse_operator("-", Prefix)));
+    passes.push(Box::new(parse_operator("+", InfixLeft)));
+
     for pass in passes {
         pass(&mut tree);
     }
@@ -191,54 +191,40 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
     }
 }
 
-fn unary_postfix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
-    move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(|child| unary_postfix(name)(child));
-        let mut i = 0;
-        while i < tree.children.len() {
-            let curr = tree.children[i].data.get::<Token>().unwrap();
-            if curr.deref() == name {
-                if i == 0 {
-                    panic!("no argument for {}", curr)
-                }
-                let c = tree.children.remove(i - 1);
-                i -= 1;
-                tree.children[i].children.push(c);
-            }
-            i += 1;
-        }
-    }
-}
+use Operator::*;
+#[derive(Clone, Copy)]
+enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
 
-fn unary_prefix<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
+fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(|child| unary_prefix(name)(child));
-        let mut i = tree.children.len().wrapping_sub(1);
+        tree.children.iter_mut().for_each(|child| parse_operator(name, operator)(child));
+        let mut i = match operator {
+            Postfix | InfixLeft => 0,
+            Prefix | InfixRight => tree.children.len().wrapping_sub(1),
+        };
         while i < tree.children.len() {
-            let curr = tree.children[i].data.get::<Token>().unwrap();
+            let curr = tree.children[i].data.get::<Token>().unwrap().clone();
             if curr.deref() == name {
-                if i + 1 == tree.children.len() {
-                    panic!("no argument for {}", curr)
+                let mut args = Vec::new();
+                if matches!(operator, Postfix | InfixLeft | InfixRight) {
+                    if i == 0 {
+                        panic!("no argument for {}", curr)
+                    }
+                    args.push(tree.children.remove(i - 1));
+                    i -= 1;
                 }
-                let c = tree.children.remove(i + 1);
-                tree.children[i].children.push(c);
+                if matches!(operator, Prefix | InfixLeft | InfixRight) {
+                    if i + 1 == tree.children.len(){
+                        panic!("no argument for {}", curr)
+                    }
+                    args.push(tree.children.remove(i + 1));
+                }
+                tree.children[i].children.append(&mut args);
             }
-            i = i.wrapping_sub(1);
-        }
-    }
-}
-
-fn flatten_parens(tree: &mut Tree) {
-    tree.children.iter_mut().for_each(|child| flatten_parens(child));
-    let mut i = 0;
-    while i < tree.children.len() {
-        if tree.children[i].data.get::<Token>().unwrap().deref() == "(" {
-            let cs: Vec<_> = tree.children[i].children.drain(..).collect();
-            let l = cs.len();
-            tree.children.splice(i..=i, cs);
-            i += l;
-        } else {
-            i += 1;
+            i = match operator {
+                Postfix | InfixLeft => i + 1,
+                Prefix | InfixRight => i.wrapping_sub(1),
+            };
         }
     }
 }
