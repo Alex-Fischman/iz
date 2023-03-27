@@ -124,6 +124,14 @@ fn main() {
     passes.push(Box::new(unroll_children("(", false)));
     passes.push(Box::new(unroll_children("-", true)));
     passes.push(Box::new(unroll_children("+", true)));
+    // compile
+    passes.push(Box::new(compile_push));
+    passes.push(Box::new(compile_move));
+    passes.push(Box::new(compile_copy));
+    passes.push(Box::new(compile_add));
+    passes.push(Box::new(compile_neg));
+    passes.push(Box::new(compile_jumpz));
+    passes.push(Box::new(compile_label));
 
     for pass in &passes {
         run_pass(&mut tree, pass);
@@ -177,24 +185,22 @@ fn remove_whitespace(tree: &mut Tree) {
 }
 
 fn integer_literals(tree: &mut Tree) {
-    let token = match tree.data.get::<Token>() {
-        Some(token) => token,
-        None => return,
-    };
-    let mut chars = token.deref().chars().peekable();
-    let is_negative = chars.peek() == Some(&'-');
-    if is_negative {
-        chars.next().unwrap();
-    }
-    let mut value = 0;
-    for c in chars {
-        match c {
-            '_' => continue,
-            '0'..='9' => value = 10 * value + (c as i64 - '0' as i64),
-            _ => return,
+    if let Some(token) = tree.data.get::<Token>() {
+        let mut chars = token.deref().chars().peekable();
+        let is_negative = chars.peek() == Some(&'-');
+        if is_negative {
+            chars.next().unwrap();
         }
+        let mut value = 0;
+        for c in chars {
+            match c {
+                '_' => continue,
+                '0'..='9' => value = 10 * value + (c as i64 - '0' as i64),
+                _ => return,
+            }
+        }
+        tree.data.insert::<i64>(if is_negative { -value } else { value });
     }
-    tree.data.insert::<i64>(if is_negative { -value } else { value });
 }
 
 fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
@@ -312,11 +318,24 @@ impl Instruction for Push {
         i.stack[i.sp] = self.0;
     }
 }
+fn compile_push(tree: &mut Tree) {
+    if let Some(int) = tree.data.get::<i64>() {
+        tree.data.insert::<Box<dyn Instruction>>(Box::new(Push(*int)));
+    }
+}
 
 struct Move(i64);
 impl Instruction for Move {
     fn interpret(&self, i: &mut Interpreter) {
         i.sp -= self.0;
+    }
+}
+fn compile_move(tree: &mut Tree) {
+    if let Some(token) = tree.data.get::<Token>() {
+        if token.deref() == "~" {
+            let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Move(i)));
+        }
     }
 }
 
@@ -327,12 +346,27 @@ impl Instruction for Copy {
         i.sp += 1;
     }
 }
+fn compile_copy(tree: &mut Tree) {
+    if let Some(token) = tree.data.get::<Token>() {
+        if token.deref() == "$" {
+            let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Copy(i)));
+        }
+    }
+}
 
 struct Add;
 impl Instruction for Add {
     fn interpret(&self, i: &mut Interpreter) {
         i.sp -= 1;
         i.stack[i.sp] += i.stack[i.sp + 1];
+    }
+}
+fn compile_add(tree: &mut Tree) {
+    if let Some(token) = tree.data.get::<Token>() {
+        if token.deref() == "+" {
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Add));
+        }
     }
 }
 
@@ -342,11 +376,11 @@ impl Instruction for Neg {
         i.stack[i.sp] = -i.stack[i.sp];
     }
 }
-
-struct Ltz;
-impl Instruction for Ltz {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.stack[i.sp] = (i.stack[i.sp] < 0) as i64;
+fn compile_neg(tree: &mut Tree) {
+    if let Some(token) = tree.data.get::<Token>() {
+        if token.deref() == "-" {
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Neg));
+        }
     }
 }
 
@@ -359,8 +393,24 @@ impl Instruction for Jumpz {
         i.sp -= 1;
     }
 }
+fn compile_jumpz(tree: &mut Tree) {
+    if let Some(token) = tree.data.get::<Token>() {
+        if token.deref() == "?" {
+            let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Jumpz(s.deref().to_owned())));
+        }
+    }
+}
 
 struct Label(String);
 impl Instruction for Label {
     fn interpret(&self, _i: &mut Interpreter) {}
+}
+fn compile_label(tree: &mut Tree) {
+    if let Some(token) = tree.data.get::<Token>() {
+        if token.deref() == ":" {
+            let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Label(s.deref().to_owned())));
+        }
+    }
 }
