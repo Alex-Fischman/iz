@@ -197,22 +197,46 @@ fn remove_whitespace(tree: &mut Tree) {
 }
 
 fn integer_literals(tree: &mut Tree) {
-    'outer: for tree in &mut tree.children {
+    for tree in &mut tree.children {
         if let Some(token) = tree.data.get::<Token>() {
             let mut chars = token.deref().chars().peekable();
-            let is_negative = chars.peek() == Some(&'-');
-            if is_negative {
-                chars.next().unwrap();
-            }
-            let mut value = 0;
-            'inner: for c in chars {
-                match c {
-                    '0'..='9' => value = 10 * value + (c as i64 - '0' as i64),
-                    '_' => continue 'inner,
-                    _ => continue 'outer,
+            let is_negative = match chars.peek() {
+                Some('-') => {
+                    chars.next().unwrap();
+                    true
                 }
+                _ => false,
+            };
+            if matches!(chars.peek(), Some('0'..='9')) {
+                let base = match chars.peek() {
+                    Some('1'..='9') => 10,
+                    Some('0') => {
+                        chars.next().unwrap();
+                        match chars.next() {
+                            None => 10,
+                            Some('x') => 16,
+                            Some('b') => 2,
+                            Some(c) => panic!("unknown base prefix 0{} in {}", c, token),
+                        }
+                    },
+                    Some(_) | None => unreachable!(),
+                };
+                let mut value = 0;
+                for c in chars {
+                    let digit = match c {
+                        '0'..='9' => c as i64 - '0' as i64,
+                        'a'..='f' => c as i64 - 'a' as i64 + 10,
+                        'A'..='F' => c as i64 - 'A' as i64 + 10,
+                        '_' => continue,
+                        c => panic!("unknown digit {} in {}", c, token),
+                    };
+                    if digit >= base {
+                        panic!("digit {} too large for base {} in {}", c, base, token)
+                    }
+                    value = base * value + digit;
+                }
+                tree.data.insert::<i64>(if is_negative { -value } else { value });
             }
-            tree.data.insert::<i64>(if is_negative { -value } else { value });
         }
     }
 }

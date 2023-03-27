@@ -24,10 +24,10 @@ $0 # $ copies the nth-from-top element
 
 # here is an if else statement
 if_end?
-1234
+0b100
 0 else_end?
 if_end:
-5678
+0x100
 else_end:
 
 # operators with precedence and associativity
