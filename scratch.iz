@@ -3,7 +3,7 @@
 # here is a while loop
 1
 while_start:
-dup neg 3 add while_end?
+$0 neg 3 add while_end?
 # cond ends, body starts
 1 add
 (0 while_start?)
@@ -18,13 +18,9 @@ $0 # $ copies the nth-from-top element
 
 0
 
-dup
-swap
-drop
-
-dup = {$0}
-drop = {~1}
-swap = {$1 ~3 $-2 $-2}
+# dup = {$0}
+# drop = {~1}
+# swap = {$1 ~3 $-2 $-2}
 
 # here is an if else statement
 if_end?

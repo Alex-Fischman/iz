@@ -119,6 +119,10 @@ fn main() {
     passes.push(Box::new(parse_operator("-", Operator::Prefix)));
     passes.push(Box::new(parse_operator("+", Operator::InfixLeft)));
     passes.push(Box::new(parse_operator("=", Operator::InfixRight)));
+    // flatten
+    passes.push(Box::new(unroll_children("(", false)));
+    passes.push(Box::new(unroll_children("-", true)));
+    passes.push(Box::new(unroll_children("+", true)));
 
     for pass in passes {
         pass(&mut tree);
@@ -225,6 +229,25 @@ fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) +
                 Postfix | InfixLeft => i + 1,
                 Prefix | InfixRight => i.wrapping_sub(1),
             };
+        }
+    }
+}
+
+fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(|child| unroll_children(name, keep_parent)(child));
+        let mut i = 0;
+        while i < tree.children.len() {
+            if tree.children[i].data.get::<Token>().unwrap().deref() == name {
+                let cs: Vec<_> = tree.children[i].children.drain(..).collect();
+                let l = cs.len();
+                tree.children.splice(i..i, cs);
+                i += l;
+                if !keep_parent {
+                    tree.children.remove(i);
+                }
+            }
+            i += 1;
         }
     }
 }
