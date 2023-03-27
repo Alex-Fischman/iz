@@ -75,6 +75,7 @@ struct Tree {
 }
 
 fn main() {
+    // frontend
     let args: Vec<String> = std::env::args().collect();
     let name = args.get(1).unwrap_or_else(|| panic!("missing .iz file")).to_owned();
     let text = std::fs::read_to_string(&name)
@@ -107,11 +108,10 @@ fn main() {
     passes.push(Box::new(parse_operator("-", Operator::Prefix)));
     passes.push(Box::new(parse_operator("+", Operator::InfixLeft)));
     passes.push(Box::new(parse_operator("=", Operator::InfixRight)));
-    // flatten
+    // compiling
     passes.push(Box::new(unroll_children("(", false)));
     passes.push(Box::new(unroll_children("-", true)));
     passes.push(Box::new(unroll_children("+", true)));
-    // compile
     passes.push(Box::new(compile_push));
     passes.push(Box::new(compile_move));
     passes.push(Box::new(compile_copy));
@@ -128,6 +128,7 @@ fn main() {
         }
     }
 
+    // backend
     let mut labels = HashMap::new();
     let code: Vec<_> = tree.children.into_iter().enumerate().map(|(i, mut child)| {
         let token = child.data.get::<Token>().unwrap().clone();
@@ -177,9 +178,13 @@ fn remove_comments(tree: &mut Tree) {
     });
 }
 
-fn is_identifier(s: &str) -> bool { s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') }
+fn is_identifier(s: &str) -> bool {
+    s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+}
 
-fn is_whitespace(s: &str) -> bool { s.chars().all(char::is_whitespace) }
+fn is_whitespace(s: &str) -> bool {
+    s.chars().all(char::is_whitespace)
+}
 
 fn is_operator(s: &str) -> bool {
     s.chars().all(|c| !(c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c)))
@@ -293,11 +298,14 @@ fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) +
                 let l = cs.len();
                 tree.children.splice(i..i, cs);
                 i += l;
-                if !keep_parent {
+                if keep_parent {
+                    i += 1;
+                } else {
                     tree.children.remove(i);
                 }
+            } else {
+                i += 1;
             }
-            i += 1;
         }
     }
 }
