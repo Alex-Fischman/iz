@@ -124,8 +124,12 @@ fn main() {
     passes.push(Box::new(unroll_children("-", true)));
     passes.push(Box::new(unroll_children("+", true)));
 
-    for pass in passes {
-        pass(&mut tree);
+    for pass in &passes {
+        run_pass(&mut tree, pass);
+        fn run_pass<F: Fn(&mut Tree)>(tree: &mut Tree, pass: &F) {
+            tree.children.iter_mut().for_each(|child| run_pass(child, pass));
+            pass(tree);
+        }
     }
 
     tree.print(0);
@@ -173,7 +177,6 @@ fn remove_whitespace(tree: &mut Tree) {
 
 fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(|child| match_brackets(open, close)(child));
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
         while i < tree.children.len() {
@@ -201,7 +204,6 @@ enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
 fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) + 'a {
     use Operator::*;
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(|child| parse_operator(name, operator)(child));
         let mut i = match operator {
             Postfix | InfixLeft => 0,
             Prefix | InfixRight => tree.children.len().wrapping_sub(1),
@@ -235,7 +237,6 @@ fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) +
 
 fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(|child| unroll_children(name, keep_parent)(child));
         let mut i = 0;
         while i < tree.children.len() {
             if tree.children[i].data.get::<Token>().unwrap().deref() == name {
