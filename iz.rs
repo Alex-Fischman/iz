@@ -208,21 +208,27 @@ fn integer_literals(tree: &mut Tree) {
                 _ => false,
             };
             if matches!(chars.peek(), Some('0'..='9')) {
+                let mut value = 0;
                 let base = match chars.peek() {
                     Some('1'..='9') => 10,
                     Some('0') => {
                         chars.next().unwrap();
-                        match chars.next() {
+                        match chars.peek() {
                             None => 10,
-                            Some('x') => 16,
-                            Some('b') => 2,
+                            Some('x') => {
+                                chars.next().unwrap();
+                                16
+                            },
+                            Some('b') => {
+                                chars.next().unwrap();
+                                2
+                            },
                             Some('0'..='9') => 10,
                             Some(c) => panic!("unknown base prefix 0{} in {}", c, token),
                         }
                     },
                     Some(_) | None => unreachable!(),
                 };
-                let mut value = 0;
                 for c in chars {
                     let digit = match c {
                         '0'..='9' => c as i64 - '0' as i64,
