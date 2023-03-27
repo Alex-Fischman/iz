@@ -29,6 +29,7 @@ Macros:
 - all runtime functions are compile time functions
 - but some compile time functions will take compile-time-only args
 - compile passes are macros that take an AST and a Data object
+- compile passes should be able to schedule compile passes later in the pipeline
 
 Syntax:
 - arbitrary operator definitions
