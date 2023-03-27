@@ -126,27 +126,16 @@ fn main() {
     }
 
     // backend
-    let mut labels = HashMap::new();
-    let code: Vec<_> = tree.children.into_iter().enumerate().map(|(i, mut child)| {
+    let code: Vec<_> = tree.children.into_iter().map(|mut child| {
         let token = child.data.get::<Token>().unwrap().clone();
         if !child.children.is_empty() {
             panic!("after compilation should have finished, there was a child of {}", token)
         }
-        match child.data.remove::<Box<dyn Instruction>>() {
-            None => panic!("no instruction for {}", token),
-            Some(instruction) => {
-                if let Some(label) = instruction.as_any().downcast_ref::<Label>() {
-                    let old = labels.insert(label.0.clone(), i as i64);
-                    if old.is_some() {
-                        panic!("duplicate label for {}", token)
-                    }
-                }
-                instruction
-            }
-        }
+        child.data.remove::<Box<dyn Instruction>>()
+            .unwrap_or_else(|| panic!("no instruction for {}", token))
     }).collect();
     let mut i = Interpreter {
-        labels,
+        labels: tree.data.remove::<Labels>().unwrap(),
         pc: 0,
         stack: Memory(Vec::new()),
         sp: -1,
@@ -313,14 +302,12 @@ fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) +
 }
 
 struct Memory(Vec<i64>);
-
 impl std::ops::Index<i64> for Memory {
     type Output = i64;
     fn index(&self, i: i64) -> &i64 {
         &self.0[i as usize]
     }
 }
-
 impl std::ops::IndexMut<i64> for Memory {
     fn index_mut(&mut self, i: i64) -> &mut i64 {
         let i = i as usize;
@@ -331,22 +318,22 @@ impl std::ops::IndexMut<i64> for Memory {
     }
 }
 
+struct Labels(HashMap<String, i64>);
+
 struct Interpreter {
-    labels: HashMap<String, i64>,
+    labels: Labels,
     pc: i64,
     stack: Memory,
     sp: i64,
 }
 
 trait Instruction: std::fmt::Debug {
-    fn as_any(&self) -> &dyn Any; // used for accessing a specific instruction type
     fn interpret(&self, i: &mut Interpreter);
 }
 
 #[derive(Debug)]
 struct Push(i64);
 impl Instruction for Push {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, i: &mut Interpreter) {
         i.sp += 1;
         i.stack[i.sp] = self.0;
@@ -362,7 +349,6 @@ fn compile_push(tree: &mut Tree) {
 #[derive(Debug)]
 struct Move(i64);
 impl Instruction for Move {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, i: &mut Interpreter) {
         i.sp -= self.0;
     }
@@ -380,7 +366,6 @@ fn compile_move(tree: &mut Tree) {
 #[derive(Debug)]
 struct Copy(i64);
 impl Instruction for Copy {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, i: &mut Interpreter) {
         i.stack[i.sp + 1] = i.stack[i.sp - self.0];
         i.sp += 1;
@@ -399,7 +384,6 @@ fn compile_copy(tree: &mut Tree) {
 #[derive(Debug)]
 struct Add;
 impl Instruction for Add {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, i: &mut Interpreter) {
         i.sp -= 1;
         i.stack[i.sp] += i.stack[i.sp + 1];
@@ -417,7 +401,6 @@ fn compile_add(tree: &mut Tree) {
 #[derive(Debug)]
 struct Neg;
 impl Instruction for Neg {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, i: &mut Interpreter) {
         i.stack[i.sp] = -i.stack[i.sp];
     }
@@ -434,10 +417,9 @@ fn compile_neg(tree: &mut Tree) {
 #[derive(Debug)]
 struct Jumpz(String);
 impl Instruction for Jumpz {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, i: &mut Interpreter) {
         if i.stack[i.sp] == 0 {
-            i.pc = *i.labels.get(&self.0).unwrap_or_else(|| panic!("unknown label {}", self.0));
+            i.pc = *i.labels.0.get(&self.0).unwrap_or_else(|| panic!("unknown label {}", self.0));
         }
         i.sp -= 1;
     }
@@ -455,15 +437,21 @@ fn compile_jumpz(tree: &mut Tree) {
 #[derive(Debug)]
 struct Label(String);
 impl Instruction for Label {
-    fn as_any(&self) -> &dyn Any { self }
     fn interpret(&self, _i: &mut Interpreter) {}
 }
 fn compile_label(tree: &mut Tree) {
-    for tree in &mut tree.children {
-        if let Some(token) = tree.data.get::<Token>() {
-            if token.deref() == ":" {
-                let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
-                tree.data.insert::<Box<dyn Instruction>>(Box::new(Label(s.deref().to_owned())));
+    let mut labels = Labels(HashMap::new());
+    compile_label(tree, &mut labels);
+    tree.data.insert::<Labels>(labels);
+    fn compile_label(tree: &mut Tree, labels: &mut Labels) {    
+        for (i, tree) in tree.children.iter_mut().enumerate() {
+            if let Some(token) = tree.data.get::<Token>() {
+                if token.deref() == ":" {
+                    let s = tree.children.pop().unwrap().data.remove::<Token>();
+                    let s = s.unwrap().deref().to_owned();
+                    labels.0.insert(s.clone(), i as i64);
+                    tree.data.insert::<Box<dyn Instruction>>(Box::new(Label(s)));
+                }
             }
         }
     }
