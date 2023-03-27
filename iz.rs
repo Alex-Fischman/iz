@@ -109,6 +109,7 @@ fn main() {
     passes.push(Box::new(concat_alike_tokens(is_identifier)));
     passes.push(Box::new(concat_alike_tokens(is_operator)));
     passes.push(Box::new(remove_whitespace));
+    passes.push(Box::new(integer_literals));
     // parsing
     passes.push(Box::new(match_brackets("(", ")")));
     passes.push(Box::new(match_brackets("{", "}")));
@@ -173,6 +174,27 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
 
 fn remove_whitespace(tree: &mut Tree) {
     tree.children.retain(|child| !is_whitespace(child.data.get::<Token>().unwrap()));
+}
+
+fn integer_literals(tree: &mut Tree) {
+    let token = match tree.data.get::<Token>() {
+        Some(token) => token,
+        None => return,
+    };
+    let mut chars = token.deref().chars().peekable();
+    let is_negative = chars.peek() == Some(&'-');
+    if is_negative {
+        chars.next().unwrap();
+    }
+    let mut value = 0;
+    for c in chars {
+        match c {
+            '_' => continue,
+            '0'..='9' => value = 10 * value + (c as i64 - '0' as i64),
+            _ => return,
+        }
+    }
+    tree.data.insert::<i64>(if is_negative { -value } else { value });
 }
 
 fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
