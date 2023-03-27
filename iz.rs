@@ -216,6 +216,7 @@ fn integer_literals(tree: &mut Tree) {
                             None => 10,
                             Some('x') => 16,
                             Some('b') => 2,
+                            Some('0'..='9') => 10,
                             Some(c) => panic!("unknown base prefix 0{} in {}", c, token),
                         }
                     },
