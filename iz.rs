@@ -79,6 +79,35 @@ enum Pass {
     Func(Box<dyn Fn(&mut Tree)>),
 }
 
+use std::collections::VecDeque;
+struct Passes {
+    passes: VecDeque<Pass>,
+    names: HashMap<String, usize>,
+}
+
+impl Passes {
+    fn push_func<F: Fn(&mut Tree) + 'static>(&mut self, f: F) {
+        self.passes.push_back(Pass::Func(Box::new(f)))
+    }
+
+    fn push_name(&mut self, name: &str) {
+        self.names.insert(name.to_owned(), self.passes.len());
+        self.passes.push_back(Pass::Name(name.to_owned()))
+    }
+
+    fn pop_front(&mut self) -> Option<Pass> {
+        self.names.values_mut().for_each(|v| *v = v.wrapping_sub(1));
+        match self.passes.pop_front() {
+            None => None,
+            Some(Pass::Func(f)) => Some(Pass::Func(f)),
+            Some(Pass::Name(s)) => {
+                self.names.remove(&s);
+                Some(Pass::Name(s))
+            }
+        }
+    }
+}
+
 fn main() {
     // frontend
     let args: Vec<String> = std::env::args().collect();
@@ -96,39 +125,38 @@ fn main() {
         tree.children.push(child);
     }
 
-    use std::collections::VecDeque;
-    let mut passes = VecDeque::new();
-    passes.push_back(Pass::Name("tokenizing".to_owned()));
-    passes.push_back(Pass::Func(Box::new(remove_comments)));
-    passes.push_back(Pass::Func(Box::new(concat_alike_tokens(is_identifier))));
-    passes.push_back(Pass::Func(Box::new(concat_alike_tokens(is_operator))));
-    passes.push_back(Pass::Func(Box::new(remove_whitespace)));
-    passes.push_back(Pass::Func(Box::new(integer_literals)));
-    passes.push_back(Pass::Name("parsing".to_owned()));
-    passes.push_back(Pass::Func(Box::new(match_brackets("(", ")"))));
-    passes.push_back(Pass::Func(Box::new(match_brackets("{", "}"))));
-    passes.push_back(Pass::Func(Box::new(parse_operator("?", Operator::Postfix))));
-    passes.push_back(Pass::Func(Box::new(parse_operator(":", Operator::Postfix))));
-    passes.push_back(Pass::Func(Box::new(parse_operator("~", Operator::Prefix))));
-    passes.push_back(Pass::Func(Box::new(parse_operator("$", Operator::Prefix))));
-    passes.push_back(Pass::Func(Box::new(parse_operator("-", Operator::Prefix))));
-    passes.push_back(Pass::Func(Box::new(parse_operator("+", Operator::InfixLeft))));
-    passes.push_back(Pass::Func(Box::new(parse_operator("=", Operator::InfixRight))));
-    passes.push_back(Pass::Name("flattening".to_owned()));
-    passes.push_back(Pass::Func(Box::new(unroll_children("(", false))));
-    passes.push_back(Pass::Func(Box::new(unroll_children("-", true))));
-    passes.push_back(Pass::Func(Box::new(unroll_children("+", true))));
-    passes.push_back(Pass::Name("compiling".to_owned()));
-    passes.push_back(Pass::Func(Box::new(compile_push)));
-    passes.push_back(Pass::Func(Box::new(compile_move)));
-    passes.push_back(Pass::Func(Box::new(compile_copy)));
-    passes.push_back(Pass::Func(Box::new(compile_add)));
-    passes.push_back(Pass::Func(Box::new(compile_neg)));
-    passes.push_back(Pass::Func(Box::new(compile_jumpz)));
-    passes.push_back(Pass::Func(Box::new(compile_label)));
+    let mut passes = Passes { passes: VecDeque::new(), names: HashMap::new() };
+    passes.push_name("tokenizing");
+    passes.push_func(remove_comments);
+    passes.push_func(concat_alike_tokens(is_identifier));
+    passes.push_func(concat_alike_tokens(is_operator));
+    passes.push_func(remove_whitespace);
+    passes.push_func(integer_literals);
+    passes.push_name("parsing");
+    passes.push_func(match_brackets("(", ")"));
+    passes.push_func(match_brackets("{", "}"));
+    passes.push_func(parse_operator("?", Operator::Postfix));
+    passes.push_func(parse_operator(":", Operator::Postfix));
+    passes.push_func(parse_operator("~", Operator::Prefix));
+    passes.push_func(parse_operator("$", Operator::Prefix));
+    passes.push_func(parse_operator("-", Operator::Prefix));
+    passes.push_func(parse_operator("+", Operator::InfixLeft));
+    passes.push_func(parse_operator("=", Operator::InfixRight));
+    passes.push_name("flattening");
+    passes.push_func(unroll_children("(", false));
+    passes.push_func(unroll_children("-", true));
+    passes.push_func(unroll_children("+", true));
+    passes.push_name("compiling");
+    passes.push_func(compile_push);
+    passes.push_func(compile_move);
+    passes.push_func(compile_copy);
+    passes.push_func(compile_add);
+    passes.push_func(compile_neg);
+    passes.push_func(compile_jumpz);
+    passes.push_func(compile_label);
 
-    tree.data.insert::<VecDeque<Pass>>(passes);
-    while let Some(pass) = tree.data.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
+    tree.data.insert::<Passes>(passes);
+    while let Some(pass) = tree.data.get_mut::<Passes>().unwrap().pop_front() {
         match pass {
             Pass::Name(_) => {},
             Pass::Func(f) => f(&mut tree),
