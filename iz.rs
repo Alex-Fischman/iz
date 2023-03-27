@@ -108,10 +108,11 @@ fn main() {
     passes.push(Box::new(parse_operator("-", Operator::Prefix)));
     passes.push(Box::new(parse_operator("+", Operator::InfixLeft)));
     passes.push(Box::new(parse_operator("=", Operator::InfixRight)));
-    // compiling
+    // flattening
     passes.push(Box::new(unroll_children("(", false)));
     passes.push(Box::new(unroll_children("-", true)));
     passes.push(Box::new(unroll_children("+", true)));
+    // compiling
     passes.push(Box::new(compile_push));
     passes.push(Box::new(compile_move));
     passes.push(Box::new(compile_copy));
@@ -121,11 +122,7 @@ fn main() {
     passes.push(Box::new(compile_label));
 
     for pass in &passes {
-        run_pass(&mut tree, pass);
-        fn run_pass<F: Fn(&mut Tree)>(tree: &mut Tree, pass: &F) {
-            tree.children.iter_mut().for_each(|child| run_pass(child, pass));
-            pass(tree);
-        }
+        pass(&mut tree)
     }
 
     // backend
@@ -211,26 +208,29 @@ fn remove_whitespace(tree: &mut Tree) {
 }
 
 fn integer_literals(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        let mut chars = token.deref().chars().peekable();
-        let is_negative = chars.peek() == Some(&'-');
-        if is_negative {
-            chars.next().unwrap();
-        }
-        let mut value = 0;
-        for c in chars {
-            match c {
-                '_' => continue,
-                '0'..='9' => value = 10 * value + (c as i64 - '0' as i64),
-                _ => return,
+    'outer: for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            let mut chars = token.deref().chars().peekable();
+            let is_negative = chars.peek() == Some(&'-');
+            if is_negative {
+                chars.next().unwrap();
             }
+            let mut value = 0;
+            'inner: for c in chars {
+                match c {
+                    '0'..='9' => value = 10 * value + (c as i64 - '0' as i64),
+                    '_' => continue 'inner,
+                    _ => continue 'outer,
+                }
+            }
+            tree.data.insert::<i64>(if is_negative { -value } else { value });
         }
-        tree.data.insert::<i64>(if is_negative { -value } else { value });
     }
 }
 
 fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(match_brackets(open, close));
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
         while i < tree.children.len() {
@@ -258,6 +258,7 @@ enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
 fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) + 'a {
     use Operator::*;
     move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(parse_operator(name, operator));
         let mut i = match operator {
             Postfix | InfixLeft => 0,
             Prefix | InfixRight => tree.children.len().wrapping_sub(1),
@@ -274,7 +275,7 @@ fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) +
                     i -= 1;
                 }
                 if matches!(operator, Prefix | InfixLeft | InfixRight) {
-                    if i + 1 == tree.children.len(){
+                    if i + 1 == tree.children.len() {
                         panic!("no argument for {}", curr)
                     }
                     args.push(tree.children.remove(i + 1));
@@ -291,6 +292,7 @@ fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) +
 
 fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(unroll_children(name, keep_parent));
         let mut i = 0;
         while i < tree.children.len() {
             if tree.children[i].data.get::<Token>().unwrap().deref() == name {
@@ -351,8 +353,10 @@ impl Instruction for Push {
     }
 }
 fn compile_push(tree: &mut Tree) {
-    if let Some(int) = tree.data.get::<i64>() {
-        tree.data.insert::<Box<dyn Instruction>>(Box::new(Push(*int)));
+    for tree in &mut tree.children {
+        if let Some(int) = tree.data.get::<i64>() {
+            tree.data.insert::<Box<dyn Instruction>>(Box::new(Push(*int)));
+        }
     }
 }
 #[derive(Debug)]
@@ -364,10 +368,12 @@ impl Instruction for Move {
     }
 }
 fn compile_move(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        if token.deref() == "~" {
-            let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
-            tree.data.insert::<Box<dyn Instruction>>(Box::new(Move(i)));
+    for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            if token.deref() == "~" {
+                let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
+                tree.data.insert::<Box<dyn Instruction>>(Box::new(Move(i)));
+            }
         }
     }
 }
@@ -381,10 +387,12 @@ impl Instruction for Copy {
     }
 }
 fn compile_copy(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        if token.deref() == "$" {
-            let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
-            tree.data.insert::<Box<dyn Instruction>>(Box::new(Copy(i)));
+    for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            if token.deref() == "$" {
+                let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
+                tree.data.insert::<Box<dyn Instruction>>(Box::new(Copy(i)));
+            }
         }
     }
 }
@@ -398,9 +406,11 @@ impl Instruction for Add {
     }
 }
 fn compile_add(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        if token.deref() == "+" || token.deref() == "add" {
-            tree.data.insert::<Box<dyn Instruction>>(Box::new(Add));
+    for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            if token.deref() == "+" || token.deref() == "add" {
+                tree.data.insert::<Box<dyn Instruction>>(Box::new(Add));
+            }
         }
     }
 }
@@ -413,9 +423,11 @@ impl Instruction for Neg {
     }
 }
 fn compile_neg(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        if token.deref() == "-" || token.deref() == "neg" {
-            tree.data.insert::<Box<dyn Instruction>>(Box::new(Neg));
+    for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            if token.deref() == "-" || token.deref() == "neg" {
+                tree.data.insert::<Box<dyn Instruction>>(Box::new(Neg));
+            }
         }
     }
 }
@@ -431,10 +443,12 @@ impl Instruction for Jumpz {
     }
 }
 fn compile_jumpz(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        if token.deref() == "?" {
-            let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
-            tree.data.insert::<Box<dyn Instruction>>(Box::new(Jumpz(s.deref().to_owned())));
+    for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            if token.deref() == "?" {
+                let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
+                tree.data.insert::<Box<dyn Instruction>>(Box::new(Jumpz(s.deref().to_owned())));
+            }
         }
     }
 }
@@ -445,10 +459,12 @@ impl Instruction for Label {
     fn interpret(&self, _i: &mut Interpreter) {}
 }
 fn compile_label(tree: &mut Tree) {
-    if let Some(token) = tree.data.get::<Token>() {
-        if token.deref() == ":" {
-            let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
-            tree.data.insert::<Box<dyn Instruction>>(Box::new(Label(s.deref().to_owned())));
+    for tree in &mut tree.children {
+        if let Some(token) = tree.data.get::<Token>() {
+            if token.deref() == ":" {
+                let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
+                tree.data.insert::<Box<dyn Instruction>>(Box::new(Label(s.deref().to_owned())));
+            }
         }
     }
 }
