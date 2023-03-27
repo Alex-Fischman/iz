@@ -74,37 +74,27 @@ struct Tree {
     children: Vec<Tree>,
 }
 
-enum Pass {
-    Name(String),
-    Func(Box<dyn Fn(&mut Tree)>),
-}
-
 use std::collections::VecDeque;
 struct Passes {
-    passes: VecDeque<Pass>,
+    passes: VecDeque<Box<dyn Fn(&mut Tree)>>,
     names: HashMap<String, usize>,
 }
 
 impl Passes {
-    fn push_func<F: Fn(&mut Tree) + 'static>(&mut self, f: F) {
-        self.passes.push_back(Pass::Func(Box::new(f)))
+    fn func<F: Fn(&mut Tree) + 'static>(&mut self, f: F) {
+        self.passes.push_back(Box::new(f))
     }
 
-    fn push_name(&mut self, name: &str) {
-        self.names.insert(name.to_owned(), self.passes.len());
-        self.passes.push_back(Pass::Name(name.to_owned()))
-    }
-
-    fn pop_front(&mut self) -> Option<Pass> {
-        self.names.values_mut().for_each(|v| *v = v.wrapping_sub(1));
-        match self.passes.pop_front() {
-            None => None,
-            Some(Pass::Func(f)) => Some(Pass::Func(f)),
-            Some(Pass::Name(s)) => {
-                self.names.remove(&s);
-                Some(Pass::Name(s))
-            }
+    fn name(&mut self, name: &str) {
+        let old = self.names.insert(name.to_owned(), self.passes.len());
+        if old.is_some() {
+            panic!("duplicate pass name {}", name)
         }
+    }
+
+    fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Tree)>> {
+        self.names.values_mut().for_each(|v| *v = v.wrapping_sub(1));
+        self.passes.pop_front()
     }
 }
 
@@ -126,41 +116,38 @@ fn main() {
     }
 
     let mut passes = Passes { passes: VecDeque::new(), names: HashMap::new() };
-    passes.push_name("tokenizing");
-    passes.push_func(remove_comments);
-    passes.push_func(concat_alike_tokens(is_identifier));
-    passes.push_func(concat_alike_tokens(is_operator));
-    passes.push_func(remove_whitespace);
-    passes.push_func(integer_literals);
-    passes.push_name("parsing");
-    passes.push_func(match_brackets("(", ")"));
-    passes.push_func(match_brackets("{", "}"));
-    passes.push_func(parse_operator("?", Operator::Postfix));
-    passes.push_func(parse_operator(":", Operator::Postfix));
-    passes.push_func(parse_operator("~", Operator::Prefix));
-    passes.push_func(parse_operator("$", Operator::Prefix));
-    passes.push_func(parse_operator("-", Operator::Prefix));
-    passes.push_func(parse_operator("+", Operator::InfixLeft));
-    passes.push_func(parse_operator("=", Operator::InfixRight));
-    passes.push_name("flattening");
-    passes.push_func(unroll_children("(", false));
-    passes.push_func(unroll_children("-", true));
-    passes.push_func(unroll_children("+", true));
-    passes.push_name("compiling");
-    passes.push_func(compile_push);
-    passes.push_func(compile_move);
-    passes.push_func(compile_copy);
-    passes.push_func(compile_add);
-    passes.push_func(compile_neg);
-    passes.push_func(compile_jumpz);
-    passes.push_func(compile_label);
+    passes.name("tokenizing");
+    passes.func(remove_comments);
+    passes.func(concat_alike_tokens(is_identifier));
+    passes.func(concat_alike_tokens(is_operator));
+    passes.func(remove_whitespace);
+    passes.func(integer_literals);
+    passes.name("parsing");
+    passes.func(match_brackets("(", ")"));
+    passes.func(match_brackets("{", "}"));
+    passes.func(parse_operator("?", Operator::Postfix));
+    passes.func(parse_operator(":", Operator::Postfix));
+    passes.func(parse_operator("~", Operator::Prefix));
+    passes.func(parse_operator("$", Operator::Prefix));
+    passes.func(parse_operator("-", Operator::Prefix));
+    passes.func(parse_operator("+", Operator::InfixLeft));
+    passes.func(parse_operator("=", Operator::InfixRight));
+    passes.name("flattening");
+    passes.func(unroll_children("(", false));
+    passes.func(unroll_children("-", true));
+    passes.func(unroll_children("+", true));
+    passes.name("compiling");
+    passes.func(compile_push);
+    passes.func(compile_move);
+    passes.func(compile_copy);
+    passes.func(compile_add);
+    passes.func(compile_neg);
+    passes.func(compile_jumpz);
+    passes.func(compile_label);
 
     tree.data.insert::<Passes>(passes);
     while let Some(pass) = tree.data.get_mut::<Passes>().unwrap().pop_front() {
-        match pass {
-            Pass::Name(_) => {},
-            Pass::Func(f) => f(&mut tree),
-        }
+        pass(&mut tree)
     }
 
     // backend
