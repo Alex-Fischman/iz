@@ -74,8 +74,10 @@ struct Tree {
     children: Vec<Tree>,
 }
 
-use std::collections::VecDeque;
-struct Passes(VecDeque<Box<dyn Fn(&mut Tree)>>);
+enum Pass {
+    Name(String),
+    Func(Box<dyn Fn(&mut Tree)>),
+}
 
 fn main() {
     // frontend
@@ -94,39 +96,43 @@ fn main() {
         tree.children.push(child);
     }
 
-    let mut passes = Passes(VecDeque::new());
-    // tokenizing
-    passes.0.push_back(Box::new(remove_comments));
-    passes.0.push_back(Box::new(concat_alike_tokens(is_identifier)));
-    passes.0.push_back(Box::new(concat_alike_tokens(is_operator)));
-    passes.0.push_back(Box::new(remove_whitespace));
-    passes.0.push_back(Box::new(integer_literals));
-    // parsing
-    passes.0.push_back(Box::new(match_brackets("(", ")")));
-    passes.0.push_back(Box::new(match_brackets("{", "}")));
-    passes.0.push_back(Box::new(parse_operator("?", Operator::Postfix)));
-    passes.0.push_back(Box::new(parse_operator(":", Operator::Postfix)));
-    passes.0.push_back(Box::new(parse_operator("~", Operator::Prefix)));
-    passes.0.push_back(Box::new(parse_operator("$", Operator::Prefix)));
-    passes.0.push_back(Box::new(parse_operator("-", Operator::Prefix)));
-    passes.0.push_back(Box::new(parse_operator("+", Operator::InfixLeft)));
-    passes.0.push_back(Box::new(parse_operator("=", Operator::InfixRight)));
-    // flattening
-    passes.0.push_back(Box::new(unroll_children("(", false)));
-    passes.0.push_back(Box::new(unroll_children("-", true)));
-    passes.0.push_back(Box::new(unroll_children("+", true)));
-    // compiling
-    passes.0.push_back(Box::new(compile_push));
-    passes.0.push_back(Box::new(compile_move));
-    passes.0.push_back(Box::new(compile_copy));
-    passes.0.push_back(Box::new(compile_add));
-    passes.0.push_back(Box::new(compile_neg));
-    passes.0.push_back(Box::new(compile_jumpz));
-    passes.0.push_back(Box::new(compile_label));
+    use std::collections::VecDeque;
+    let mut passes = VecDeque::new();
+    passes.push_back(Pass::Name("tokenizing".to_owned()));
+    passes.push_back(Pass::Func(Box::new(remove_comments)));
+    passes.push_back(Pass::Func(Box::new(concat_alike_tokens(is_identifier))));
+    passes.push_back(Pass::Func(Box::new(concat_alike_tokens(is_operator))));
+    passes.push_back(Pass::Func(Box::new(remove_whitespace)));
+    passes.push_back(Pass::Func(Box::new(integer_literals)));
+    passes.push_back(Pass::Name("parsing".to_owned()));
+    passes.push_back(Pass::Func(Box::new(match_brackets("(", ")"))));
+    passes.push_back(Pass::Func(Box::new(match_brackets("{", "}"))));
+    passes.push_back(Pass::Func(Box::new(parse_operator("?", Operator::Postfix))));
+    passes.push_back(Pass::Func(Box::new(parse_operator(":", Operator::Postfix))));
+    passes.push_back(Pass::Func(Box::new(parse_operator("~", Operator::Prefix))));
+    passes.push_back(Pass::Func(Box::new(parse_operator("$", Operator::Prefix))));
+    passes.push_back(Pass::Func(Box::new(parse_operator("-", Operator::Prefix))));
+    passes.push_back(Pass::Func(Box::new(parse_operator("+", Operator::InfixLeft))));
+    passes.push_back(Pass::Func(Box::new(parse_operator("=", Operator::InfixRight))));
+    passes.push_back(Pass::Name("flattening".to_owned()));
+    passes.push_back(Pass::Func(Box::new(unroll_children("(", false))));
+    passes.push_back(Pass::Func(Box::new(unroll_children("-", true))));
+    passes.push_back(Pass::Func(Box::new(unroll_children("+", true))));
+    passes.push_back(Pass::Name("compiling".to_owned()));
+    passes.push_back(Pass::Func(Box::new(compile_push)));
+    passes.push_back(Pass::Func(Box::new(compile_move)));
+    passes.push_back(Pass::Func(Box::new(compile_copy)));
+    passes.push_back(Pass::Func(Box::new(compile_add)));
+    passes.push_back(Pass::Func(Box::new(compile_neg)));
+    passes.push_back(Pass::Func(Box::new(compile_jumpz)));
+    passes.push_back(Pass::Func(Box::new(compile_label)));
 
-    tree.data.insert::<Passes>(passes);
-    while let Some(pass) = tree.data.get_mut::<Passes>().unwrap().0.pop_front() {
-        pass(&mut tree)
+    tree.data.insert::<VecDeque<Pass>>(passes);
+    while let Some(pass) = tree.data.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
+        match pass {
+            Pass::Name(_) => {},
+            Pass::Func(f) => f(&mut tree),
+        }
     }
 
     // backend
