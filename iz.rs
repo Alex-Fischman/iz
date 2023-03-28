@@ -125,13 +125,11 @@ fn main() {
     passes.name("parsing");
     passes.func(match_brackets("(", ")"));
     passes.func(match_brackets("{", "}"));
-    passes.func(parse_operator("?", Operator::Postfix));
-    passes.func(parse_operator(":", Operator::Postfix));
-    passes.func(parse_operator("~", Operator::Prefix));
-    passes.func(parse_operator("$", Operator::Prefix));
-    passes.func(parse_operator("-", Operator::Prefix));
-    passes.func(parse_operator("+", Operator::InfixLeft));
-    passes.func(parse_operator("=", Operator::InfixRight));
+    passes.func(parse_operators(&["?", ":"], Operator::Postfix));
+    passes.func(parse_operators(&["~", "$"], Operator::Prefix));
+    passes.func(parse_operators(&["-"], Operator::Prefix));
+    passes.func(parse_operators(&["+"], Operator::InfixLeft));
+    passes.func(parse_operators(&["="], Operator::InfixRight));
     passes.name("flattening");
     passes.func(unroll_brackets("("));
     passes.func(unroll_operator("-"));
@@ -299,17 +297,17 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
 #[derive(Clone, Copy)]
 enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
 
-fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) + 'a {
+fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Tree) + 'a {
     use Operator::*;
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(parse_operator(name, operator));
+        tree.children.iter_mut().for_each(parse_operators(names, operator));
         let mut i = match operator {
             Postfix | InfixLeft => 0,
             Prefix | InfixRight => tree.children.len().wrapping_sub(1),
         };
         while i < tree.children.len() {
             let curr = tree.children[i].data.get::<Token>().unwrap().clone();
-            if curr.deref() == name {
+            if names.contains(&curr.deref()) {
                 let mut args = Vec::new();
                 if matches!(operator, Postfix | InfixLeft | InfixRight) {
                     if i == 0 {
