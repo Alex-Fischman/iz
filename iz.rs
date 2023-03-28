@@ -130,7 +130,7 @@ fn main() {
     passes.func(parse_operators(&["-"], Operator::Prefix));
     passes.func(parse_operators(&["+"], Operator::InfixLeft));
     passes.func(parse_operators(&["="], Operator::InfixRight));
-    passes.name("flattening");
+    passes.name("unrolling");
     passes.func(unroll_brackets("("));
     passes.func(unroll_operator("-"));
     passes.func(unroll_operator("+"));
