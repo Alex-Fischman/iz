@@ -133,9 +133,9 @@ fn main() {
     passes.func(parse_operator("+", Operator::InfixLeft));
     passes.func(parse_operator("=", Operator::InfixRight));
     passes.name("flattening");
-    passes.func(unroll_children("(", false));
-    passes.func(unroll_children("-", true));
-    passes.func(unroll_children("+", true));
+    passes.func(unroll_brackets("("));
+    passes.func(unroll_operator("-"));
+    passes.func(unroll_operator("+"));
     passes.name("compiling");
     passes.func(compile_push);
     passes.func(compile_move);
@@ -334,9 +334,26 @@ fn parse_operator<'a>(name: &'a str, operator: Operator) -> impl Fn(&mut Tree) +
     }
 }
 
-fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) + 'a {
+fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(unroll_children(name, keep_parent));
+        tree.children.iter_mut().for_each(unroll_brackets(name));
+        let mut i = 0;
+        while i < tree.children.len() {
+            if tree.children[i].data.get::<Token>().unwrap().deref() == name {
+                let cs: Vec<_> = tree.children[i].children.drain(..).collect();
+                let l = cs.len();
+                tree.children.splice(i..=i, cs);
+                i += l;
+            } else {
+                i += 1;
+            }
+        }
+    }
+}
+
+fn unroll_operator<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(unroll_operator(name));
         let mut i = 0;
         while i < tree.children.len() {
             if tree.children[i].data.get::<Token>().unwrap().deref() == name {
@@ -344,14 +361,8 @@ fn unroll_children<'a>(name: &'a str, keep_parent: bool) -> impl Fn(&mut Tree) +
                 let l = cs.len();
                 tree.children.splice(i..i, cs);
                 i += l;
-                if keep_parent {
-                    i += 1;
-                } else {
-                    tree.children.remove(i);
-                }
-            } else {
-                i += 1;
             }
+            i += 1;
         }
     }
 }
