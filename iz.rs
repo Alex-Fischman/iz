@@ -76,20 +76,14 @@ struct Tree {
 
 use std::collections::VecDeque;
 struct Passes {
-    passes: VecDeque<Box<dyn Fn(&mut Tree)>>,
     names: HashMap<String, usize>,
+    passes: VecDeque<Box<dyn Fn(&mut Tree)>>,
 }
 
 impl Passes {
-    fn func<F: Fn(&mut Tree) + 'static>(&mut self, f: F) {
-        self.passes.push_back(Box::new(f))
-    }
-
-    fn name(&mut self, name: &str) {
-        let old = self.names.insert(name.to_owned(), self.passes.len());
-        if old.is_some() {
-            panic!("duplicate pass name {}", name)
-        }
+    fn push_back<F: Fn(&mut Tree) + 'static>(&mut self, name: &str, pass: F) {
+        self.names.insert(name.to_owned(), self.passes.len());
+        self.passes.push_back(Box::new(pass));
     }
 
     fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Tree)>> {
@@ -116,32 +110,31 @@ fn main() {
     }
 
     let mut passes = Passes { passes: VecDeque::new(), names: HashMap::new() };
-    passes.name("tokenizing");
-    passes.func(remove_comments);
-    passes.func(concat_alike_tokens(is_identifier));
-    passes.func(concat_alike_tokens(is_operator));
-    passes.func(remove_whitespace);
-    passes.func(integer_literals);
-    passes.name("parsing");
-    passes.func(match_brackets("(", ")"));
-    passes.func(match_brackets("{", "}"));
-    passes.func(parse_operators(&["?", ":"], Operator::Postfix));
-    passes.func(parse_operators(&["~", "$"], Operator::Prefix));
-    passes.func(parse_operators(&["-"], Operator::Prefix));
-    passes.func(parse_operators(&["+"], Operator::InfixLeft));
-    passes.func(parse_operators(&["="], Operator::InfixRight));
-    passes.name("unrolling");
-    passes.func(unroll_brackets("("));
-    passes.func(unroll_operator("-"));
-    passes.func(unroll_operator("+"));
-    passes.name("compiling");
-    passes.func(compile_push);
-    passes.func(compile_move);
-    passes.func(compile_copy);
-    passes.func(compile_add);
-    passes.func(compile_neg);
-    passes.func(compile_jumpz);
-    passes.func(compile_label);
+    // flat
+    passes.push_back("remove comments", remove_comments);
+    passes.push_back("tokenize identifiers", concat_alike_tokens(is_identifier));
+    passes.push_back("tokenize operators", concat_alike_tokens(is_operator));
+    passes.push_back("remove whitespace", remove_whitespace);
+    passes.push_back("parse integer literals", integer_literals);
+    // tree
+    passes.push_back("parse ()", match_brackets("(", ")"));
+    passes.push_back("parse {}", match_brackets("{", "}"));
+    passes.push_back("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
+    passes.push_back("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
+    passes.push_back("parse -", parse_operators(&["-"], Operator::Prefix));
+    passes.push_back("parse +", parse_operators(&["+"], Operator::InfixLeft));
+    passes.push_back("parse =", parse_operators(&["="], Operator::InfixRight));
+    passes.push_back("unroll (", unroll_brackets("("));
+    passes.push_back("unroll -", unroll_operator("-"));
+    passes.push_back("unroll +", unroll_operator("+"));
+    // flat
+    passes.push_back("compile push", compile_push);
+    passes.push_back("compile move", compile_move);
+    passes.push_back("compile copy", compile_copy);
+    passes.push_back("compile add", compile_add);
+    passes.push_back("compile neg", compile_neg);
+    passes.push_back("compile jumpz", compile_jumpz);
+    passes.push_back("compile label", compile_label);
 
     tree.data.insert::<Passes>(passes);
     while let Some(pass) = tree.data.get_mut::<Passes>().unwrap().pop_front() {
