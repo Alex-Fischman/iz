@@ -152,36 +152,11 @@ fn main() {
     passes.push_back("compile neg", compile_neg);
     passes.push_back("compile jumpz", compile_jumpz);
     passes.push_back("compile label", compile_label);
+    passes.push_back("interpret", interpret);
 
     context.globals.insert::<Passes>(passes);
     while let Some(pass) = context.globals.get_mut::<Passes>().unwrap().pop_front() {
         pass(&mut context)
-    }
-
-    // backend
-    let code: Vec<_> = context.trees.into_iter().map(|child| {
-        let token = child.locals.get::<Token>().unwrap().clone();
-        if !child.children.is_empty() {
-            panic!("after compilation should have finished, there was a child of {}", token)
-        }
-        child.locals.remove::<Box<dyn Instruction>>()
-            .unwrap_or_else(|| panic!("no instruction for {}", token))
-    }).collect();
-    let mut i = Interpreter {
-        labels: context.globals.remove::<Labels>().unwrap(),
-        pc: 0,
-        stack: Memory(Vec::new()),
-        sp: -1,
-    };
-    while let Some(instruction) = code.get(i.pc as usize) {
-        instruction.interpret(&mut i);
-        i.pc += 1;
-
-        print!("{:<32}\t", format!("{:?}", instruction));
-        if i.sp > -1 {
-            print!("{:?}", &i.stack.0[0..=i.sp as usize])
-        }
-        println!();
     }
 }
 
@@ -403,6 +378,33 @@ struct Interpreter {
 
 trait Instruction: std::fmt::Debug {
     fn interpret(&self, i: &mut Interpreter);
+}
+
+fn interpret(context: &mut Context) {
+    let code: Vec<_> = context.trees.into_iter().map(|child| {
+        let token = child.locals.get::<Token>().unwrap().clone();
+        if !child.children.is_empty() {
+            panic!("after compilation should have finished, there was a child of {}", token)
+        }
+        child.locals.remove::<Box<dyn Instruction>>()
+            .unwrap_or_else(|| panic!("no instruction for {}", token))
+    }).collect();
+    let mut i = Interpreter {
+        labels: context.globals.remove::<Labels>().unwrap(),
+        pc: 0,
+        stack: Memory(Vec::new()),
+        sp: -1,
+    };
+    while let Some(instruction) = code.get(i.pc as usize) {
+        instruction.interpret(&mut i);
+        i.pc += 1;
+
+        print!("{:<32}\t", format!("{:?}", instruction));
+        if i.sp > -1 {
+            print!("{:?}", &i.stack.0[0..=i.sp as usize])
+        }
+        println!();
+    }
 }
 
 #[derive(Debug)]
