@@ -124,6 +124,7 @@ fn main() {
         tree.locals.insert::<Token>(Token { source: source.clone(), lo: i, hi: j });
         context.trees.push(tree);
     }
+    context.globals.insert::<Labels>(Labels(HashMap::new()));
 
     let mut passes = Passes { passes: VecDeque::new(), names: HashMap::new() };
     // flat
@@ -512,19 +513,14 @@ struct Label(String);
 impl Instruction for Label {
     fn interpret(&self, _i: &mut Interpreter) {}
 }
-fn compile_label(context: &mut Context) {
-    let mut labels = Labels(HashMap::new());
-    compile_label(context, &mut labels);
-    context.globals.insert::<Labels>(labels);
-    fn compile_label(context: &mut Context, labels: &mut Labels) {    
-        for (i, tree) in context.trees.iter_mut().enumerate() {
-            if let Some(token) = tree.locals.get::<Token>() {
-                if token.deref() == ":" {
-                    let s = tree.children.pop().unwrap().locals.remove::<Token>();
-                    let s = s.unwrap().deref().to_owned();
-                    labels.0.insert(s.clone(), i as i64);
-                    tree.locals.insert::<Box<dyn Instruction>>(Box::new(Label(s)));
-                }
+fn compile_label(context: &mut Context) {    
+    for (i, tree) in context.trees.iter_mut().enumerate() {
+        if let Some(token) = tree.locals.get::<Token>() {
+            if token.deref() == ":" {
+                let s = tree.children.pop().unwrap().locals.remove::<Token>();
+                let s = s.unwrap().deref().to_owned();
+                context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i as i64);
+                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Label(s)));
             }
         }
     }
