@@ -103,7 +103,6 @@ impl<'a> Context<'a> {
     }
 }
 
-
 struct NextPass(usize);
 
 struct Passes {
