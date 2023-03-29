@@ -74,16 +74,15 @@ struct Tree {
     children: Vec<Tree>,
 }
 
-// this is separate from Tree because global data should be accessible at every level
-struct Forest<'a> {
+struct Context<'a> {
     globals: &'a mut Data,
     trees: &'a mut Vec<Tree>,
 }
 
-impl<'a> Forest<'a> {
-    fn for_each<F: Fn(&mut Forest)>(&mut self, f: F) {
+impl<'a> Context<'a> {
+    fn for_each<F: Fn(&mut Context)>(&mut self, f: F) {
         for tree in &mut *self.trees {
-            f(&mut Forest {
+            f(&mut Context {
                 globals: self.globals,
                 trees: &mut tree.children,
             });
@@ -94,16 +93,16 @@ impl<'a> Forest<'a> {
 use std::collections::VecDeque;
 struct Passes {
     names: HashMap<String, usize>,
-    passes: VecDeque<Box<dyn Fn(&mut Forest)>>,
+    passes: VecDeque<Box<dyn Fn(&mut Context)>>,
 }
 
 impl Passes {
-    fn push_back<F: Fn(&mut Forest) + 'static>(&mut self, name: &str, pass: F) {
+    fn push_back<F: Fn(&mut Context) + 'static>(&mut self, name: &str, pass: F) {
         self.names.insert(name.to_owned(), self.passes.len());
         self.passes.push_back(Box::new(pass));
     }
 
-    fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Forest)>> {
+    fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Context)>> {
         self.names.values_mut().for_each(|v| *v = v.wrapping_sub(1));
         self.passes.pop_front()
     }
@@ -117,7 +116,7 @@ fn main() {
         .unwrap_or_else(|_| panic!("could not read {}", name));
     let source = Rc::new(Source { name, text });
 
-    let mut forest = Forest { globals: &mut Data(HashMap::new()), trees: &mut Vec::new() };
+    let mut forest = Context { globals: &mut Data(HashMap::new()), trees: &mut Vec::new() };
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
@@ -185,7 +184,7 @@ fn main() {
     }
 }
 
-fn remove_comments(forest: &mut Forest) {
+fn remove_comments(forest: &mut Context) {
     let mut in_comment = false;
     forest.trees.retain(|tree| {
         match tree.locals.get::<Token>().unwrap().deref() {
@@ -209,8 +208,8 @@ fn is_operator(s: &str) -> bool {
     s.chars().all(|c| !(c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c)))
 }
 
-fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Forest) {
-    move |forest: &mut Forest| {
+fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Context) {
+    move |forest: &mut Context| {
         let mut i = 1;
         while i < forest.trees.len() {
             let curr = forest.trees[i].locals.get::<Token>().unwrap();
@@ -225,11 +224,11 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Forest) {
     }
 }
 
-fn remove_whitespace(forest: &mut Forest) {
+fn remove_whitespace(forest: &mut Context) {
     forest.trees.retain(|tree| !is_whitespace(tree.locals.get::<Token>().unwrap()));
 }
 
-fn integer_literals(forest: &mut Forest) {
+fn integer_literals(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(token) = tree.locals.get::<Token>() {
             let mut chars = token.deref().chars().peekable();
@@ -280,8 +279,8 @@ fn integer_literals(forest: &mut Forest) {
     }
 }
 
-fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Forest) + 'a {
-    move |forest: &mut Forest| {
+fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Context) + 'a {
+    move |forest: &mut Context| {
         forest.for_each(match_brackets(open, close));
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
@@ -307,9 +306,9 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Forest) + '
 #[derive(Clone, Copy)]
 enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
 
-fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Forest) + 'a {
+fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Context) + 'a {
     use Operator::*;
-    move |forest: &mut Forest| {
+    move |forest: &mut Context| {
         forest.for_each(parse_operators(names, operator));
         let mut i = match operator {
             Postfix | InfixLeft => 0,
@@ -342,8 +341,8 @@ fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut
     }
 }
 
-fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Forest) + 'a {
-    move |forest: &mut Forest| {
+fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Context) + 'a {
+    move |forest: &mut Context| {
         forest.for_each(unroll_brackets(name));
         let mut i = 0;
         while i < forest.trees.len() {
@@ -359,8 +358,8 @@ fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Forest) + 'a {
     }
 }
 
-fn unroll_operator<'a>(name: &'a str) -> impl Fn(&mut Forest) + 'a {
-    move |forest: &mut Forest| {
+fn unroll_operator<'a>(name: &'a str) -> impl Fn(&mut Context) + 'a {
+    move |forest: &mut Context| {
         forest.for_each(unroll_operator(name));
         let mut i = 0;
         while i < forest.trees.len() {
@@ -413,7 +412,7 @@ impl Instruction for Push {
         i.stack[i.sp] = self.0;
     }
 }
-fn compile_push(forest: &mut Forest) {
+fn compile_push(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(int) = tree.locals.get::<i64>() {
             tree.locals.insert::<Box<dyn Instruction>>(Box::new(Push(*int)));
@@ -427,7 +426,7 @@ impl Instruction for Move {
         i.sp -= self.0;
     }
 }
-fn compile_move(forest: &mut Forest) {
+fn compile_move(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(token) = tree.locals.get::<Token>() {
             if token.deref() == "~" {
@@ -445,7 +444,7 @@ impl Instruction for Copy {
         i.sp += 1;
     }
 }
-fn compile_copy(forest: &mut Forest) {
+fn compile_copy(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(token) = tree.locals.get::<Token>() {
             if token.deref() == "$" {
@@ -463,7 +462,7 @@ impl Instruction for Add {
         i.stack[i.sp] += i.stack[i.sp + 1];
     }
 }
-fn compile_add(forest: &mut Forest) {
+fn compile_add(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(token) = tree.locals.get::<Token>() {
             if token.deref() == "+" || token.deref() == "add" {
@@ -479,7 +478,7 @@ impl Instruction for Neg {
         i.stack[i.sp] = -i.stack[i.sp];
     }
 }
-fn compile_neg(forest: &mut Forest) {
+fn compile_neg(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(token) = tree.locals.get::<Token>() {
             if token.deref() == "-" || token.deref() == "neg" {
@@ -498,7 +497,7 @@ impl Instruction for Jumpz {
         i.sp -= 1;
     }
 }
-fn compile_jumpz(forest: &mut Forest) {
+fn compile_jumpz(forest: &mut Context) {
     for tree in &mut *forest.trees {
         if let Some(token) = tree.locals.get::<Token>() {
             if token.deref() == "?" {
@@ -513,11 +512,11 @@ struct Label(String);
 impl Instruction for Label {
     fn interpret(&self, _i: &mut Interpreter) {}
 }
-fn compile_label(forest: &mut Forest) {
+fn compile_label(forest: &mut Context) {
     let mut labels = Labels(HashMap::new());
     compile_label(forest, &mut labels);
     forest.globals.insert::<Labels>(labels);
-    fn compile_label(forest: &mut Forest, labels: &mut Labels) {    
+    fn compile_label(forest: &mut Context, labels: &mut Labels) {    
         for (i, tree) in forest.trees.iter_mut().enumerate() {
             if let Some(token) = tree.locals.get::<Token>() {
                 if token.deref() == ":" {
