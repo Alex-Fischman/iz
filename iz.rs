@@ -375,7 +375,6 @@ struct Interpreter {
     pc: i64,
     stack: Memory,
     sp: i64,
-    heap: Memory,
 }
 
 trait Instruction: std::fmt::Debug {
@@ -396,7 +395,6 @@ fn interpret(context: &mut Context) {
         pc: 0,
         stack: Memory(Vec::new()),
         sp: -1,
-        heap: Memory(Vec::new()),
     };
     while let Some(instruction) = code.get(i.pc as usize) {
         instruction.interpret(&mut i);
@@ -528,21 +526,5 @@ fn compile_label(context: &mut Context) {
                 tree.locals.insert::<Box<dyn Instruction>>(Box::new(Label(s)));
             }
         }
-    }
-}
-#[derive(Debug)]
-struct Read(i64);
-impl Instruction for Read {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.sp += 1;
-        i.stack[i.sp] = i.heap[self.0];
-    }
-}
-#[derive(Debug)]
-struct Write(i64);
-impl Instruction for Write {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.heap[self.0] = i.stack[i.sp];
-        i.sp -= 1;
     }
 }
