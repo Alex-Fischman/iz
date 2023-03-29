@@ -138,7 +138,9 @@ fn main() {
     passes.push("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
     passes.push("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
     // flat
-    passes.push("add labels", |context| context.globals.insert::<Labels>(Labels(HashMap::new()));)
+    passes.push("insert labels", |context| {
+        context.globals.insert::<Labels>(Labels(HashMap::new()));
+    });
     passes.push("compile push", compile_push);
     passes.push("compile move", compile_move);
     passes.push("compile copy", compile_copy);
