@@ -90,21 +90,22 @@ impl<'a> Context<'a> {
     }
 }
 
-use std::collections::VecDeque;
 struct Passes {
+    next: usize,
     names: HashMap<String, usize>,
-    passes: VecDeque<Box<dyn Fn(&mut Context)>>,
+    passes: Vec<Rc<dyn Fn(&mut Context)>>,
 }
 
 impl Passes {
-    fn push_back<F: Fn(&mut Context) + 'static>(&mut self, name: &str, pass: F) {
+    fn push<F: Fn(&mut Context) + 'static>(&mut self, name: &str, pass: F) {
         self.names.insert(name.to_owned(), self.passes.len());
-        self.passes.push_back(Box::new(pass));
+        self.passes.push(Rc::new(pass));
     }
 
-    fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Context)>> {
-        self.names.values_mut().for_each(|v| *v = v.wrapping_sub(1));
-        self.passes.pop_front()
+    fn next(&mut self) -> Option<Rc<dyn Fn(&mut Context)>> {
+        let pass = self.passes.get(self.next)?;
+        self.next += 1;
+        Some(pass.clone())
     }
 }
 
@@ -126,36 +127,36 @@ fn main() {
     }
     context.globals.insert::<Labels>(Labels(HashMap::new()));
 
-    let mut passes = Passes { passes: VecDeque::new(), names: HashMap::new() };
+    let mut passes = Passes { next: 0, names: HashMap::new(), passes: Vec::new() };
     // flat
-    passes.push_back("remove comments", remove_comments);
-    passes.push_back("tokenize identifiers", concat_alike_tokens(is_identifier));
-    passes.push_back("tokenize operators", concat_alike_tokens(is_operator));
-    passes.push_back("remove whitespace", remove_whitespace);
-    passes.push_back("parse integer literals", integer_literals);
+    passes.push("remove comments", remove_comments);
+    passes.push("tokenize identifiers", concat_alike_tokens(is_identifier));
+    passes.push("tokenize operators", concat_alike_tokens(is_operator));
+    passes.push("remove whitespace", remove_whitespace);
+    passes.push("parse integer literals", integer_literals);
     // tree
-    passes.push_back("parse ()", match_brackets("(", ")"));
-    passes.push_back("parse {}", match_brackets("{", "}"));
-    passes.push_back("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
-    passes.push_back("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
-    passes.push_back("parse -", parse_operators(&["-"], Operator::Prefix));
-    passes.push_back("parse +", parse_operators(&["+"], Operator::InfixLeft));
-    passes.push_back("parse =", parse_operators(&["="], Operator::InfixRight));
-    passes.push_back("unroll (", unroll_brackets("("));
-    passes.push_back("unroll -", unroll_operator("-"));
-    passes.push_back("unroll +", unroll_operator("+"));
+    passes.push("parse ()", match_brackets("(", ")"));
+    passes.push("parse {}", match_brackets("{", "}"));
+    passes.push("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
+    passes.push("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
+    passes.push("parse -", parse_operators(&["-"], Operator::Prefix));
+    passes.push("parse +", parse_operators(&["+"], Operator::InfixLeft));
+    passes.push("parse =", parse_operators(&["="], Operator::InfixRight));
+    passes.push("unroll (", unroll_brackets("("));
+    passes.push("unroll -", unroll_operator("-"));
+    passes.push("unroll +", unroll_operator("+"));
     // flat
-    passes.push_back("compile push", compile_push);
-    passes.push_back("compile move", compile_move);
-    passes.push_back("compile copy", compile_copy);
-    passes.push_back("compile add", compile_add);
-    passes.push_back("compile neg", compile_neg);
-    passes.push_back("compile jumpz", compile_jumpz);
-    passes.push_back("compile label", compile_label);
-    passes.push_back("interpret", interpret);
+    passes.push("compile push", compile_push);
+    passes.push("compile move", compile_move);
+    passes.push("compile copy", compile_copy);
+    passes.push("compile add", compile_add);
+    passes.push("compile neg", compile_neg);
+    passes.push("compile jumpz", compile_jumpz);
+    passes.push("compile label", compile_label);
+    passes.push("interpret", interpret);
 
     context.globals.insert::<Passes>(passes);
-    while let Some(pass) = context.globals.get_mut::<Passes>().unwrap().pop_front() {
+    while let Some(pass) = context.globals.get_mut::<Passes>().unwrap().next() {
         pass(&mut context)
     }
 }
