@@ -125,7 +125,6 @@ fn main() {
         tree.locals.insert::<Token>(Token { source: source.clone(), lo: i, hi: j });
         context.trees.push(tree);
     }
-    context.globals.insert::<Labels>(Labels(HashMap::new()));
 
     let mut passes = Passes { next: 0, names: HashMap::new(), passes: Vec::new() };
     // flat
@@ -135,17 +134,11 @@ fn main() {
     passes.push("remove whitespace", remove_whitespace);
     passes.push("parse integer literals", integer_literals);
     // tree
-    passes.push("parse ()", match_brackets("(", ")"));
     passes.push("parse {}", match_brackets("{", "}"));
     passes.push("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
     passes.push("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
-    passes.push("parse -", parse_operators(&["-"], Operator::Prefix));
-    passes.push("parse +", parse_operators(&["+"], Operator::InfixLeft));
-    passes.push("parse =", parse_operators(&["="], Operator::InfixRight));
-    passes.push("unroll (", unroll_brackets("("));
-    passes.push("unroll -", unroll_operator("-"));
-    passes.push("unroll +", unroll_operator("+"));
     // flat
+    passes.push("add labels", |context| context.globals.insert::<Labels>(Labels(HashMap::new()));)
     passes.push("compile push", compile_push);
     passes.push("compile move", compile_move);
     passes.push("compile copy", compile_copy);
@@ -281,28 +274,28 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Context) + 
 }
 
 #[derive(Clone, Copy)]
-enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
+enum Operator { Prefix, Postfix }
 
 fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Context) + 'a {
     use Operator::*;
     move |context: &mut Context| {
         context.for_each(parse_operators(names, operator));
         let mut i = match operator {
-            Postfix | InfixLeft => 0,
-            Prefix | InfixRight => context.trees.len().wrapping_sub(1),
+            Postfix => 0,
+            Prefix => context.trees.len().wrapping_sub(1),
         };
         while i < context.trees.len() {
             let curr = context.trees[i].locals.get::<Token>().unwrap().clone();
             if names.contains(&curr.deref()) {
                 let mut args = Vec::new();
-                if matches!(operator, Postfix | InfixLeft | InfixRight) {
+                if matches!(operator, Postfix) {
                     if i == 0 {
                         panic!("no argument for {}", curr)
                     }
                     args.push(context.trees.remove(i - 1));
                     i -= 1;
                 }
-                if matches!(operator, Prefix | InfixLeft | InfixRight) {
+                if matches!(operator, Prefix) {
                     if i + 1 == context.trees.len() {
                         panic!("no argument for {}", curr)
                     }
@@ -311,42 +304,9 @@ fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut
                 context.trees[i].children.append(&mut args);
             }
             i = match operator {
-                Postfix | InfixLeft => i + 1,
-                Prefix | InfixRight => i.wrapping_sub(1),
+                Postfix => i + 1,
+                Prefix => i.wrapping_sub(1),
             };
-        }
-    }
-}
-
-fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Context) + 'a {
-    move |context: &mut Context| {
-        context.for_each(unroll_brackets(name));
-        let mut i = 0;
-        while i < context.trees.len() {
-            if context.trees[i].locals.get::<Token>().unwrap().deref() == name {
-                let cs: Vec<_> = context.trees[i].children.drain(..).collect();
-                let l = cs.len();
-                context.trees.splice(i..=i, cs);
-                i += l;
-            } else {
-                i += 1;
-            }
-        }
-    }
-}
-
-fn unroll_operator<'a>(name: &'a str) -> impl Fn(&mut Context) + 'a {
-    move |context: &mut Context| {
-        context.for_each(unroll_operator(name));
-        let mut i = 0;
-        while i < context.trees.len() {
-            if context.trees[i].locals.get::<Token>().unwrap().deref() == name {
-                let cs: Vec<_> = context.trees[i].children.drain(..).collect();
-                let l = cs.len();
-                context.trees.splice(i..i, cs);
-                i += l;
-            }
-            i += 1;
         }
     }
 }
@@ -469,7 +429,7 @@ impl Instruction for Add {
 fn compile_add(context: &mut Context) {
     for tree in &mut *context.trees {
         if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "+" || token.deref() == "add" {
+            if token.deref() == "add" {
                 tree.locals.insert::<Box<dyn Instruction>>(Box::new(Add));
             }
         }
@@ -485,7 +445,7 @@ impl Instruction for Neg {
 fn compile_neg(context: &mut Context) {
     for tree in &mut *context.trees {
         if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "-" || token.deref() == "neg" {
+            if token.deref() == "neg" {
                 tree.locals.insert::<Box<dyn Instruction>>(Box::new(Neg));
             }
         }
