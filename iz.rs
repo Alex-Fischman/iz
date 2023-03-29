@@ -11,7 +11,7 @@ struct Source {
     text: String,
 }
 
-use std::rc::Rc; // only needed to get around Any restrictions, not necessary for bootstrapping
+use std::rc::Rc; // only needed to get around Any restrictions
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct Token {
     source: Rc<Source>,
@@ -74,19 +74,36 @@ struct Tree {
     children: Vec<Tree>,
 }
 
+// this is separate from Tree because global data should be accessible at every level
+struct Forest<'a> {
+    global: &'a mut Data,
+    trees: &'a mut Vec<Tree>,
+}
+
+impl<'a> Forest<'a> {
+    fn for_each<F: Fn(&mut Forest)>(&mut self, f: F) {
+        for tree in &mut *self.trees {
+            f(&mut Forest {
+                global: self.global,
+                trees: &mut tree.children,
+            });
+        }
+    }
+}
+
 use std::collections::VecDeque;
 struct Passes {
     names: HashMap<String, usize>,
-    passes: VecDeque<Box<dyn Fn(&mut Tree)>>,
+    passes: VecDeque<Box<dyn Fn(&mut Forest)>>,
 }
 
 impl Passes {
-    fn push_back<F: Fn(&mut Tree) + 'static>(&mut self, name: &str, pass: F) {
+    fn push_back<F: Fn(&mut Forest) + 'static>(&mut self, name: &str, pass: F) {
         self.names.insert(name.to_owned(), self.passes.len());
         self.passes.push_back(Box::new(pass));
     }
 
-    fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Tree)>> {
+    fn pop_front(&mut self) -> Option<Box<dyn Fn(&mut Forest)>> {
         self.names.values_mut().for_each(|v| *v = v.wrapping_sub(1));
         self.passes.pop_front()
     }
@@ -100,13 +117,13 @@ fn main() {
         .unwrap_or_else(|_| panic!("could not read {}", name));
     let source = Rc::new(Source { name, text });
 
-    let mut tree = Tree { data: Data(HashMap::new()), children: Vec::new() };
+    let mut forest = Forest { global: &mut Data(HashMap::new()), trees: &mut Vec::new() };
     let is = source.text.char_indices().map(|(i, _)| i);
     let js = source.text.char_indices().map(|(j, _)| j);
     for (i, j) in is.zip(js.skip(1).chain([source.text.len()])) {
-        let mut child = Tree { data: Data(HashMap::new()), children: Vec::new() };
-        child.data.insert::<Token>(Token { source: source.clone(), lo: i, hi: j });
-        tree.children.push(child);
+        let mut tree = Tree { data: Data(HashMap::new()), children: Vec::new() };
+        tree.data.insert::<Token>(Token { source: source.clone(), lo: i, hi: j });
+        forest.trees.push(tree);
     }
 
     let mut passes = Passes { passes: VecDeque::new(), names: HashMap::new() };
@@ -136,13 +153,13 @@ fn main() {
     passes.push_back("compile jumpz", compile_jumpz);
     passes.push_back("compile label", compile_label);
 
-    tree.data.insert::<Passes>(passes);
-    while let Some(pass) = tree.data.get_mut::<Passes>().unwrap().pop_front() {
-        pass(&mut tree)
+    forest.global.insert::<Passes>(passes);
+    while let Some(pass) = forest.global.get_mut::<Passes>().unwrap().pop_front() {
+        pass(&mut forest)
     }
 
     // backend
-    let code: Vec<_> = tree.children.into_iter().map(|mut child| {
+    let code: Vec<_> = forest.trees.into_iter().map(|child| {
         let token = child.data.get::<Token>().unwrap().clone();
         if !child.children.is_empty() {
             panic!("after compilation should have finished, there was a child of {}", token)
@@ -151,7 +168,7 @@ fn main() {
             .unwrap_or_else(|| panic!("no instruction for {}", token))
     }).collect();
     let mut i = Interpreter {
-        labels: tree.data.remove::<Labels>().unwrap(),
+        labels: forest.global.remove::<Labels>().unwrap(),
         pc: 0,
         stack: Memory(Vec::new()),
         sp: -1,
@@ -168,10 +185,10 @@ fn main() {
     }
 }
 
-fn remove_comments(tree: &mut Tree) {
+fn remove_comments(forest: &mut Forest) {
     let mut in_comment = false;
-    tree.children.retain(|child| {
-        match child.data.get::<Token>().unwrap().deref() {
+    forest.trees.retain(|tree| {
+        match tree.data.get::<Token>().unwrap().deref() {
             "#" if !in_comment => in_comment = true,
             "\n" if in_comment => in_comment = false,
             _ => {},
@@ -192,28 +209,28 @@ fn is_operator(s: &str) -> bool {
     s.chars().all(|c| !(c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c)))
 }
 
-fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
-    move |tree: &mut Tree| {
+fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Forest) {
+    move |forest: &mut Forest| {
         let mut i = 1;
-        while i < tree.children.len() {
-            let curr = tree.children[i].data.get::<Token>().unwrap();
-            let prev = tree.children[i - 1].data.get::<Token>().unwrap();
+        while i < forest.trees.len() {
+            let curr = forest.trees[i].data.get::<Token>().unwrap();
+            let prev = forest.trees[i - 1].data.get::<Token>().unwrap();
             if alike(curr) && alike(prev) && curr.source == prev.source && curr.lo == prev.hi {
-                let curr = tree.children.remove(i).data.remove::<Token>().unwrap();
+                let curr = forest.trees.remove(i).data.remove::<Token>().unwrap();
                 i -= 1;
-                tree.children[i].data.get_mut::<Token>().unwrap().hi = curr.hi;
+                forest.trees[i].data.get_mut::<Token>().unwrap().hi = curr.hi;
             }
             i += 1;
         }
     }
 }
 
-fn remove_whitespace(tree: &mut Tree) {
-    tree.children.retain(|child| !is_whitespace(child.data.get::<Token>().unwrap()));
+fn remove_whitespace(forest: &mut Forest) {
+    forest.trees.retain(|tree| !is_whitespace(tree.data.get::<Token>().unwrap()));
 }
 
-fn integer_literals(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn integer_literals(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(token) = tree.data.get::<Token>() {
             let mut chars = token.deref().chars().peekable();
             let is_negative = match chars.peek() {
@@ -263,26 +280,26 @@ fn integer_literals(tree: &mut Tree) {
     }
 }
 
-fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
-    move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(match_brackets(open, close));
+fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Forest) + 'a {
+    move |forest: &mut Forest| {
+        forest.for_each(match_brackets(open, close));
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
-        while i < tree.children.len() {
-            let curr = tree.children[i].data.get::<Token>().unwrap();
+        while i < forest.trees.len() {
+            let curr = forest.trees[i].data.get::<Token>().unwrap();
             if curr.deref() == open {
                 indices.push(i);
             } else if curr.deref() == close {
                 let j = indices.pop().unwrap_or_else(|| panic!("extra {}", curr));
-                let mut cs: Vec<Tree> = tree.children.drain(j + 1 ..= i).collect();
+                let mut cs: Vec<Tree> = forest.trees.drain(j + 1 ..= i).collect();
                 cs.pop(); // remove closing bracket
-                tree.children[j].children.append(&mut cs);
+                forest.trees[j].children.append(&mut cs);
                 i = j;
             }
             i += 1;
         }
         if let Some(j) = indices.pop() {
-            panic!("extra {}", tree.children[j].data.get::<Token>().unwrap())
+            panic!("extra {}", forest.trees[j].data.get::<Token>().unwrap())
         }
     }
 }
@@ -290,32 +307,32 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
 #[derive(Clone, Copy)]
 enum Operator { Prefix, Postfix, InfixLeft, InfixRight }
 
-fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Tree) + 'a {
+fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Forest) + 'a {
     use Operator::*;
-    move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(parse_operators(names, operator));
+    move |forest: &mut Forest| {
+        forest.for_each(parse_operators(names, operator));
         let mut i = match operator {
             Postfix | InfixLeft => 0,
-            Prefix | InfixRight => tree.children.len().wrapping_sub(1),
+            Prefix | InfixRight => forest.trees.len().wrapping_sub(1),
         };
-        while i < tree.children.len() {
-            let curr = tree.children[i].data.get::<Token>().unwrap().clone();
+        while i < forest.trees.len() {
+            let curr = forest.trees[i].data.get::<Token>().unwrap().clone();
             if names.contains(&curr.deref()) {
                 let mut args = Vec::new();
                 if matches!(operator, Postfix | InfixLeft | InfixRight) {
                     if i == 0 {
                         panic!("no argument for {}", curr)
                     }
-                    args.push(tree.children.remove(i - 1));
+                    args.push(forest.trees.remove(i - 1));
                     i -= 1;
                 }
                 if matches!(operator, Prefix | InfixLeft | InfixRight) {
-                    if i + 1 == tree.children.len() {
+                    if i + 1 == forest.trees.len() {
                         panic!("no argument for {}", curr)
                     }
-                    args.push(tree.children.remove(i + 1));
+                    args.push(forest.trees.remove(i + 1));
                 }
-                tree.children[i].children.append(&mut args);
+                forest.trees[i].children.append(&mut args);
             }
             i = match operator {
                 Postfix | InfixLeft => i + 1,
@@ -325,15 +342,15 @@ fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut
     }
 }
 
-fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
-    move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(unroll_brackets(name));
+fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Forest) + 'a {
+    move |forest: &mut Forest| {
+        forest.for_each(unroll_brackets(name));
         let mut i = 0;
-        while i < tree.children.len() {
-            if tree.children[i].data.get::<Token>().unwrap().deref() == name {
-                let cs: Vec<_> = tree.children[i].children.drain(..).collect();
+        while i < forest.trees.len() {
+            if forest.trees[i].data.get::<Token>().unwrap().deref() == name {
+                let cs: Vec<_> = forest.trees[i].children.drain(..).collect();
                 let l = cs.len();
-                tree.children.splice(i..=i, cs);
+                forest.trees.splice(i..=i, cs);
                 i += l;
             } else {
                 i += 1;
@@ -342,15 +359,15 @@ fn unroll_brackets<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
-fn unroll_operator<'a>(name: &'a str) -> impl Fn(&mut Tree) + 'a {
-    move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(unroll_operator(name));
+fn unroll_operator<'a>(name: &'a str) -> impl Fn(&mut Forest) + 'a {
+    move |forest: &mut Forest| {
+        forest.for_each(unroll_operator(name));
         let mut i = 0;
-        while i < tree.children.len() {
-            if tree.children[i].data.get::<Token>().unwrap().deref() == name {
-                let cs: Vec<_> = tree.children[i].children.drain(..).collect();
+        while i < forest.trees.len() {
+            if forest.trees[i].data.get::<Token>().unwrap().deref() == name {
+                let cs: Vec<_> = forest.trees[i].children.drain(..).collect();
                 let l = cs.len();
-                tree.children.splice(i..i, cs);
+                forest.trees.splice(i..i, cs);
                 i += l;
             }
             i += 1;
@@ -396,8 +413,8 @@ impl Instruction for Push {
         i.stack[i.sp] = self.0;
     }
 }
-fn compile_push(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn compile_push(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(int) = tree.data.get::<i64>() {
             tree.data.insert::<Box<dyn Instruction>>(Box::new(Push(*int)));
         }
@@ -410,8 +427,8 @@ impl Instruction for Move {
         i.sp -= self.0;
     }
 }
-fn compile_move(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn compile_move(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(token) = tree.data.get::<Token>() {
             if token.deref() == "~" {
                 let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
@@ -428,8 +445,8 @@ impl Instruction for Copy {
         i.sp += 1;
     }
 }
-fn compile_copy(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn compile_copy(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(token) = tree.data.get::<Token>() {
             if token.deref() == "$" {
                 let i = tree.children.pop().unwrap().data.remove::<i64>().unwrap();
@@ -446,8 +463,8 @@ impl Instruction for Add {
         i.stack[i.sp] += i.stack[i.sp + 1];
     }
 }
-fn compile_add(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn compile_add(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(token) = tree.data.get::<Token>() {
             if token.deref() == "+" || token.deref() == "add" {
                 tree.data.insert::<Box<dyn Instruction>>(Box::new(Add));
@@ -462,8 +479,8 @@ impl Instruction for Neg {
         i.stack[i.sp] = -i.stack[i.sp];
     }
 }
-fn compile_neg(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn compile_neg(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(token) = tree.data.get::<Token>() {
             if token.deref() == "-" || token.deref() == "neg" {
                 tree.data.insert::<Box<dyn Instruction>>(Box::new(Neg));
@@ -481,8 +498,8 @@ impl Instruction for Jumpz {
         i.sp -= 1;
     }
 }
-fn compile_jumpz(tree: &mut Tree) {
-    for tree in &mut tree.children {
+fn compile_jumpz(forest: &mut Forest) {
+    for tree in &mut *forest.trees {
         if let Some(token) = tree.data.get::<Token>() {
             if token.deref() == "?" {
                 let s = tree.children.pop().unwrap().data.remove::<Token>().unwrap();
@@ -496,12 +513,12 @@ struct Label(String);
 impl Instruction for Label {
     fn interpret(&self, _i: &mut Interpreter) {}
 }
-fn compile_label(tree: &mut Tree) {
+fn compile_label(forest: &mut Forest) {
     let mut labels = Labels(HashMap::new());
-    compile_label(tree, &mut labels);
-    tree.data.insert::<Labels>(labels);
-    fn compile_label(tree: &mut Tree, labels: &mut Labels) {    
-        for (i, tree) in tree.children.iter_mut().enumerate() {
+    compile_label(forest, &mut labels);
+    forest.global.insert::<Labels>(labels);
+    fn compile_label(forest: &mut Forest, labels: &mut Labels) {    
+        for (i, tree) in forest.trees.iter_mut().enumerate() {
             if let Some(token) = tree.data.get::<Token>() {
                 if token.deref() == ":" {
                     let s = tree.children.pop().unwrap().data.remove::<Token>();
