@@ -151,7 +151,8 @@ fn main() {
     });
     passes.push("compile push", compile_push);
     passes.push("compile move", compile_move);
-    passes.push("compile copy", compile_copy);
+    passes.push("compile sp", compile_sp);
+    passes.push("compile read", compile_read);
     passes.push("compile add", compile_add);
     passes.push("compile neg", compile_neg);
     passes.push("compile jumpz", compile_jumpz);
@@ -410,19 +411,34 @@ fn compile_move(context: &mut Context) {
     }
 }
 #[derive(Debug)]
-struct Copy(i64);
-impl Instruction for Copy {
+struct Sp;
+impl Instruction for Sp {
     fn interpret(&self, i: &mut Interpreter) {
-        i.stack[i.sp + 1] = i.stack[i.sp - self.0];
+        i.stack[i.sp + 1] = &i.stack[i.sp] as *const i64 as i64;
         i.sp += 1;
     }
 }
-fn compile_copy(context: &mut Context) {
+fn compile_sp(context: &mut Context) {
     for tree in &mut *context.trees {
         if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "$" {
-                let i = tree.children.pop().unwrap().locals.remove::<i64>().unwrap();
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Copy(i)));
+            if token.deref() == "^" {
+                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Sp));
+            }
+        }
+    }
+}
+#[derive(Debug)]
+struct Read;
+impl Instruction for Read {
+    fn interpret(&self, i: &mut Interpreter) {
+        i.stack[i.sp] = unsafe { *(i.stack[i.sp] as *const i64) };
+    }
+}
+fn compile_read(context: &mut Context) {
+    for tree in &mut *context.trees {
+        if let Some(token) = tree.locals.get::<Token>() {
+            if token.deref() == "*" {
+                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Read));
             }
         }
     }
