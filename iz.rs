@@ -88,10 +88,25 @@ impl<'a> Context<'a> {
             });
         }
     }
+
+    // requires globals::Passes and globals::NextPass to exist
+    fn run(&mut self) {
+        loop {
+            let passes = self.globals.get::<Passes>().unwrap();
+            let pass = match passes.passes.get(self.globals.get::<NextPass>().unwrap().0) {
+                None => return,
+                Some(rc) => rc.clone(),
+            };
+            self.globals.get_mut::<NextPass>().unwrap().0 += 1;
+            pass(self)
+        }
+    }
 }
 
+
+struct NextPass(usize);
+
 struct Passes {
-    next: usize,
     names: HashMap<String, usize>,
     passes: Vec<Rc<dyn Fn(&mut Context)>>,
 }
@@ -100,12 +115,6 @@ impl Passes {
     fn push<F: Fn(&mut Context) + 'static>(&mut self, name: &str, pass: F) {
         self.names.insert(name.to_owned(), self.passes.len());
         self.passes.push(Rc::new(pass));
-    }
-
-    fn next(&mut self) -> Option<Rc<dyn Fn(&mut Context)>> {
-        let pass = self.passes.get(self.next)?;
-        self.next += 1;
-        Some(pass.clone())
     }
 }
 
@@ -126,7 +135,7 @@ fn main() {
         context.trees.push(tree);
     }
 
-    let mut passes = Passes { next: 0, names: HashMap::new(), passes: Vec::new() };
+    let mut passes = Passes { names: HashMap::new(), passes: Vec::new() };
     // flat
     passes.push("remove comments", remove_comments);
     passes.push("tokenize identifiers", concat_alike_tokens(is_identifier));
@@ -151,9 +160,8 @@ fn main() {
     passes.push("interpret", interpret);
 
     context.globals.insert::<Passes>(passes);
-    while let Some(pass) = context.globals.get_mut::<Passes>().unwrap().next() {
-        pass(&mut context)
-    }
+    context.globals.insert::<NextPass>(NextPass(0));
+    context.run();
 }
 
 fn remove_comments(context: &mut Context) {
