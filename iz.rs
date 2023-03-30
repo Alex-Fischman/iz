@@ -355,8 +355,7 @@ fn interpret(context: &mut Context) {
         if !child.children.is_empty() {
             panic!("after compilation should have finished, there was a child of {}", token)
         }
-        child.locals.remove::<Instruction>()
-            .unwrap_or_else(|| panic!("no instruction for {}", token))
+        child.locals.remove::<Instruction>().unwrap()
     }).collect();
     let mut i = Interpreter {
         labels: context.globals.remove::<Labels>().unwrap(),
