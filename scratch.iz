@@ -3,7 +3,7 @@
 # here is a while loop
 1
 while_start:
-^ * - 3 + while_end?
+^ * 3 - + while_end?
 # cond ends, body starts
 1 +
 0 while_start?
@@ -13,8 +13,7 @@ while_end:
 # here are some examples of stack memory management
 13 # a bare literal pushes its value
 ^ * # pushes address of top of stack and then reads the value at that address
-~2 # ~ moves the stack pointer
-# both $ and ~ can take negative arguments
+~2 # ~ moves the stack pointer (in multiples of word size, can take negative numbers)
 
 0
 
