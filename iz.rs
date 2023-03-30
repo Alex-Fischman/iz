@@ -370,9 +370,7 @@ fn interpret(context: &mut Context) {
                 i.sp += 1;
                 i.stack[i.sp] = *int;
             }
-            Instruction::Move(int) => {
-                i.sp -= int;
-            }
+            Instruction::Move(int) => i.sp -= int,
             Instruction::Sp => {
                 i.stack[i.sp + 1] = &i.stack[i.sp] as *const i64 as i64;
                 i.sp += 1;
