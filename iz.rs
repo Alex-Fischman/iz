@@ -145,8 +145,8 @@ fn main() {
     passes.push("parse {}", match_brackets("{", "}"));
     passes.push("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
     passes.push("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
-    // flat
     passes.push("compile instructions", compile_instructions);
+    // flat
     passes.push("interpret", interpret);
 
     context.globals.insert::<Passes>(passes);
