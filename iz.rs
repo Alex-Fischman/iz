@@ -408,10 +408,10 @@ fn compile_instructions(context: &mut Context) {
                 "*" => {
                     tree.locals.insert::<Instruction>(Instruction::Read);
                 },
-                "add" => {
+                "+" => {
                     tree.locals.insert::<Instruction>(Instruction::Add);
                 },
-                "neg" => {
+                "-" => {
                     tree.locals.insert::<Instruction>(Instruction::Neg);
                 },
                 "?" => {
