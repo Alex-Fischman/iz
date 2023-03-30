@@ -312,7 +312,7 @@ fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut
 }
 
 #[derive(Debug)]
-enum Instructio {
+enum Instruction {
     Push(i64),
     Move(i64),
     Sp,
@@ -355,7 +355,7 @@ fn interpret(context: &mut Context) {
         if !child.children.is_empty() {
             panic!("after compilation should have finished, there was a child of {}", token)
         }
-        child.locals.remove::<Instructio>()
+        child.locals.remove::<Instruction>()
             .unwrap_or_else(|| panic!("no instruction for {}", token))
     }).collect();
     let mut i = Interpreter {
@@ -366,31 +366,31 @@ fn interpret(context: &mut Context) {
     };
     while let Some(instruction) = code.get(i.pc as usize) {
         match instruction {
-            Instructio::Push(int) => {
+            Instruction::Push(int) => {
                 i.sp += 1;
                 i.stack[i.sp] = *int;
             }
-            Instructio::Move(int) => {
+            Instruction::Move(int) => {
                 i.sp -= int;
             }
-            Instructio::Sp => {
+            Instruction::Sp => {
                 i.stack[i.sp + 1] = &i.stack[i.sp] as *const i64 as i64;
                 i.sp += 1;
             }
-            Instructio::Read => i.stack[i.sp] = unsafe { *(i.stack[i.sp] as *const i64) },
-            Instructio::Add => {
+            Instruction::Read => i.stack[i.sp] = unsafe { *(i.stack[i.sp] as *const i64) },
+            Instruction::Add => {
                 i.sp -= 1;
                 i.stack[i.sp] += i.stack[i.sp + 1];
             },
-            Instructio::Neg => i.stack[i.sp] = -i.stack[i.sp],
-            Instructio::Jumpz(label) => {
+            Instruction::Neg => i.stack[i.sp] = -i.stack[i.sp],
+            Instruction::Jumpz(label) => {
                 if i.stack[i.sp] == 0 {
                     i.pc = *i.labels.0.get(label)
                         .unwrap_or_else(|| panic!("unknown label {}", label));
                 }
                 i.sp -= 1;
             },
-            Instructio::Label(_label) => {},
+            Instruction::Label(_label) => {},
         }
         i.pc += 1;
 
@@ -406,35 +406,35 @@ fn compile_instructions(context: &mut Context) {
     context.globals.insert::<Labels>(Labels(HashMap::new()));
     for (i, tree) in context.trees.iter_mut().enumerate() {
         if let Some(int) = tree.locals.get::<i64>() {
-            tree.locals.insert::<Instructio>(Instructio::Push(*int));
+            tree.locals.insert::<Instruction>(Instruction::Push(*int));
         } else {
             let token = tree.locals.get::<Token>().unwrap();
             match token.deref() {
                 "~" => {
                     let i = tree.children.pop().unwrap().locals.remove::<i64>().unwrap();
-                    tree.locals.insert::<Instructio>(Instructio::Move(i));
+                    tree.locals.insert::<Instruction>(Instruction::Move(i));
                 }
                 "^" => {
-                    tree.locals.insert::<Instructio>(Instructio::Sp);
+                    tree.locals.insert::<Instruction>(Instruction::Sp);
                 },
                 "*" => {
-                    tree.locals.insert::<Instructio>(Instructio::Read);
+                    tree.locals.insert::<Instruction>(Instruction::Read);
                 },
                 "add" => {
-                    tree.locals.insert::<Instructio>(Instructio::Add);
+                    tree.locals.insert::<Instruction>(Instruction::Add);
                 },
                 "neg" => {
-                    tree.locals.insert::<Instructio>(Instructio::Neg);
+                    tree.locals.insert::<Instruction>(Instruction::Neg);
                 },
                 "?" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>().unwrap();
-                    tree.locals.insert::<Instructio>(Instructio::Jumpz(s.deref().to_owned()));
+                    tree.locals.insert::<Instruction>(Instruction::Jumpz(s.deref().to_owned()));
                 }
                 ":" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>();
                     let s = s.unwrap().deref().to_owned();
                     context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i as i64);
-                    tree.locals.insert::<Instructio>(Instructio::Label(s));
+                    tree.locals.insert::<Instruction>(Instruction::Label(s));
                 }
                 _ => panic!("unknown instruction {}", token)
             }
