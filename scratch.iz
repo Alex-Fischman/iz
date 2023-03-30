@@ -12,7 +12,7 @@ while_end:
 
 # here are some examples of stack memory management
 13 # a bare literal pushes its value
-^ * # $ copies the nth-from-top element
+^ * # pushes address of top of stack and then reads the value at that address
 ~2 # ~ moves the stack pointer
 # both $ and ~ can take negative arguments
 
