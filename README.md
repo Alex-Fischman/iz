@@ -1,12 +1,16 @@
 # iz: a programming language (for me)
 
+## Motivation
+
 I want to create a language that I, personally, will enjoy using for the foreseeable future.
 
 No one can predict what will be needed in a programming language in a decade. Therefore, if there’s one quality that iz must have, it is adaptability. I want to be able to use this language for any personal project that I can think of. Also, this needs to be a project I can finish. I don’t want to keep writing a programming language for the rest of my life, I want to write a language that I can be productive in.
 
 For a truly adaptable language to be complete, the programmer must be able to define the language to almost the same degree that the compiler writer did. The compiler itself should be as minimal as possible and have most of its features come from a default prelude. This would give the user the most flexibility because the prelude could then be swapped for a custom one.
 
-A minimal compiler will be an almost direct translation from text to bytecode. The base bytecode will model a machine that has a program counter and stack pointer but no other registers. I believe that this is the closest that we can get to the hardware without sacrificing too much portablility.
+A minimal compiler will be an almost direct translation from text to bytecode. The base bytecode will model a very simple virtual machine that only has a program counter and stack pointer. I believe that this is the closest that we can get to the hardware without sacrificing too much portablility.
+
+## Implementation
 
 Should there be a difference between macros and compiler passes?
 
