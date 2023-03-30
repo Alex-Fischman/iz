@@ -97,8 +97,8 @@ impl<'a> Context<'a> {
                 None => return,
                 Some(rc) => rc.clone(),
             };
-            self.globals.get_mut::<NextPass>().unwrap().0 += 1;
             pass(self)
+            self.globals.get_mut::<NextPass>().unwrap().0 += 1;
         }
     }
 }
