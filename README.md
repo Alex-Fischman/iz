@@ -12,13 +12,10 @@ A minimal compiler will be an almost direct translation from text to bytecode. T
 
 ## Implementation
 
-Should there be a difference between macros and compiler passes?
-
 Here is a list of things that should be possible for users of this programming language to add:
-- Auto-polyfilled intrinsics: a minimal backend will only need to support a tiny set of base ops, but faster backends can choose to translate other types of ops
 - If statements, while loops, for loops
 - Variables and namespacing
-- Type checking: do you get free dependent types?
+- Type checking
 - Operator overloads for Vectors, Rationals, etc.
 - Shader restrictions
 - “Lifetime analysis” or other memory safety guarantees
@@ -30,13 +27,11 @@ Macros:
 - a macro is just a function that runs at compile time
 - generics are macros that take types and return types
 - Rust macros are macros that take ASTs and return ASTs
-- all runtime functions are compile time functions
-- but some compile time functions will take compile-time-only args
-- compile passes are macros that take an AST and a Data object
-- compile passes should be able to schedule compile passes later in the pipeline
+- all functions can be macros, but not all macros are functions
+- compile passes are macros that take a mutuable Context struct
+- compile passes can schedule future compile passes by modifying Context
 
 Syntax:
-- arbitrary operator definitions
 - operators call macros when parsed, which usually just unroll the arguments but can do anything
 - ()s are used for arbitrary grouping in parsing
 - {}s are used to quote code blocks and turn them into functions/macros
@@ -48,5 +43,7 @@ Namespaces:
 
 Colorability:
 - const, mut, async, comptime, etc. are all things that end up coloring functions
-- the only solution that I know of is to choose a default and auto-convert from it
-- for example, all pointers are const pointers, all async functions can be called synchronously (by blocking), all values can be used at compile time, etc.
+- the only solution that I know of is to choose a default and auto-convert from it, e.g.
+	- all pointers are const pointers
+	- no await syntax
+	- all values can be used at compile time
