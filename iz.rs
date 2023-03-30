@@ -397,10 +397,8 @@ fn interpret(context: &mut Context) {
         tree.locals.remove::<Instruction>().unwrap()
     }).collect();
     let labels = context.globals.remove::<Labels>().unwrap();
-    let mut pc: usize = 0;
     let mut memory = Memory(HashMap::new());
-    // sp points to the top element of the stack
-    // 0 means that the stack is empty
+    let mut pc: usize = 0;
     let mut sp: i64 = 0;
     while let Some(instruction) = code.get(pc) {
         match instruction {
@@ -410,10 +408,10 @@ fn interpret(context: &mut Context) {
             }
             Instruction::Move(int) => sp += int,
             Instruction::Sp => {
-                memory[sp - 1] = &memory[sp] as *const i64 as i64;
+                memory[sp - 1] = sp;
                 sp -= 1;
             }
-            Instruction::Read => memory[sp] = unsafe { *(memory[sp] as *const i64) },
+            Instruction::Read => memory[sp] = memory[memory[sp]],
             Instruction::Add => {
                 sp += 1;
                 memory[sp] += memory[sp - 1];
@@ -431,8 +429,8 @@ fn interpret(context: &mut Context) {
         }
         pc += 1;
 
-        print!("{:<32}\t", format!("{:?}", instruction));
-        (sp..0).rev().for_each(|i| print!("{:?} ", memory[i]));
+        print!("{:<16}\t", format!("{:?}", instruction));
+        (sp..0).rev().for_each(|i| print!("{:>8?}", memory[i]));
         println!();
     }
 }
