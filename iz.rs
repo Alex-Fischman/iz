@@ -342,13 +342,6 @@ impl std::ops::IndexMut<i64> for Memory {
 
 struct Labels(HashMap<String, i64>);
 
-struct Interpreter {
-    labels: Labels,
-    pc: i64,
-    stack: Memory,
-    sp: i64,
-}
-
 fn interpret(context: &mut Context) {
     let code: Vec<_> = context.trees.into_iter().map(|child| {
         let token = child.locals.get::<Token>().unwrap().clone();
@@ -357,43 +350,41 @@ fn interpret(context: &mut Context) {
         }
         child.locals.remove::<Instruction>().unwrap()
     }).collect();
-    let mut i = Interpreter {
-        labels: context.globals.remove::<Labels>().unwrap(),
-        pc: 0,
-        stack: Memory(Vec::new()),
-        sp: -1,
-    };
-    while let Some(instruction) = code.get(i.pc as usize) {
+    let labels = context.globals.remove::<Labels>().unwrap();
+    let mut pc = 0;
+    let mut stack = Memory(Vec::new());
+    let mut sp = -1;
+    while let Some(instruction) = code.get(pc as usize) {
         match instruction {
             Instruction::Push(int) => {
-                i.sp += 1;
-                i.stack[i.sp] = *int;
+                sp += 1;
+                stack[sp] = *int;
             }
-            Instruction::Move(int) => i.sp -= int,
+            Instruction::Move(int) => sp -= int,
             Instruction::Sp => {
-                i.stack[i.sp + 1] = &i.stack[i.sp] as *const i64 as i64;
-                i.sp += 1;
+                stack[sp + 1] = &stack[sp] as *const i64 as i64;
+                sp += 1;
             }
-            Instruction::Read => i.stack[i.sp] = unsafe { *(i.stack[i.sp] as *const i64) },
+            Instruction::Read => stack[sp] = unsafe { *(stack[sp] as *const i64) },
             Instruction::Add => {
-                i.sp -= 1;
-                i.stack[i.sp] += i.stack[i.sp + 1];
+                sp -= 1;
+                stack[sp] += stack[sp + 1];
             },
-            Instruction::Neg => i.stack[i.sp] = -i.stack[i.sp],
+            Instruction::Neg => stack[sp] = -stack[sp],
             Instruction::Jumpz(label) => {
-                if i.stack[i.sp] == 0 {
-                    i.pc = *i.labels.0.get(label)
+                if stack[sp] == 0 {
+                    pc = *labels.0.get(label)
                         .unwrap_or_else(|| panic!("unknown label {}", label));
                 }
-                i.sp -= 1;
+                sp -= 1;
             },
             Instruction::Label(_label) => {},
         }
-        i.pc += 1;
+        pc += 1;
 
         print!("{:<32}\t", format!("{:?}", instruction));
-        if i.sp > -1 {
-            print!("{:?}", &i.stack.0[0..=i.sp as usize])
+        if sp > -1 {
+            print!("{:?}", &stack.0[0..=sp as usize])
         }
         println!();
     }
