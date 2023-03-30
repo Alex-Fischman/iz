@@ -146,17 +146,7 @@ fn main() {
     passes.push("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
     passes.push("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
     // flat
-    passes.push("insert labels", |context| {
-        context.globals.insert::<Labels>(Labels(HashMap::new()));
-    });
-    passes.push("compile push", compile_push);
-    passes.push("compile move", compile_move);
-    passes.push("compile sp", compile_sp);
-    passes.push("compile read", compile_read);
-    passes.push("compile add", compile_add);
-    passes.push("compile neg", compile_neg);
-    passes.push("compile jumpz", compile_jumpz);
-    passes.push("compile label", compile_label);
+    passes.push("compile instructions", compile_instructions);
     passes.push("interpret", interpret);
 
     context.globals.insert::<Passes>(passes);
@@ -321,6 +311,18 @@ fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut
     }
 }
 
+#[derive(Debug)]
+enum Instructio {
+    Push(i64),
+    Move(i64),
+    Sp,
+    Read,
+    Add,
+    Neg,
+    Jumpz(String),
+    Label(String),
+}
+
 struct Memory(Vec<i64>);
 impl std::ops::Index<i64> for Memory {
     type Output = i64;
@@ -347,17 +349,13 @@ struct Interpreter {
     sp: i64,
 }
 
-trait Instruction: std::fmt::Debug {
-    fn interpret(&self, i: &mut Interpreter);
-}
-
 fn interpret(context: &mut Context) {
     let code: Vec<_> = context.trees.into_iter().map(|child| {
         let token = child.locals.get::<Token>().unwrap().clone();
         if !child.children.is_empty() {
             panic!("after compilation should have finished, there was a child of {}", token)
         }
-        child.locals.remove::<Box<dyn Instruction>>()
+        child.locals.remove::<Instructio>()
             .unwrap_or_else(|| panic!("no instruction for {}", token))
     }).collect();
     let mut i = Interpreter {
@@ -367,7 +365,33 @@ fn interpret(context: &mut Context) {
         sp: -1,
     };
     while let Some(instruction) = code.get(i.pc as usize) {
-        instruction.interpret(&mut i);
+        match instruction {
+            Instructio::Push(int) => {
+                i.sp += 1;
+                i.stack[i.sp] = *int;
+            }
+            Instructio::Move(int) => {
+                i.sp -= int;
+            }
+            Instructio::Sp => {
+                i.stack[i.sp + 1] = &i.stack[i.sp] as *const i64 as i64;
+                i.sp += 1;
+            }
+            Instructio::Read => i.stack[i.sp] = unsafe { *(i.stack[i.sp] as *const i64) },
+            Instructio::Add => {
+                i.sp -= 1;
+                i.stack[i.sp] += i.stack[i.sp + 1];
+            },
+            Instructio::Neg => i.stack[i.sp] = -i.stack[i.sp],
+            Instructio::Jumpz(label) => {
+                if i.stack[i.sp] == 0 {
+                    i.pc = *i.labels.0.get(label)
+                        .unwrap_or_else(|| panic!("unknown label {}", label));
+                }
+                i.sp -= 1;
+            },
+            Instructio::Label(_label) => {},
+        }
         i.pc += 1;
 
         print!("{:<32}\t", format!("{:?}", instruction));
@@ -378,137 +402,41 @@ fn interpret(context: &mut Context) {
     }
 }
 
-#[derive(Debug)]
-struct Push(i64);
-impl Instruction for Push {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.sp += 1;
-        i.stack[i.sp] = self.0;
-    }
-}
-fn compile_push(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(int) = tree.locals.get::<i64>() {
-            tree.locals.insert::<Box<dyn Instruction>>(Box::new(Push(*int)));
-        }
-    }
-}
-#[derive(Debug)]
-struct Move(i64);
-impl Instruction for Move {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.sp -= self.0;
-    }
-}
-fn compile_move(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "~" {
-                let i = tree.children.pop().unwrap().locals.remove::<i64>().unwrap();
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Move(i)));
-            }
-        }
-    }
-}
-#[derive(Debug)]
-struct Sp;
-impl Instruction for Sp {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.stack[i.sp + 1] = &i.stack[i.sp] as *const i64 as i64;
-        i.sp += 1;
-    }
-}
-fn compile_sp(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "^" {
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Sp));
-            }
-        }
-    }
-}
-#[derive(Debug)]
-struct Read;
-impl Instruction for Read {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.stack[i.sp] = unsafe { *(i.stack[i.sp] as *const i64) };
-    }
-}
-fn compile_read(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "*" {
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Read));
-            }
-        }
-    }
-}
-#[derive(Debug)]
-struct Add;
-impl Instruction for Add {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.sp -= 1;
-        i.stack[i.sp] += i.stack[i.sp + 1];
-    }
-}
-fn compile_add(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "add" {
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Add));
-            }
-        }
-    }
-}
-#[derive(Debug)]
-struct Neg;
-impl Instruction for Neg {
-    fn interpret(&self, i: &mut Interpreter) {
-        i.stack[i.sp] = -i.stack[i.sp];
-    }
-}
-fn compile_neg(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "neg" {
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Neg));
-            }
-        }
-    }
-}
-#[derive(Debug)]
-struct Jumpz(String);
-impl Instruction for Jumpz {
-    fn interpret(&self, i: &mut Interpreter) {
-        if i.stack[i.sp] == 0 {
-            i.pc = *i.labels.0.get(&self.0).unwrap_or_else(|| panic!("unknown label {}", self.0));
-        }
-        i.sp -= 1;
-    }
-}
-fn compile_jumpz(context: &mut Context) {
-    for tree in &mut *context.trees {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == "?" {
-                let s = tree.children.pop().unwrap().locals.remove::<Token>().unwrap();
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Jumpz(s.deref().to_owned())));
-            }
-        }
-    }
-}
-#[derive(Debug)]
-struct Label(String);
-impl Instruction for Label {
-    fn interpret(&self, _i: &mut Interpreter) {}
-}
-fn compile_label(context: &mut Context) {    
+fn compile_instructions(context: &mut Context) {
+    context.globals.insert::<Labels>(Labels(HashMap::new()));
     for (i, tree) in context.trees.iter_mut().enumerate() {
-        if let Some(token) = tree.locals.get::<Token>() {
-            if token.deref() == ":" {
-                let s = tree.children.pop().unwrap().locals.remove::<Token>();
-                let s = s.unwrap().deref().to_owned();
-                context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i as i64);
-                tree.locals.insert::<Box<dyn Instruction>>(Box::new(Label(s)));
+        if let Some(int) = tree.locals.get::<i64>() {
+            tree.locals.insert::<Instructio>(Instructio::Push(*int));
+        } else {
+            let token = tree.locals.get::<Token>().unwrap();
+            match token.deref() {
+                "~" => {
+                    let i = tree.children.pop().unwrap().locals.remove::<i64>().unwrap();
+                    tree.locals.insert::<Instructio>(Instructio::Move(i));
+                }
+                "^" => {
+                    tree.locals.insert::<Instructio>(Instructio::Sp);
+                },
+                "*" => {
+                    tree.locals.insert::<Instructio>(Instructio::Read);
+                },
+                "add" => {
+                    tree.locals.insert::<Instructio>(Instructio::Add);
+                },
+                "neg" => {
+                    tree.locals.insert::<Instructio>(Instructio::Neg);
+                },
+                "?" => {
+                    let s = tree.children.pop().unwrap().locals.remove::<Token>().unwrap();
+                    tree.locals.insert::<Instructio>(Instructio::Jumpz(s.deref().to_owned()));
+                }
+                ":" => {
+                    let s = tree.children.pop().unwrap().locals.remove::<Token>();
+                    let s = s.unwrap().deref().to_owned();
+                    context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i as i64);
+                    tree.locals.insert::<Instructio>(Instructio::Label(s));
+                }
+                _ => panic!("unknown instruction {}", token)
             }
         }
     }
