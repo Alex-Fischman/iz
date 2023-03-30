@@ -332,71 +332,7 @@ enum Instruction {
     Label(String),
 }
 
-struct Memory(Vec<i64>);
-impl std::ops::Index<i64> for Memory {
-    type Output = i64;
-    fn index(&self, i: i64) -> &i64 {
-        &self.0[i as usize]
-    }
-}
-impl std::ops::IndexMut<i64> for Memory {
-    fn index_mut(&mut self, i: i64) -> &mut i64 {
-        let i = i as usize;
-        if i >= self.0.len() {
-            self.0.resize(i + 1, 0)
-        }
-        &mut self.0[i]
-    }
-}
-
 struct Labels(HashMap<String, i64>);
-
-fn interpret(context: &mut Context) {
-    let code: Vec<_> = context.trees.into_iter().map(|tree| {
-        if !tree.children.is_empty() {
-            panic!("unexpected child of {}", tree.locals.get::<Token>().unwrap())
-        }
-        tree.locals.remove::<Instruction>().unwrap()
-    }).collect();
-    let labels = context.globals.remove::<Labels>().unwrap();
-    let mut pc = 0;
-    let mut stack = Memory(Vec::new());
-    let mut sp = -1;
-    while let Some(instruction) = code.get(pc as usize) {
-        match instruction {
-            Instruction::Push(int) => {
-                sp += 1;
-                stack[sp] = *int;
-            }
-            Instruction::Move(int) => sp -= int,
-            Instruction::Sp => {
-                stack[sp + 1] = &stack[sp] as *const i64 as i64;
-                sp += 1;
-            }
-            Instruction::Read => stack[sp] = unsafe { *(stack[sp] as *const i64) },
-            Instruction::Add => {
-                sp -= 1;
-                stack[sp] += stack[sp + 1];
-            },
-            Instruction::Neg => stack[sp] = -stack[sp],
-            Instruction::Jumpz(label) => {
-                if stack[sp] == 0 {
-                    pc = *labels.0.get(label)
-                        .unwrap_or_else(|| panic!("unknown label {}", label));
-                }
-                sp -= 1;
-            },
-            Instruction::Label(_label) => {},
-        }
-        pc += 1;
-
-        print!("{:<32}\t", format!("{:?}", instruction));
-        if sp > -1 {
-            print!("{:?}", &stack.0[0..=sp as usize])
-        }
-        println!();
-    }
-}
 
 fn compile_instructions(context: &mut Context) {
     context.globals.insert::<Labels>(Labels(HashMap::new()));
@@ -435,5 +371,68 @@ fn compile_instructions(context: &mut Context) {
                 _ => panic!("unknown instruction {}", token)
             }
         }
+    }
+}
+
+// heap is stored in positive indices
+// stack is stored in negative indices
+struct Memory(HashMap<i64, i64>);
+impl std::ops::Index<i64> for Memory {
+    type Output = i64;
+    fn index(&self, i: i64) -> &i64 {
+        &self.0[&i]
+    }
+}
+impl std::ops::IndexMut<i64> for Memory {
+    fn index_mut(&mut self, i: i64) -> &mut i64 {
+        self.0.entry(i).or_insert(0)
+    }
+}
+
+fn interpret(context: &mut Context) {
+    let code: Vec<_> = context.trees.into_iter().map(|tree| {
+        if !tree.children.is_empty() {
+            panic!("unexpected child of {}", tree.locals.get::<Token>().unwrap())
+        }
+        tree.locals.remove::<Instruction>().unwrap()
+    }).collect();
+    let labels = context.globals.remove::<Labels>().unwrap();
+    let mut pc: usize = 0;
+    let mut memory = Memory(HashMap::new());
+    // sp points to the top element of the stack
+    // 0 means that the stack is empty
+    let mut sp: i64 = 0;
+    while let Some(instruction) = code.get(pc) {
+        match instruction {
+            Instruction::Push(int) => {
+                sp -= 1;
+                memory[sp] = *int;
+            }
+            Instruction::Move(int) => sp += int,
+            Instruction::Sp => {
+                memory[sp - 1] = &memory[sp] as *const i64 as i64;
+                sp -= 1;
+            }
+            Instruction::Read => memory[sp] = unsafe { *(memory[sp] as *const i64) },
+            Instruction::Add => {
+                sp += 1;
+                memory[sp] += memory[sp - 1];
+            },
+            Instruction::Neg => memory[sp] = -memory[sp],
+            Instruction::Jumpz(label) => {
+                if memory[sp] == 0 {
+                    let label = labels.0.get(label)
+                        .unwrap_or_else(|| panic!("unknown label {}", label));
+                    pc = *label as usize;
+                }
+                sp += 1;
+            },
+            Instruction::Label(_label) => {},
+        }
+        pc += 1;
+
+        print!("{:<32}\t", format!("{:?}", instruction));
+        (sp..0).rev().for_each(|i| print!("{:?} ", memory[i]));
+        println!();
     }
 }
