@@ -157,6 +157,9 @@ fn main() {
 fn remove_comments(context: &mut Context) {
     let mut in_comment = false;
     context.trees.retain(|tree| {
+        if !tree.children.is_empty() {
+            panic!("unexpected child of {}", tree.locals.get::<Token>().unwrap())
+        }
         match tree.locals.get::<Token>().unwrap().deref() {
             "#" if !in_comment => in_comment = true,
             "\n" if in_comment => in_comment = false,
@@ -182,6 +185,9 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Context) {
     move |context: &mut Context| {
         let mut i = 1;
         while i < context.trees.len() {
+            if !context.trees[i].children.is_empty() {
+                panic!("unexpected child of {}", context.trees[i].locals.get::<Token>().unwrap())
+            }
             let curr = context.trees[i].locals.get::<Token>().unwrap();
             let prev = context.trees[i - 1].locals.get::<Token>().unwrap();
             if alike(curr) && alike(prev) && curr.source == prev.source && curr.lo == prev.hi {
@@ -200,6 +206,9 @@ fn remove_whitespace(context: &mut Context) {
 
 fn integer_literals(context: &mut Context) {
     for tree in &mut *context.trees {
+        if !tree.children.is_empty() {
+            panic!("unexpected child of {}", tree.locals.get::<Token>().unwrap())
+        }
         if let Some(token) = tree.locals.get::<Token>() {
             let mut chars = token.deref().chars().peekable();
             let is_negative = match chars.peek() {
@@ -343,12 +352,11 @@ impl std::ops::IndexMut<i64> for Memory {
 struct Labels(HashMap<String, i64>);
 
 fn interpret(context: &mut Context) {
-    let code: Vec<_> = context.trees.into_iter().map(|child| {
-        let token = child.locals.get::<Token>().unwrap().clone();
-        if !child.children.is_empty() {
-            panic!("after compilation should have finished, there was a child of {}", token)
+    let code: Vec<_> = context.trees.into_iter().map(|tree| {
+        if !tree.children.is_empty() {
+            panic!("unexpected child of {}", tree.locals.get::<Token>().unwrap())
         }
-        child.locals.remove::<Instruction>().unwrap()
+        tree.locals.remove::<Instruction>().unwrap()
     }).collect();
     let labels = context.globals.remove::<Labels>().unwrap();
     let mut pc = 0;
