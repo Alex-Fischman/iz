@@ -312,7 +312,7 @@ enum Instruction {
     Sp,
     Stack,
     Read,
-    // Write,
+    Write,
 }
 
 struct Labels(HashMap<String, usize>);
@@ -341,6 +341,7 @@ fn compile_instructions(context: &mut Context) {
                 "sp" => Instruction::Sp,
                 "stack" => Instruction::Stack,
                 "read" => Instruction::Read,
+                "write" => Instruction::Write,
                 _ => panic!("unknown command {}", token)
             }
         });
@@ -411,6 +412,11 @@ fn interpret(context: &mut Context) {
                 sp += 1;
             }
             Instruction::Read => memory[sp] = memory[memory[sp]],
+            Instruction::Write => {
+                let addr = memory[sp]; // borrow checker
+                memory[addr] = memory[sp + 1];
+                sp += 2;
+            }
         }
         pc += 1;
 
