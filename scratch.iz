@@ -3,22 +3,22 @@
 # here is a while loop
 1
 while_start:
-^ * 3 - + while_end?
+sp read -3 add while_end?
 # cond ends, body starts
-1 +
+1 add
 0 while_start?
 while_end:
 # stack should just be 3 here
 
 # here are some examples of stack memory management
 13 # a bare literal pushes its value
-^ * # pushes address of top of stack and then reads the value at that address
-~2 # ~ moves the stack pointer (in multiples of word size, can take negative numbers)
+sp read # pushes sp and then reads the value at that address
+2 stack # adds to sp (in multiples of word size, can take negative numbers)
 
 0
 
-# dup = {^ *}
-# drop = {~1}
+# dup = {sp read}
+# drop = {1 stack}
 
 # here is an if else statement
 if_end?

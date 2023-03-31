@@ -143,8 +143,7 @@ fn main() {
     passes.push("parse integer literals", integer_literals);
     // tree
     passes.push("parse {}", match_brackets("{", "}"));
-    passes.push("parse :?", parse_operators(&[":", "?"], Operator::Postfix));
-    passes.push("parse ~$", parse_operators(&["~", "$"], Operator::Prefix));
+    passes.push("parse :?", parse_postfix(&[":", "?"]));
     passes.push("compile instructions", compile_instructions);
     // flat
     passes.push("interpret", interpret);
@@ -282,40 +281,21 @@ fn match_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Context) + 
     }
 }
 
-#[derive(Clone, Copy)]
-enum Operator { Prefix, Postfix }
-
-fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut Context) + 'a {
-    use Operator::*;
+fn parse_postfix<'a>(names: &'a [&'a str]) -> impl Fn(&mut Context) + 'a {
     move |context: &mut Context| {
-        context.for_each(parse_operators(names, operator));
-        let mut i = match operator {
-            Postfix => 0,
-            Prefix => context.trees.len().wrapping_sub(1),
-        };
+        context.for_each(parse_postfix(names));
+        let mut i = 0;
         while i < context.trees.len() {
             let curr = context.trees[i].locals.get::<Token>().unwrap().clone();
             if names.contains(&curr.deref()) {
-                let mut args = Vec::new();
-                if matches!(operator, Postfix) {
-                    if i == 0 {
-                        panic!("no argument for {}", curr)
-                    }
-                    args.push(context.trees.remove(i - 1));
-                    i -= 1;
+                if i == 0 {
+                    panic!("no argument for {}", curr)
                 }
-                if matches!(operator, Prefix) {
-                    if i + 1 == context.trees.len() {
-                        panic!("no argument for {}", curr)
-                    }
-                    args.push(context.trees.remove(i + 1));
-                }
-                context.trees[i].children.append(&mut args);
+                let child = context.trees.remove(i - 1);
+                i -= 1;
+                context.trees[i].children.push(child);
             }
-            i = match operator {
-                Postfix => i + 1,
-                Prefix => i.wrapping_sub(1),
-            };
+            i += 1;
         }
     }
 }
@@ -323,54 +303,47 @@ fn parse_operators<'a>(names: &'a [&'a str], operator: Operator) -> impl Fn(&mut
 #[derive(Debug)]
 enum Instruction {
     Push(i64),
-    Move(i64),
-    Sp,
-    Read,
     Add,
-    Neg,
+    Mul,
     Jumpz(String),
     Label(String),
+    Pc,
+    Return,
+    Sp,
+    Stack,
+    Read,
+    // Write,
 }
 
-struct Labels(HashMap<String, i64>);
-
+struct Labels(HashMap<String, usize>);
 fn compile_instructions(context: &mut Context) {
     context.globals.insert::<Labels>(Labels(HashMap::new()));
     for (i, tree) in context.trees.iter_mut().enumerate() {
-        if let Some(int) = tree.locals.get::<i64>() {
-            tree.locals.insert::<Instruction>(Instruction::Push(*int));
+        tree.locals.insert::<Instruction>(if let Some(int) = tree.locals.get::<i64>() {
+            Instruction::Push(*int)
         } else {
             let token = tree.locals.get::<Token>().unwrap();
             match token.deref() {
-                "~" => {
-                    let i = tree.children.pop().unwrap().locals.remove::<i64>().unwrap();
-                    tree.locals.insert::<Instruction>(Instruction::Move(i));
-                }
-                "^" => {
-                    tree.locals.insert::<Instruction>(Instruction::Sp);
-                },
-                "*" => {
-                    tree.locals.insert::<Instruction>(Instruction::Read);
-                },
-                "+" => {
-                    tree.locals.insert::<Instruction>(Instruction::Add);
-                },
-                "-" => {
-                    tree.locals.insert::<Instruction>(Instruction::Neg);
-                },
+                "add" => Instruction::Add,
+                "mul" => Instruction::Mul,
                 "?" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>().unwrap();
-                    tree.locals.insert::<Instruction>(Instruction::Jumpz(s.deref().to_owned()));
+                    Instruction::Jumpz(s.deref().to_owned())
                 }
                 ":" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>();
                     let s = s.unwrap().deref().to_owned();
-                    context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i as i64);
-                    tree.locals.insert::<Instruction>(Instruction::Label(s));
+                    context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i);
+                    Instruction::Label(s)
                 }
-                _ => panic!("unknown instruction {}", token)
+                "pc" => Instruction::Pc,
+                "return" => Instruction::Return,
+                "sp" => Instruction::Sp,
+                "stack" => Instruction::Stack,
+                "read" => Instruction::Read,
+                _ => panic!("unknown command {}", token)
             }
-        }
+        });
     }
 }
 
@@ -400,32 +373,44 @@ fn interpret(context: &mut Context) {
     let mut memory = Memory(HashMap::new());
     let mut pc: usize = 0;
     let mut sp: i64 = 0;
-    while let Some(instruction) = code.get(pc) {
+    while let Some(instruction) = code.get(pc as usize) {
         match instruction {
             Instruction::Push(int) => {
                 sp -= 1;
                 memory[sp] = *int;
             }
-            Instruction::Move(int) => sp += int,
-            Instruction::Sp => {
-                memory[sp - 1] = sp;
-                sp -= 1;
-            }
-            Instruction::Read => memory[sp] = memory[memory[sp]],
             Instruction::Add => {
                 sp += 1;
                 memory[sp] += memory[sp - 1];
-            },
-            Instruction::Neg => memory[sp] = -memory[sp],
+            }
+            Instruction::Mul => {
+                sp += 1;
+                memory[sp] *= memory[sp - 1];
+            }
             Instruction::Jumpz(label) => {
                 if memory[sp] == 0 {
-                    let label = labels.0.get(label)
-                        .unwrap_or_else(|| panic!("unknown label {}", label));
-                    pc = *label as usize;
+                    pc = *labels.0.get(label).unwrap_or_else(|| panic!("unknown label {}", label));
                 }
                 sp += 1;
             },
             Instruction::Label(_label) => {},
+            Instruction::Pc => {
+                sp -= 1;
+                memory[sp] = pc as i64;
+            }
+            Instruction::Return => {
+                pc = memory[sp] as usize;
+                sp += 1;
+            }
+            Instruction::Sp => {
+                sp -= 1;
+                memory[sp] = sp + 1;
+            }
+            Instruction::Stack => {
+                sp += memory[sp];
+                sp += 1;
+            }
+            Instruction::Read => memory[sp] = memory[memory[sp]],
         }
         pc += 1;
 
