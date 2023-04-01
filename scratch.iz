@@ -19,6 +19,7 @@ sp read # pushes sp and then reads the value at that address
 
 # dup = {sp read}
 # drop = {1 stack}
+# swap = {sp 1 add read sp 1 add read sp 3 add write sp 1 add write}
 
 # here is an if else statement
 if_end?
