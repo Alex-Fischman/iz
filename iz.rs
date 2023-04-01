@@ -304,7 +304,6 @@ fn parse_postfix<'a>(names: &'a [&'a str]) -> impl Fn(&mut Context) + 'a {
 enum Instruction {
     Push(i64),
     Add,
-    Mul,
     Jumpz(String),
     Label(String),
     Pc,
@@ -325,7 +324,6 @@ fn compile_instructions(context: &mut Context) {
             let token = tree.locals.get::<Token>().unwrap();
             match token.deref() {
                 "add" => Instruction::Add,
-                "mul" => Instruction::Mul,
                 "?" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>().unwrap();
                     Instruction::Jumpz(s.deref().to_owned())
@@ -383,10 +381,6 @@ fn interpret(context: &mut Context) {
             Instruction::Add => {
                 sp += 1;
                 memory[sp] += memory[sp - 1];
-            }
-            Instruction::Mul => {
-                sp += 1;
-                memory[sp] *= memory[sp - 1];
             }
             Instruction::Jumpz(label) => {
                 if memory[sp] == 0 {
