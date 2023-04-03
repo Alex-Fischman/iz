@@ -145,6 +145,7 @@ fn main() {
     passes.push("parse {}", match_brackets("{", "}"));
     passes.push("parse :?", parse_postfix(&[":", "?"]));
     passes.push("compile instructions", compile_instructions);
+    passes.push("compute effects", compute_effects);
     // flat
     passes.push("interpret", interpret);
 
@@ -314,35 +315,87 @@ enum Instruction {
     Write,
 }
 
-struct Labels(HashMap<String, usize>);
 fn compile_instructions(context: &mut Context) {
-    context.globals.insert::<Labels>(Labels(HashMap::new()));
-    for (i, tree) in context.trees.iter_mut().enumerate() {
-        tree.locals.insert::<Instruction>(if let Some(int) = tree.locals.get::<i64>() {
-            Instruction::Push(*int)
+    context.for_each(compile_instructions);
+    for tree in &mut *context.trees {
+        let instruction = if let Some(int) = tree.locals.get::<i64>() {
+            Some(Instruction::Push(*int))
         } else {
             let token = tree.locals.get::<Token>().unwrap();
             match token.deref() {
-                "add" => Instruction::Add,
+                "add" => Some(Instruction::Add),
                 "?" => {
-                    let s = tree.children.pop().unwrap().locals.remove::<Token>().unwrap();
-                    Instruction::Jumpz(s.deref().to_owned())
+                    let s = tree.children.pop().unwrap().locals.remove::<Token>();
+                    Some(Instruction::Jumpz(s.unwrap().deref().to_owned()))
                 }
                 ":" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>();
-                    let s = s.unwrap().deref().to_owned();
-                    context.globals.get_mut::<Labels>().unwrap().0.insert(s.clone(), i);
-                    Instruction::Label(s)
+                    Some(Instruction::Label(s.unwrap().deref().to_owned()))
                 }
-                "pc" => Instruction::Pc,
-                "return" => Instruction::Return,
-                "sp" => Instruction::Sp,
-                "stack" => Instruction::Stack,
-                "read" => Instruction::Read,
-                "write" => Instruction::Write,
-                _ => panic!("unknown command {}", token)
+                "pc" => Some(Instruction::Pc),
+                "return" => Some(Instruction::Return),
+                "sp" => Some(Instruction::Sp),
+                "stack" => Some(Instruction::Stack),
+                "read" => Some(Instruction::Read),
+                "write" => Some(Instruction::Write),
+                _ => None,
             }
-        });
+        };
+        if let Some(instruction) = instruction {
+            tree.locals.insert::<Vec<Instruction>>(vec![instruction]);
+        }
+    }
+}
+
+struct Effect { popped: usize, pushed: usize }
+impl Effect {
+    fn compose(&mut self, other: Effect) {
+        if self.pushed < other.popped {
+            self.popped += other.popped - self.pushed;
+            self.pushed = 0;
+        } else {
+            self.pushed -= other.popped;
+        }
+        self.pushed += other.pushed;
+    }
+}
+
+fn compute_effects(context: &mut Context) {
+    compute_effect(context);
+    fn compute_effect(context: &mut Context) -> Effect {
+        let mut effect = Effect { popped: 0, pushed: 0 };
+        for tree in &mut *context.trees {
+            effect.compose(if let Some(instructions) = tree.locals.get::<Vec<Instruction>>() {
+                let mut effect = Effect { popped: 0, pushed: 0 };
+                for instruction in instructions {
+                    effect.compose(match instruction {
+                        Instruction::Push(_) => Effect { popped: 0, pushed: 1 },
+                        Instruction::Add => Effect { popped: 2, pushed: 1 },
+                        Instruction::Jumpz(_) => todo!(),
+                        Instruction::Label(_) => Effect { popped: 0, pushed: 0 },
+                        Instruction::Pc => Effect { popped: 0, pushed: 1 },
+                        Instruction::Return => Effect { popped: 1, pushed: 0 },
+                        Instruction::Sp => Effect { popped: 0, pushed: 1 },
+                        Instruction::Stack => todo!(),
+                        Instruction::Read => Effect { popped: 1, pushed: 1 },
+                        Instruction::Write => Effect { popped: 2, pushed: 0 },
+                    });
+                }
+                effect
+            } else {
+                let token = tree.locals.get::<Token>().unwrap();
+                if token.deref() == "{" {
+                    tree.locals.insert::<Effect>(compute_effect(&mut Context {
+                        globals: context.globals,
+                        trees: &mut tree.children,
+                    }));
+                    Effect { popped: 0, pushed: 1 }
+                } else {
+                    panic!("unknown effect for {}", token)
+                }
+            });
+        }
+        effect
     }
 }
 
@@ -362,13 +415,19 @@ impl std::ops::IndexMut<i64> for Memory {
 }
 
 fn interpret(context: &mut Context) {
-    let code: Vec<_> = context.trees.into_iter().map(|tree| {
+    let code: Vec<_> = context.trees.into_iter().flat_map(|tree| {
         if !tree.children.is_empty() {
             panic!("unexpected child of {}", tree.locals.get::<Token>().unwrap())
         }
-        tree.locals.remove::<Instruction>().unwrap()
+        tree.locals.remove::<Vec<Instruction>>()
+            .unwrap_or_else(|| panic!("no instruction for {}", tree.locals.get::<Token>().unwrap()))
     }).collect();
-    let labels = context.globals.remove::<Labels>().unwrap();
+    let mut labels: HashMap<String, usize> = HashMap::new();
+    for (i, instruction) in code.iter().enumerate() {
+        if let Instruction::Label(s) = instruction {
+            labels.insert(s.clone(), i);
+        }
+    }
     let mut memory = Memory(HashMap::new());
     let mut pc: usize = 0;
     let mut sp: i64 = 0;
@@ -384,7 +443,7 @@ fn interpret(context: &mut Context) {
             }
             Instruction::Jumpz(label) => {
                 if memory[sp] == 0 {
-                    pc = *labels.0.get(label).unwrap_or_else(|| panic!("unknown label {}", label));
+                    pc = *labels.get(label).unwrap_or_else(|| panic!("unknown label {}", label));
                 }
                 sp += 1;
             },
