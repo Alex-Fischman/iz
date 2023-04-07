@@ -310,7 +310,6 @@ enum Instruction {
     Pc,
     Return,
     Sp,
-    Stack,
     Read,
     Write,
 }
@@ -335,7 +334,6 @@ fn compile_instructions(context: &mut Context) {
                 "pc" => Some(Instruction::Pc),
                 "return" => Some(Instruction::Return),
                 "sp" => Some(Instruction::Sp),
-                "stack" => Some(Instruction::Stack),
                 "read" => Some(Instruction::Read),
                 "write" => Some(Instruction::Write),
                 _ => None,
@@ -376,7 +374,6 @@ fn compute_effects(context: &mut Context) {
                         Instruction::Pc => Effect { popped: 0, pushed: 1 },
                         Instruction::Return => Effect { popped: 1, pushed: 0 },
                         Instruction::Sp => Effect { popped: 0, pushed: 1 },
-                        Instruction::Stack => todo!(),
                         Instruction::Read => Effect { popped: 1, pushed: 1 },
                         Instruction::Write => Effect { popped: 2, pushed: 0 },
                     });
@@ -459,10 +456,6 @@ fn interpret(context: &mut Context) {
             Instruction::Sp => {
                 sp -= 1;
                 memory[sp] = sp + 1;
-            }
-            Instruction::Stack => {
-                sp += memory[sp];
-                sp += 1;
             }
             Instruction::Read => memory[sp] = memory[memory[sp]],
             Instruction::Write => {
