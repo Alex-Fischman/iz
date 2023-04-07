@@ -48,7 +48,7 @@ impl std::fmt::Display for Token {
     }
 }
 
-use std::collections::HashMap;
+use std::{any::{Any, TypeId}, collections::HashMap};
 struct Data(HashMap<TypeId, Box<dyn Any>>);
 impl Data {
     fn insert<T: Any>(&mut self, x: T) -> Option<T> {
@@ -68,7 +68,6 @@ impl Data {
     }
 }
 
-use std::any::{Any, TypeId};
 struct Tree {
     locals: Data,
     children: Vec<Tree>,
@@ -144,8 +143,8 @@ fn main() {
     // tree
     passes.push("parse {}", match_brackets("{", "}"));
     passes.push("parse :?", parse_postfix(&[":", "?"]));
+    passes.push("analyze types", type_check);
     passes.push("compile instructions", compile_instructions);
-    passes.push("compute effects", compute_effects);
     // flat
     passes.push("interpret", interpret);
 
@@ -314,6 +313,38 @@ enum Instruction {
     Write,
 }
 
+#[derive(Debug, PartialEq)]
+enum Type {
+    Int,
+    Ptr,
+}
+
+struct Effect {
+    inputs: Vec<Type>,
+    outputs: Vec<Type>,
+}
+
+impl Effect {
+    fn new<I: IntoIterator<Item = Type>>(inputs: I, outputs: I) -> Effect {
+        Effect { inputs: inputs.into_iter().collect(), outputs: outputs.into_iter().collect() }
+    }
+
+    fn compose(&mut self, mut other: Effect) {
+        for input in other.inputs.into_iter().rev() {
+            match self.outputs.pop() {
+                Some(output) if input == output => {}
+                Some(output) => panic!("expected {:?}, found {:?}", output, input),
+                None => self.inputs.insert(0, input),
+            }
+        }
+        self.outputs.append(&mut other.outputs);
+    }
+}
+
+fn type_check(_context: &mut Context) {
+    todo!()
+}
+
 fn compile_instructions(context: &mut Context) {
     context.for_each(compile_instructions);
     for tree in &mut *context.trees {
@@ -342,57 +373,6 @@ fn compile_instructions(context: &mut Context) {
         if let Some(instruction) = instruction {
             tree.locals.insert::<Vec<Instruction>>(vec![instruction]);
         }
-    }
-}
-
-struct Effect { popped: usize, pushed: usize }
-impl Effect {
-    fn compose(&mut self, other: Effect) {
-        if self.pushed < other.popped {
-            self.popped += other.popped - self.pushed;
-            self.pushed = 0;
-        } else {
-            self.pushed -= other.popped;
-        }
-        self.pushed += other.pushed;
-    }
-}
-
-fn compute_effects(context: &mut Context) {
-    compute_effect(context);
-    fn compute_effect(context: &mut Context) -> Effect {
-        let mut effect = Effect { popped: 0, pushed: 0 };
-        for tree in &mut *context.trees {
-            effect.compose(if let Some(instructions) = tree.locals.get::<Vec<Instruction>>() {
-                let mut effect = Effect { popped: 0, pushed: 0 };
-                for instruction in instructions {
-                    effect.compose(match instruction {
-                        Instruction::Push(_) => Effect { popped: 0, pushed: 1 },
-                        Instruction::Add => Effect { popped: 2, pushed: 1 },
-                        Instruction::Jumpz(_) => todo!(),
-                        Instruction::Label(_) => Effect { popped: 0, pushed: 0 },
-                        Instruction::Pc => Effect { popped: 0, pushed: 1 },
-                        Instruction::Return => Effect { popped: 1, pushed: 0 },
-                        Instruction::Sp => Effect { popped: 0, pushed: 1 },
-                        Instruction::Read => Effect { popped: 1, pushed: 1 },
-                        Instruction::Write => Effect { popped: 2, pushed: 0 },
-                    });
-                }
-                effect
-            } else {
-                let token = tree.locals.get::<Token>().unwrap();
-                if token.deref() == "{" {
-                    tree.locals.insert::<Effect>(compute_effect(&mut Context {
-                        globals: context.globals,
-                        trees: &mut tree.children,
-                    }));
-                    Effect { popped: 0, pushed: 1 }
-                } else {
-                    panic!("unknown effect for {}", token)
-                }
-            });
-        }
-        effect
     }
 }
 
