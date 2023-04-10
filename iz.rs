@@ -300,32 +300,22 @@ fn parse_postfix<'a>(names: &'a [&'a str]) -> impl Fn(&mut Context) + 'a {
     }
 }
 
-#[derive(Debug)]
-enum Instruction {
-    Push(i64),
-    Add,
-    Jumpz(String),
-    Label(String),
-    Pc,
-    Return,
-    Sp,
-    Read,
-    Write,
-}
-
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Type {
     Int,
-    Ptr,
+    Function(Effect),
 }
 
+#[derive(Clone, Debug, PartialEq)]
 struct Effect {
     inputs: Vec<Type>,
     outputs: Vec<Type>,
 }
 
 impl Effect {
-    fn new<I: IntoIterator<Item = Type>>(inputs: I, outputs: I) -> Effect {
+    fn new<I, O>(inputs: I, outputs: O) -> Effect
+    where I: IntoIterator<Item = Type>,
+          O: IntoIterator<Item = Type> {
         Effect { inputs: inputs.into_iter().collect(), outputs: outputs.into_iter().collect() }
     }
 
@@ -341,8 +331,54 @@ impl Effect {
     }
 }
 
-fn type_check(_context: &mut Context) {
-    todo!()
+fn type_check(context: &mut Context) {
+    type_check(context);
+    fn type_check(context: &mut Context) -> Effect {
+        let mut e = Effect::new([], []);
+        for tree in &mut *context.trees {
+            let children = type_check(&mut Context {
+                globals: context.globals,
+                trees: &mut tree.children,
+            });
+            let effect = if let Some(_int) = tree.locals.get::<i64>() {
+                Some(Effect::new([], [Type::Int]))
+            } else {
+                let token = tree.locals.get::<Token>().unwrap();
+                match token.deref() {
+                    "pop" => Some(Effect::new([Type::Int], [])),
+                    "add" => Some(Effect::new([Type::Int], [Type::Int])),
+                    "?" => Some(Effect::new([Type::Int], [])),
+                    ":" => Some(Effect::new([], [])),
+                    "pc" => Some(Effect::new([], [Type::Int])),
+                    "return" => Some(Effect::new([Type::Int], [])),
+                    "sp" => Some(Effect::new([], [Type::Int])),
+                    "read" => Some(Effect::new([Type::Int], [Type::Int])),
+                    "write" => Some(Effect::new([Type::Int, Type::Int], [])),
+                    "{" => Some(Effect::new([], [Type::Function(children)])),
+                    _ => None,
+                }
+            };
+            if let Some(effect) = effect {
+                tree.locals.insert::<Effect>(effect.clone());
+                e.compose(effect);
+            }
+        }
+        e
+    }
+}
+
+#[derive(Debug)]
+enum Instruction {
+    Push(i64),
+    Pop,
+    Add,
+    Jumpz(String),
+    Label(String),
+    Pc,
+    Return,
+    Sp,
+    Read,
+    Write,
 }
 
 fn compile_instructions(context: &mut Context) {
@@ -353,6 +389,7 @@ fn compile_instructions(context: &mut Context) {
         } else {
             let token = tree.locals.get::<Token>().unwrap();
             match token.deref() {
+                "pop" => Some(Instruction::Pop),
                 "add" => Some(Instruction::Add),
                 "?" => {
                     let s = tree.children.pop().unwrap().locals.remove::<Token>();
@@ -414,6 +451,7 @@ fn interpret(context: &mut Context) {
                 sp -= 1;
                 memory[sp] = *int;
             }
+            Instruction::Pop => sp += 1,
             Instruction::Add => {
                 sp += 1;
                 memory[sp] += memory[sp - 1];

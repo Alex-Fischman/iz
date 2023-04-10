@@ -13,7 +13,7 @@ while_end:
 # here are some examples of stack memory management
 13 # a bare literal pushes its value
 sp read # pushes sp and then reads the value at that address
-2 stack # adds to sp (in multiples of word size, can take negative numbers)
+pop pop # adds to sp
 
 0
 
