@@ -16,7 +16,7 @@ A minimal compiler will be an almost direct translation from text to bytecode. T
 
 - Let `Data` be a dynamically typed map.
 - Let `Node` be a wrapped integer type.
-- Let `Context` be a map from `Node`s to `Data`s.
+- Let `Context` be a tree where each node has an arbitrary number of children and holds arbitrary data.
 	- A `Context` is interpreted as an adjacency list representation of a syntax tree, where each node can hold arbitrary data.
 	- To do this, every `Data` contains a list of the children of the current node, and the 0 `Node` is treated as the root.
 - Let a `Pass` be a function that modifies a `Context`.
