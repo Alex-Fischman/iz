@@ -107,5 +107,19 @@ fn main() {
         tree.children.push(child);
     }
 
+    remove_comments(&mut tree);
+
     print!("{}", tree);
+}
+
+fn remove_comments(tree: &mut Tree) {
+    let mut in_comment = false;
+    tree.children.retain(|child| {
+        match child.contents.get::<Token>().unwrap().deref() {
+            "#" if !in_comment => in_comment = true,
+            "\n" if in_comment => in_comment = false,
+            _ => {}
+        }
+        !in_comment
+    });
 }
