@@ -108,6 +108,7 @@ fn main() {
     }
 
     remove_comments(&mut tree);
+    remove_whitespace(&mut tree);
 
     print!("{}", tree);
 }
@@ -121,5 +122,11 @@ fn remove_comments(tree: &mut Tree) {
             _ => {}
         }
         !in_comment
+    });
+}
+
+fn remove_whitespace(tree: &mut Tree) {
+    tree.children.retain(|child| {
+        !child.contents.get::<Token>().unwrap().deref().chars().next().unwrap().is_whitespace()
     });
 }
