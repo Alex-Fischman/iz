@@ -43,41 +43,37 @@ impl std::fmt::Display for Token {
     }
 }
 
-struct Data(HashMap<TypeId, Box<dyn Any>>);
-
-impl Data {
-    fn insert<T: 'static>(&mut self, value: T) -> Option<T> {
-        self.0.insert(TypeId::of::<T>(), Box::new(value)).map(|any| *any.downcast().unwrap())
-    }
-
-    fn remove<T: 'static>(&mut self) -> Option<T> {
-        self.0.remove(&TypeId::of::<T>()).map(|any| *any.downcast().unwrap())
-    }
-
-    fn get<T: 'static>(&self) -> Option<&T> {
-        self.0.get(&TypeId::of::<T>()).map(|any| any.downcast_ref().unwrap())
-    }
-
-    fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.0.get_mut(&TypeId::of::<T>()).map(|any| any.downcast_mut().unwrap())
-    }
-}
-
 struct Tree {
     children: Vec<Tree>,
-    contents: Data,
+    contents: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Tree {
     fn new() -> Tree {
-        Tree { children: Vec::new(), contents: Data(HashMap::new()) }
+        Tree { children: Vec::new(), contents: HashMap::new() }
+    }
+
+    fn insert<T: 'static>(&mut self, value: T) -> Option<T> {
+        self.contents.insert(TypeId::of::<T>(), Box::new(value)).map(|any| *any.downcast().unwrap())
+    }
+
+    fn remove<T: 'static>(&mut self) -> Option<T> {
+        self.contents.remove(&TypeId::of::<T>()).map(|any| *any.downcast().unwrap())
+    }
+
+    fn get<T: 'static>(&self) -> Option<&T> {
+        self.contents.get(&TypeId::of::<T>()).map(|any| any.downcast_ref().unwrap())
+    }
+
+    fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.contents.get_mut(&TypeId::of::<T>()).map(|any| any.downcast_mut().unwrap())
     }
 }
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         fn fmt(tree: &Tree, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
-            writeln!(f, "{}{}", "\t".repeat(depth), tree.contents.get::<Token>().unwrap())?;
+            writeln!(f, "{}{}", "\t".repeat(depth), tree.get::<Token>().unwrap())?;
             tree.children.iter().map(|child| fmt(child, f, depth + 1)).collect()
         }
         fmt(self, f, 0)
@@ -97,13 +93,13 @@ fn main() {
     let source = std::rc::Rc::new(Source { name, text });
 
     let mut tree = Tree::new();
-    tree.contents.insert(Token { source: source.clone(), lo: 0, hi: 0 });
+    tree.insert(Token { source: source.clone(), lo: 0, hi: 0 });
 
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
         let mut child = Tree::new();
-        child.contents.insert(Token { source: source.clone(), lo, hi });
+        child.insert(Token { source: source.clone(), lo, hi });
         tree.children.push(child);
     }
 
@@ -116,7 +112,7 @@ fn main() {
 fn remove_comments(tree: &mut Tree) {
     let mut in_comment = false;
     tree.children.retain(|child| {
-        match child.contents.get::<Token>().unwrap().deref() {
+        match child.get::<Token>().unwrap().deref() {
             "#" if !in_comment => in_comment = true,
             "\n" if in_comment => in_comment = false,
             _ => {}
@@ -127,6 +123,6 @@ fn remove_comments(tree: &mut Tree) {
 
 fn remove_whitespace(tree: &mut Tree) {
     tree.children.retain(|child| {
-        !child.contents.get::<Token>().unwrap().deref().chars().next().unwrap().is_whitespace()
+        !child.get::<Token>().unwrap().deref().chars().next().unwrap().is_whitespace()
     });
 }
