@@ -16,18 +16,12 @@ A minimal compiler will be an almost direct translation from text to bytecode. T
 
 - Let `Data` be a dynamically typed map.
 - Let `Node` be a wrapped integer type.
-- Let `Context` be a tree where each node has an arbitrary number of children and holds arbitrary data.
-	- A `Context` is interpreted as an adjacency list representation of a syntax tree, where each node can hold arbitrary data.
-	- To do this, every `Data` contains a list of the children of the current node, and the 0 `Node` is treated as the root.
-- Let a `Pass` be a function that modifies a `Context`.
-	- A `Pass` is implemented in Rust as a `Fn(&mut Context)`, but it could just as easily be a `Fn(&Context) -> Context`.
-	- There are many, many invariants that every `Pass` must hold, such as each `Node` holding a list of its children.
-- Let an `Interpreter` be a function that takes a `Context` and runs it as a `Pass`.
-	- The `Context` must have the form where each child of the root contains a list of `Instruction`s, and has no children.
-	- The `Interpreter` doesn't strictly have to be an interpreter, it could be a JIT compiler or something similar.
-- Let the "frontend" refer to the list of `Pass`es.
-- Let the "backend" refer to a function that takes a `Context` and performs a side effect with it.
-	- The `Interpreter` can be a backend, albeit a weird one.
+- Let `Tree` be a tree where each node has a token, an arbitrary number of children, and other arbitrary data.
+- Let `Pass` be a function that modifies a `Tree`.
+	- A `Pass` is implemented in Rust as a `Fn(&mut Tree)`, but it could just as easily be a `Fn(&Tree) -> Tree`.
+- Let an `Interpreter` be a function that takes a `Tree` and runs it as a `Pass`.
+	- The `Tree` must have the form where each child of the root contains a list of `Instruction`s, and has no children.
+	- The `Interpreter` could be a JIT compiler, the implementation isn't important.
 
 ### Instructions
 The `Interpreter` will represent a virtual machine with the following abstract memory layout. `int`s are signed 64 bit 2s complement integers.
@@ -37,7 +31,7 @@ The `Interpreter` will represent a virtual machine with the following abstract m
 [Instruction]: | 0 | 1 | 2 | 3 | 4 | ... |
                Code         ^Pc
 ```
-It will support the following `Instruction`s. ("push {value}" means to decrement `Sp` and set the value that it points to, "pop {value}" means to increment `Sp` and use the value that it used to point to.)
+It will support the following `Instruction`s. "push {value}" means to decrement `Sp` and set the value that it points to, "pop {value}" means to increment `Sp` and use the value that it used to point to.
 - `Push(int)`: push the immediate onto the stack
 - `Pop`: increment `Sp`
 - `Sp`: push `Sp` onto the stack
