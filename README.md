@@ -21,13 +21,35 @@ A minimal compiler will be an almost direct translation from text to bytecode. T
 	- To do this, every `Data` contains a list of the children of the current node, and the 0 `Node` is treated as the root.
 - Let a `Pass` be a function that modifies a `Context`.
 	- A `Pass` is implemented in Rust as a `Fn(&mut Context)`, but it could just as easily be a `Fn(&Context) -> Context`.
-	- There are many, many invariants that every `Pass` must hold, such as the list of `Pass`es to be run in the root, or each `Node` holding a list of its children.
+	- There are many, many invariants that every `Pass` must hold, such as each `Node` holding a list of its children.
 - Let an `Interpreter` be a function that takes a `Context` and runs it as a `Pass`.
 	- The `Context` must have the form where each child of the root contains a list of `Instruction`s, and has no children.
 	- The `Interpreter` doesn't strictly have to be an interpreter, it could be a JIT compiler or something similar.
 - Let the "frontend" refer to the list of `Pass`es.
 - Let the "backend" refer to a function that takes a `Context` and performs a side effect with it.
 	- The `Interpreter` can be a backend, albeit a weird one.
+
+### Instructions
+The `Interpreter` will represent a virtual machine with the following abstract memory layout. `int`s are signed 64 bit 2s complement integers.
+```
+[int]: | 0 | 1 | 2 | 3 | 4 | ... | -3 | -2 | -1 |
+       Heap                       ^Sp       Stack
+[Instruction]: | 0 | 1 | 2 | 3 | 4 | ... |
+               Code         ^Pc
+```
+It will support the following `Instruction`s. ("push {value}" means to decrement `Sp` and set the value that it points to, "pop {value}" means to increment `Sp` and use the value that it used to point to.)
+- `Push(int)`: push the immediate onto the stack
+- `Pop`: increment `Sp`
+- `Sp`: push `Sp` onto the stack
+- `Pc`: push `Pc` onto the stack
+- `Return`: pop a value off of the stack and put it into `Pc`
+- `Write`: pop an address, pop a value, write the value to the address
+- `Read`: pop an address, push the value at that address
+- `Add`: pop two values, push their sum
+- `Mul`: pop two values, push their product
+- `Ltz`: pop a value, push 1 if it's negative or 0 otherwise
+- `Jumpz(String)`: pop a value, if it's equal to 0 set `Pc` to point to the `Label` with a matching immediate
+- `Label(String)`: do nothing
 
 ### Future
 
