@@ -64,15 +64,20 @@ impl Data {
 }
 
 struct Tree {
-    token: Token,
     children: Vec<Tree>,
     contents: Data,
+}
+
+impl Tree {
+    fn new() -> Tree {
+        Tree { children: Vec::new(), contents: Data(HashMap::new()) }
+    }
 }
 
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         fn fmt(tree: &Tree, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
-            writeln!(f, "{}{}", "\t".repeat(depth), tree.token)?;
+            writeln!(f, "{}{}", "\t".repeat(depth), tree.contents.get::<Token>().unwrap())?;
             tree.children.iter().map(|child| fmt(child, f, depth + 1)).collect()
         }
         fmt(self, f, 0)
@@ -91,20 +96,15 @@ fn main() {
     };
     let source = std::rc::Rc::new(Source { name, text });
 
-    let mut tree = Tree {
-        token: Token { source: source.clone(), lo: 0, hi: 0 },
-        children: Vec::new(),
-        contents: Data(HashMap::new()),
-    };
+    let mut tree = Tree::new();
+    tree.contents.insert(Token { source: source.clone(), lo: 0, hi: 0 });
 
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
-        tree.children.push(Tree {
-            token: Token { source: source.clone(), lo, hi },
-            children: Vec::new(),
-            contents: Data(HashMap::new()),
-        });
+        let mut child = Tree::new();
+        child.contents.insert(Token { source: source.clone(), lo, hi });
+        tree.children.push(child);
     }
 
     print!("{}", tree);
