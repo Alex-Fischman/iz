@@ -1,10 +1,11 @@
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
+    rc::Rc,
 };
 
 struct Token {
-    source: std::rc::Rc<Source>,
+    source: Rc<Source>,
     lo: usize,
     hi: usize,
 }
@@ -25,9 +26,6 @@ impl Deref for Token {
 
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.lo == 0 && self.hi == 0 {
-            return Ok(());
-        }
         let mut row = 1;
         let mut col = 1;
         for (i, c) in self.source.text.char_indices() {
@@ -74,10 +72,30 @@ impl Tree {
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         fn fmt(tree: &Tree, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
-            writeln!(f, "{}{}", "\t".repeat(depth), tree.get::<Token>().unwrap())?;
+            if let Some(token) = tree.get::<Token>() {
+                writeln!(f, "{}{}", "\t".repeat(depth), token)?;
+            }
             tree.children.iter().map(|child| fmt(child, f, depth + 1)).collect()
         }
         fmt(self, f, 0)
+    }
+}
+
+struct Pass {
+    name: String,
+    func: Box<dyn Fn(&mut Tree)>,
+}
+
+impl Pass {
+    fn new<F: Fn(&mut Tree) + 'static>(name: &str, func: F) -> Pass {
+        Pass { name: name.to_owned(), func: Box::new(func) }
+    }
+
+    fn run_passes(passes: VecDeque<Pass>, tree: &mut Tree) {
+        tree.insert(passes);
+        while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
+            (pass.func)(tree)
+        }
     }
 }
 
@@ -91,11 +109,10 @@ fn main() {
         Ok(text) => text,
         Err(_) => panic!("could not read {}", name),
     };
-    let source = std::rc::Rc::new(Source { name, text });
+    let source = Rc::new(Source { name, text });
 
     let mut tree = Tree::new();
-    tree.insert(Token { source: source.clone(), lo: 0, hi: 0 });
-
+    tree.insert(source.clone());
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
@@ -104,12 +121,13 @@ fn main() {
         tree.children.push(child);
     }
 
-    remove_comments(&mut tree);
-    remove_whitespace(&mut tree);
-    concat_alike_tokens(is_identifier)(&mut tree);
-    concat_alike_tokens(is_operator)(&mut tree);
-
-    print!("{}", tree);
+    let mut passes = VecDeque::new();
+    passes.push_back(Pass::new("remove comments", remove_comments));
+    passes.push_back(Pass::new("remove whitespace", remove_whitespace));
+    passes.push_back(Pass::new("concat identifiers", concat_alike_tokens(is_identifier)));
+    passes.push_back(Pass::new("concat operators", concat_alike_tokens(is_operator)));
+    passes.push_back(Pass::new("printing backend", |tree| print!("{}", tree)));
+    Pass::run_passes(passes, &mut tree);
 }
 
 fn remove_comments(tree: &mut Tree) {
