@@ -12,15 +12,6 @@ A minimal compiler will be an almost direct translation from text to bytecode. T
 
 ## Implementation
 
-### Definitions
-- Let `Data` be a dynamically typed map.
-- Let `Node` be a wrapped integer type.
-- Let `Tree` be a tree where each node has an arbitrary number of children and arbitrary other data.
-- Let `Pass` be a function that modifies a `Tree`.
-- Let an `Interpreter` be a function that takes a `Tree` and runs it as a `Pass`.
-	- The `Tree` must have the form where each child of the root contains a list of `Instruction`s, and has no children.
-	- The "`Interpreter`" could be implemented as a JIT compiler.
-
 ### Interpreter
 The `Interpreter` will run code that targets a virtual machine with the following properties.
 - `int`s are signed 64 bit 2s complement integers.
