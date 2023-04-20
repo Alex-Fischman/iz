@@ -9,6 +9,7 @@ struct Token {
     hi: usize,
 }
 
+#[derive(PartialEq)]
 struct Source {
     name: String,
     text: String,
@@ -105,6 +106,8 @@ fn main() {
 
     remove_comments(&mut tree);
     remove_whitespace(&mut tree);
+    concat_alike_tokens(is_identifier)(&mut tree);
+    concat_alike_tokens(is_operator)(&mut tree);
 
     print!("{}", tree);
 }
@@ -121,8 +124,34 @@ fn remove_comments(tree: &mut Tree) {
     });
 }
 
+fn is_identifier(s: &str) -> bool {
+    s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+}
+
+fn is_whitespace(s: &str) -> bool {
+    s.chars().all(|c| c.is_whitespace())
+}
+
+fn is_operator(s: &str) -> bool {
+    s.chars().all(|c| !(c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c)))
+}
+
 fn remove_whitespace(tree: &mut Tree) {
-    tree.children.retain(|child| {
-        !child.get::<Token>().unwrap().deref().chars().next().unwrap().is_whitespace()
-    });
+    tree.children.retain(|child| !is_whitespace(child.get::<Token>().unwrap()));
+}
+
+fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
+    move |tree: &mut Tree| {
+        let mut i = 1;
+        while i < tree.children.len() {
+            let curr = tree.children[i].get::<Token>().unwrap();
+            let prev = tree.children[i - 1].get::<Token>().unwrap();
+            if alike(curr) && alike(prev) && curr.source == prev.source && prev.hi == curr.lo {
+                let curr = tree.children.remove(i).remove::<Token>().unwrap();
+                i -= 1;
+                tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
+            }
+            i += 1;
+        }
+    }
 }
