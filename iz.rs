@@ -1,6 +1,7 @@
 use std::{
     any::{Any, TypeId},
     collections::{HashMap, VecDeque},
+    ops::Deref,
     rc::Rc,
 };
 
@@ -17,7 +18,6 @@ struct Source {
     text: String,
 }
 
-pub use std::ops::Deref;
 impl Deref for Token {
     type Target = str;
     fn deref(&self) -> &str {
@@ -131,7 +131,6 @@ fn main() {
     passes.push_back(Pass::new("print tree", |tree| print!("{}", tree)));
     passes.push_back(Pass::new("get instructions", instructions));
     passes.push_back(Pass::new("get labels", labels));
-
     Pass::run_passes(passes, &mut tree);
 }
 
@@ -236,7 +235,7 @@ fn instructions(tree: &mut Tree) {
 struct Labels(HashMap<String, (usize, Token)>);
 
 fn labels(tree: &mut Tree) {
-    let code: &Code = tree.get().expect("expected tree to contain instructions");
+    let code: &Code = tree.get().expect("expected tree to contain code");
     let mut labels = Labels(HashMap::new());
     for (pc, (instruction, token)) in code.0.iter().enumerate() {
         if let Instruction::Label(label) = instruction {
@@ -254,8 +253,4 @@ fn labels(tree: &mut Tree) {
         }
     }
     tree.insert(labels);
-}
-
-fn interpret(tree: &mut Tree) {
-    todo!("interpreter for {}", tree)
 }

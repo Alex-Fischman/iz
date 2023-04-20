@@ -12,16 +12,7 @@ A minimal compiler will be an almost direct translation from text to bytecode. T
 
 ## Implementation
 
-### Interpreter
-The `Interpreter` will run code that targets a virtual machine with the following properties.
-- `int`s are signed 64 bit 2s complement integers.
-- There are two `int` registers: the stack pointer `sp` and the program counter `pc`.
-- There is one unit of virtual memory that contains `Instruction`s, the heap, and the stack. The memory can be accessed by index as an array of `int`s.
-- The stack starts at the end of this memory and grows downward. The `Interpreter` will treat negative indices of `Read`s and `Write`s as indexed from the end of the memory.
-- `sp` points to the last element on the stack. If the stack is empty, `sp` will be `0`.
-- `pc` points to the next `Instruction` to be executed.
-
-The `Interpreter` will support the following `Instruction`s. Note that "push" means to decrement `sp` and reference the memory location that it now points to, while "pop" means to reference the memory location that `sp` points to and then decrement `sp`.
+### `Instruction`s
 - `Push(int)`: push the immediate onto the stack
 - `Pop`: pop and do nothing else
 - `Sp`: push `sp` onto the stack
@@ -34,6 +25,11 @@ The `Interpreter` will support the following `Instruction`s. Note that "push" me
 - `Ltz`: pop a value, push 1 if it's negative or 0 otherwise
 - `Jumpz(String)`: pop a value, if it's equal to 0 set `pc` to point to the `Label` with a matching immediate
 - `Label(String)`: do nothing
+#### Notes
+- `int` refers to 64-bit 2s-complement signed integers
+- there are only two registers: `sp` and `pc`
+- "push" means to decrement `sp` and reference the memory location that it now points to
+- "pop" means to reference the memory location that `sp` points to and then increment `sp`
 
 ### Future
 Here is a list of things that should be possible for users of this programming language to add:
