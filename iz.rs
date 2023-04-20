@@ -4,6 +4,7 @@ use std::{
     rc::Rc,
 };
 
+#[derive(Clone)]
 struct Token {
     source: Rc<Source>,
     lo: usize,
@@ -126,7 +127,11 @@ fn main() {
     passes.push_back(Pass::new("remove whitespace", remove_whitespace));
     passes.push_back(Pass::new("concat identifiers", concat_alike_tokens(is_identifier)));
     passes.push_back(Pass::new("concat operators", concat_alike_tokens(is_operator)));
-    passes.push_back(Pass::new("printing backend", |tree| print!("{}", tree)));
+    passes.push_back(Pass::new("concat labels", concat_labels));
+    passes.push_back(Pass::new("print tree", |tree| print!("{}", tree)));
+    passes.push_back(Pass::new("get instructions", instructions));
+    passes.push_back(Pass::new("get labels", labels));
+
     Pass::run_passes(passes, &mut tree);
 }
 
@@ -162,9 +167,9 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
     move |tree: &mut Tree| {
         let mut i = 1;
         while i < tree.children.len() {
-            let curr = tree.children[i].get::<Token>().unwrap();
             let prev = tree.children[i - 1].get::<Token>().unwrap();
-            if alike(curr) && alike(prev) && curr.source == prev.source && prev.hi == curr.lo {
+            let curr = tree.children[i].get::<Token>().unwrap();
+            if alike(prev) && alike(curr) && curr.source == prev.source && prev.hi == curr.lo {
                 let curr = tree.children.remove(i).remove::<Token>().unwrap();
                 i -= 1;
                 tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
@@ -172,4 +177,85 @@ fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
             i += 1;
         }
     }
+}
+
+fn concat_labels(tree: &mut Tree) {
+    let mut i = 1;
+    while i < tree.children.len() {
+        let prev = tree.children[i - 1].get::<Token>().unwrap();
+        let curr = tree.children[i].get::<Token>().unwrap();
+        if curr.deref() == ":" {
+            if is_identifier(prev) && curr.source == prev.source && prev.hi == curr.lo {
+                let curr = tree.children.remove(i).remove::<Token>().unwrap();
+                i -= 1;
+                tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
+            }
+        }
+        i += 1;
+    }
+}
+
+enum Instruction {
+    Push(i64),
+    Pop,
+    Sp,
+    Pc,
+    Return,
+    Write,
+    Read,
+    Add,
+    Mul,
+    Ltz,
+    Jumpz(String),
+    Label(String),
+}
+
+// we want the tokens for the location information
+struct Code(Vec<(Instruction, Token)>);
+
+fn instructions(tree: &mut Tree) {
+    let code = tree
+        .children
+        .drain(..)
+        .map(|mut child| match (child.remove::<Instruction>(), child.remove::<Token>()) {
+            (None, _) => panic!("no instruction for tree\n{}", child),
+            (_, None) => panic!("no token for tree\n{}", child),
+            (Some(instruction), Some(token)) => {
+                if child.children.is_empty() {
+                    (instruction, token)
+                } else {
+                    panic!("tree had children\n{}", child)
+                }
+            }
+        })
+        .collect();
+    tree.insert(Code(code));
+}
+
+// we want the tokens for the location information
+struct Labels(HashMap<String, (usize, Token)>);
+
+fn labels(tree: &mut Tree) {
+    let code: &Code = tree.get().expect("expected tree to contain instructions");
+    let mut labels = Labels(HashMap::new());
+    for (pc, (instruction, token)) in code.0.iter().enumerate() {
+        if let Instruction::Label(label) = instruction {
+            let old = labels.0.insert(label.clone(), (pc, token.clone()));
+            if let Some((_, old)) = old {
+                panic!("label is declared twice:\n{}\n{}", token, old)
+            }
+        }
+    }
+    for (instruction, token) in &code.0 {
+        if let Instruction::Jumpz(label) = instruction {
+            if labels.0.get(label).is_none() {
+                panic!("jumpz has no matching label: {}", token)
+            }
+        }
+    }
+    tree.insert(labels);
+}
+
+fn interpret(tree: &mut Tree) {
+    todo!("interpreter for {}", tree)
 }
