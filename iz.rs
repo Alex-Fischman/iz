@@ -127,7 +127,7 @@ fn main() {
     passes.push_back(Pass::new("remove whitespace", remove_whitespace));
     passes.push_back(Pass::new("concat identifiers", concat_tokens(is_identifier, is_identifier)));
     passes.push_back(Pass::new("concat operators", concat_tokens(is_operator, is_operator)));
-    passes.push_back(Pass::new("concat labels", concat_tokens(is_identifier, |s| s == ":")));
+    passes.push_back(Pass::new("parse labels and jumpzs", parse_postfixes(&[":", "?", "&"])));
     passes.push_back(Pass::new("translate instructions", translate_instructions));
     passes.push_back(Pass::new("get instructions", get_instructions));
     passes.push_back(Pass::new("get labels", get_labels));
@@ -179,6 +179,25 @@ fn concat_tokens(f: impl Fn(&str) -> bool, g: impl Fn(&str) -> bool) -> impl Fn(
     }
 }
 
+fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(parse_postfixes(names));
+        let mut i = 0;
+        while i < tree.children.len() {
+            let curr = tree.children[i].get::<Token>().unwrap();
+            if names.contains(&curr.deref()) {
+                if i == 0 {
+                    panic!("no argument for {}", curr)
+                }
+                let child = tree.children.remove(i - 1);
+                i -= 1;
+                tree.children[i].children.push(child);
+            }
+            i += 1;
+        }
+    }
+}
+
 enum Instruction {
     Push(i64),
     Pop,
@@ -209,13 +228,18 @@ fn translate_instructions(tree: &mut Tree) {
                     "add" => Instruction::Add,
                     "mul" => Instruction::Mul,
                     "ltz" => Instruction::Ltz,
-                    "jumpz" => Instruction::Jumpz(todo!()),
-                    s if s.chars().last() == Some(':') => {
-                        let mut s = s.to_owned();
-                        s.pop();
-                        Instruction::Label(s)
+                    "?" => {
+                        let mut child = child.children.pop().unwrap();
+                        Instruction::Jumpz(child.remove::<Token>().unwrap().deref().to_owned())
                     }
-                    "addr" => Instruction::Addr(todo!()),
+                    ":" => {
+                        let mut child = child.children.pop().unwrap();
+                        Instruction::Label(child.remove::<Token>().unwrap().deref().to_owned())
+                    }
+                    "&" => {
+                        let mut child = child.children.pop().unwrap();
+                        Instruction::Addr(child.remove::<Token>().unwrap().deref().to_owned())
+                    }
                     "goto" => Instruction::Goto,
                     _ => panic!("could not translate {}", token),
                 }
