@@ -128,9 +128,10 @@ fn main() {
     passes.push_back(Pass::new("concat identifiers", concat_alike_tokens(is_identifier)));
     passes.push_back(Pass::new("concat operators", concat_alike_tokens(is_operator)));
     passes.push_back(Pass::new("concat labels", concat_labels));
-    passes.push_back(Pass::new("print tree", |tree| print!("{}", tree)));
-    passes.push_back(Pass::new("get instructions", instructions));
-    passes.push_back(Pass::new("get labels", labels));
+    passes.push_back(Pass::new("translate instructions", translate_instructions));
+    passes.push_back(Pass::new("get instructions", get_instructions));
+    passes.push_back(Pass::new("get labels", get_labels));
+    passes.push_back(Pass::new("compile x86", compile_x86));
     Pass::run_passes(passes, &mut tree);
 }
 
@@ -198,8 +199,6 @@ enum Instruction {
     Push(i64),
     Pop,
     Sp,
-    Pc,
-    Return,
     Write,
     Read,
     Add,
@@ -207,21 +206,57 @@ enum Instruction {
     Ltz,
     Jumpz(String),
     Label(String),
+    Addr(String),
+    Goto,
+}
+
+fn translate_instructions(tree: &mut Tree) {
+    for child in &mut tree.children {
+        if child.get::<Instruction>().is_none() {
+            let instruction = if let Some(int) = child.get::<i64>() {
+                Instruction::Push(*int)
+            } else {
+                let token = child.get::<Token>().unwrap();
+                match token.deref() {
+                    "pop" => Instruction::Pop,
+                    "sp" => Instruction::Sp,
+                    "write" => Instruction::Write,
+                    "read" => Instruction::Read,
+                    "add" => Instruction::Add,
+                    "mul" => Instruction::Mul,
+                    "ltz" => Instruction::Ltz,
+                    "jumpz" => Instruction::Jumpz(todo!()),
+                    s if s.chars().last() == Some(':') => {
+                        let mut s = s.to_owned();
+                        s.pop();
+                        Instruction::Label(s)
+                    }
+                    "addr" => Instruction::Addr(todo!()),
+                    "goto" => Instruction::Goto,
+                    _ => panic!("could not translate {}", token),
+                }
+            };
+            child.insert(vec![instruction]);
+        }
+    }
 }
 
 // we want the tokens for the location information
 struct Code(Vec<(Instruction, Token)>);
 
-fn instructions(tree: &mut Tree) {
+fn get_instructions(tree: &mut Tree) {
     let code = tree
         .children
         .drain(..)
-        .map(|mut child| match (child.remove::<Instruction>(), child.remove::<Token>()) {
+        .flat_map(|mut child| match (child.remove::<Vec<Instruction>>(), child.get::<Token>()) {
             (None, _) => panic!("no instruction for tree\n{}", child),
             (_, None) => panic!("no token for tree\n{}", child),
-            (Some(instruction), Some(token)) => {
+            (Some(instructions), Some(token)) => {
                 if child.children.is_empty() {
-                    (instruction, token)
+                    instructions
+                        .into_iter()
+                        .map(|i| (i, token.clone()))
+                        .collect::<Vec<(Instruction, Token)>>()
                 } else {
                     panic!("tree had children\n{}", child)
                 }
@@ -234,7 +269,7 @@ fn instructions(tree: &mut Tree) {
 // we want the tokens for the location information
 struct Labels(HashMap<String, (usize, Token)>);
 
-fn labels(tree: &mut Tree) {
+fn get_labels(tree: &mut Tree) {
     let code: &Code = tree.get().expect("expected tree to contain code");
     let mut labels = Labels(HashMap::new());
     for (pc, (instruction, token)) in code.0.iter().enumerate() {
@@ -251,6 +286,36 @@ fn labels(tree: &mut Tree) {
                 panic!("jumpz has no matching label: {}", token)
             }
         }
+        if let Instruction::Addr(label) = instruction {
+            if labels.0.get(label).is_none() {
+                panic!("addr has no matching label: {}", token)
+            }
+        }
     }
     tree.insert(labels);
+}
+
+fn compile_x86(tree: &mut Tree) {
+    let code: &Code = tree.get().expect("expected tree to contain code");
+    let assembly: String = code
+        .0
+        .iter()
+        .map(|(instruction, _)| match instruction {
+            Instruction::Push(int) => format!("\tpushq ${}\n", int),
+            Instruction::Pop => format!("\tpopq %rax\n"),
+            Instruction::Sp => format!("\tpushq %rsp\n"),
+            Instruction::Write => format!("\tpopq %rax\n\tpopq %rbx\n\tmovq %rbx, (%rax)\n"),
+            Instruction::Read => format!("\tmovq (%rsp), %rax\n\tmovq (%rax), (%rsp)\n"),
+            Instruction::Add => format!("\tpopq %rax\n\tadd %rax, (%rsp)\n"),
+            Instruction::Mul => format!("\tpopq %rax\n\timul %rax, (%rsp)\n"),
+            Instruction::Ltz => format!("TODO"),
+            Instruction::Jumpz(label) => {
+                format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
+            }
+            Instruction::Label(label) => format!("{}:\n", label),
+            Instruction::Addr(label) => format!("\tpushq {}\n", label),
+            Instruction::Goto => format!("\tret\n"),
+        })
+        .collect();
+    println!("{}", assembly);
 }

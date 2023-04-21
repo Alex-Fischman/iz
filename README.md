@@ -10,28 +10,7 @@ For a truly adaptable language to be complete, the programmer must be able to de
 
 A minimal compiler will be an almost direct translation from text to bytecode. The base bytecode will model a very simple virtual machine that only has a program counter and stack pointer. I think that this is the closest that we can get to the hardware without sacrificing too much portablility.
 
-## Implementation
-
-### `Instruction`s
-- `Push(int)`: push the immediate onto the stack
-- `Pop`: pop and do nothing else
-- `Sp`: push `sp` onto the stack
-- `Pc`: push `pc` onto the stack
-- `Return`: pop a value off of the stack and set `pc` to that value
-- `Write`: pop an address, pop a value, write the value to that address
-- `Read`: pop an address, push the value at that address
-- `Add`: pop two values, push their sum
-- `Mul`: pop two values, push their product
-- `Ltz`: pop a value, push 1 if it's negative or 0 otherwise
-- `Jumpz(String)`: pop a value, if it's equal to 0 set `pc` to point to the `Label` with a matching immediate
-- `Label(String)`: do nothing
-#### Notes
-- `int` refers to 64-bit 2s-complement signed integers
-- there are only two registers: `sp` and `pc`
-- "push" means to decrement `sp` and reference the memory location that it now points to
-- "pop" means to reference the memory location that `sp` points to and then increment `sp`
-
-### Future
+## Future
 Here is a list of things that should be possible for users of this programming language to add:
 - If statements, while loops, for loops
 - Variables and namespacing
