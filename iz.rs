@@ -125,9 +125,9 @@ fn main() {
     let mut passes = VecDeque::new();
     passes.push_back(Pass::new("remove comments", remove_comments));
     passes.push_back(Pass::new("remove whitespace", remove_whitespace));
-    passes.push_back(Pass::new("concat identifiers", concat_alike_tokens(is_identifier)));
-    passes.push_back(Pass::new("concat operators", concat_alike_tokens(is_operator)));
-    passes.push_back(Pass::new("concat labels", concat_labels));
+    passes.push_back(Pass::new("concat identifiers", concat_tokens(is_identifier, is_identifier)));
+    passes.push_back(Pass::new("concat operators", concat_tokens(is_operator, is_operator)));
+    passes.push_back(Pass::new("concat labels", concat_tokens(is_identifier, |s| s == ":")));
     passes.push_back(Pass::new("translate instructions", translate_instructions));
     passes.push_back(Pass::new("get instructions", get_instructions));
     passes.push_back(Pass::new("get labels", get_labels));
@@ -163,35 +163,19 @@ fn remove_whitespace(tree: &mut Tree) {
     tree.children.retain(|child| !is_whitespace(child.get::<Token>().unwrap()));
 }
 
-fn concat_alike_tokens<F: Fn(&str) -> bool>(alike: F) -> impl Fn(&mut Tree) {
+fn concat_tokens(f: impl Fn(&str) -> bool, g: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
     move |tree: &mut Tree| {
         let mut i = 1;
         while i < tree.children.len() {
             let prev = tree.children[i - 1].get::<Token>().unwrap();
             let curr = tree.children[i].get::<Token>().unwrap();
-            if alike(prev) && alike(curr) && curr.source == prev.source && prev.hi == curr.lo {
+            if f(prev) && g(curr) && curr.source == prev.source && prev.hi == curr.lo {
                 let curr = tree.children.remove(i).remove::<Token>().unwrap();
                 i -= 1;
                 tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
             }
             i += 1;
         }
-    }
-}
-
-fn concat_labels(tree: &mut Tree) {
-    let mut i = 1;
-    while i < tree.children.len() {
-        let prev = tree.children[i - 1].get::<Token>().unwrap();
-        let curr = tree.children[i].get::<Token>().unwrap();
-        if curr.deref() == ":" {
-            if is_identifier(prev) && curr.source == prev.source && prev.hi == curr.lo {
-                let curr = tree.children.remove(i).remove::<Token>().unwrap();
-                i -= 1;
-                tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
-            }
-        }
-        i += 1;
     }
 }
 
