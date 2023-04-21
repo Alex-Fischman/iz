@@ -127,6 +127,7 @@ fn main() {
     passes.push_back(Pass::new("remove whitespace", remove_whitespace));
     passes.push_back(Pass::new("concat identifiers", concat_tokens(is_identifier, is_identifier)));
     passes.push_back(Pass::new("concat operators", concat_tokens(is_operator, is_operator)));
+    passes.push_back(Pass::new("parse integers", parse_integers));
     passes.push_back(Pass::new("parse :?&", parse_postfixes(&[":", "?", "&"])));
     passes.push_back(Pass::new("translate instructions", translate_instructions));
     passes.push_back(Pass::new("get instructions", get_instructions));
@@ -175,6 +176,37 @@ fn concat_tokens(f: impl Fn(&str) -> bool, g: impl Fn(&str) -> bool) -> impl Fn(
                 tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
             }
             i += 1;
+        }
+    }
+}
+
+fn parse_integers(tree: &mut Tree) {
+    for child in &mut tree.children {
+        let token = child.get::<Token>().unwrap();
+        let chars: Vec<char> = token.deref().chars().collect();
+        let (chars, is_negative) = match chars[0] {
+            '-' => (&chars[1..], true),
+            _ => (&chars[..], false),
+        };
+        if let Some('0'..='9') = chars.get(0) {
+            let (chars, base) = match chars {
+                ['0', 'x', ..] => (&chars[2..], 16),
+                ['0', 'b', ..] => (&chars[2..], 2),
+                _ => (chars, 10),
+            };
+            let value = chars.iter().fold(0, |value, c| {
+                let digit = match c {
+                    '0'..='9' => *c as i64 - '0' as i64,
+                    'a'..='f' => *c as i64 - 'a' as i64 + 10,
+                    '_' => return value,
+                    c => panic!("unknown digit {} in {}", c, token),
+                };
+                if digit >= base {
+                    panic!("digit {} too large for base {} in {}", c, base, token)
+                }
+                base * value + digit
+            });
+            child.insert::<i64>(if is_negative { -value } else { value });
         }
     }
 }
@@ -256,10 +288,10 @@ fn get_instructions(tree: &mut Tree) {
     let code = tree
         .children
         .drain(..)
-        .flat_map(|mut child| match (child.remove::<Vec<Instruction>>(), child.get::<Token>()) {
-            (None, _) => panic!("no instruction for tree\n{}", child),
-            (_, None) => panic!("no token for tree\n{}", child),
-            (Some(instructions), Some(token)) => {
+        .flat_map(|mut child| match child.remove::<Vec<Instruction>>() {
+            None => panic!("no instruction for tree\n{}", child),
+            Some(instructions) => {
+                let token = child.get::<Token>().unwrap();
                 if child.children.is_empty() {
                     instructions
                         .into_iter()
