@@ -1,7 +1,9 @@
 use std::{
     any::{Any, TypeId},
     collections::{HashMap, VecDeque},
+    io::Write,
     ops::Deref,
+    process::{Command, Stdio},
     rc::Rc,
 };
 
@@ -331,25 +333,47 @@ fn get_labels(tree: &mut Tree) {
 
 fn compile_x86(tree: &mut Tree) {
     let code: &Code = tree.get().expect("expected tree to contain code");
-    let assembly: String = code
-        .0
-        .iter()
-        .map(|(instruction, _)| match instruction {
-            Instruction::Push(int) => format!("\tpushq ${}\n", int),
-            Instruction::Pop => format!("\tpopq %rax\n"),
-            Instruction::Sp => format!("\tpushq %rsp\n"),
-            Instruction::Write => format!("\tpopq %rax\n\tpopq %rbx\n\tmovq %rbx, (%rax)\n"),
-            Instruction::Read => format!("\tmovq (%rsp), %rax\n\tmovq (%rax), (%rsp)\n"),
-            Instruction::Add => format!("\tpopq %rax\n\tadd %rax, (%rsp)\n"),
-            Instruction::Mul => format!("\tpopq %rax\n\timul %rax, (%rsp)\n"),
-            Instruction::Ltz => format!("TODO"),
-            Instruction::Label(label) => format!("{}:\n", label),
-            Instruction::Jumpz(label) => {
-                format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
+    let mut assembler = Command::new("gcc")
+        .arg("-x")
+        .arg("assembler-with-cpp")
+        .arg("-nostdlib")
+        .arg("-Wall")
+        .arg("-g")
+        .arg("-O")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = assembler.stdin.as_mut().unwrap();
+
+    write!(stdin, "#include <sys/syscall.h>\n\t.global _start\n_start:\n").unwrap();
+    for (instruction, _) in &code.0 {
+        match instruction {
+            Instruction::Push(int) => write!(stdin, "\tpushq ${}\n", int),
+            Instruction::Pop => write!(stdin, "\tpopq %rax\n"),
+            Instruction::Sp => write!(stdin, "\tpushq %rsp\n"),
+            Instruction::Write => {
+                write!(stdin, "\tpopq %rax\n\tpopq %rbx\n\tmovq %rbx, (%rax)\n")
             }
-            Instruction::Addr(label) => format!("\tpushq {}\n", label),
-            Instruction::Goto => format!("\tret\n"),
-        })
-        .collect();
-    println!("{}", assembly);
+            Instruction::Read => {
+                write!(stdin, "\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
+            }
+            Instruction::Add => write!(stdin, "\tpopq %rax\n\taddq %rax, (%rsp)\n"),
+            Instruction::Mul => write!(stdin, "\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
+            Instruction::Ltz => write!(stdin, "TODO"),
+            Instruction::Label(label) => write!(stdin, "{}:\n", label),
+            Instruction::Jumpz(label) => {
+                write!(stdin, "\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
+            }
+            Instruction::Addr(label) => write!(stdin, "\tpushq {}\n", label),
+            Instruction::Goto => write!(stdin, "\tret\n"),
+        }
+        .unwrap();
+    }
+
+    write!(stdin, "\tmovq $SYS_exit, %rax\n\txorq %rdi, %rdi\n\tsyscall\n").unwrap();
+
+    assembler.wait().unwrap();
+    let output = Command::new("./a.out").output().unwrap();
+    println!("{:?}", if output.status.success() { output.stdout } else { output.stderr });
 }

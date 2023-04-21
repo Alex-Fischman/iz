@@ -1,30 +1,9 @@
 # this is a comment
 
-# here is a while loop
 1
 while_start:
-sp read -3 add while_end?
-# cond ends, body starts
+sp read -5 add
+while_end?
 1 add
 0 while_start?
 while_end:
-# stack should just be 3 here
-
-# here are some examples of stack memory management
-13 # a bare literal pushes its value
-sp read # pushes sp and then reads the value at that address
-pop pop # adds to sp
-
-0
-
-# dup = {sp read}
-# drop = {1 stack}
-# swap = {sp 1 add read sp 1 add read sp 3 add write sp 1 add write}
-
-# here is an if else statement
-if_end?
-0b100
-0 else_end?
-if_end:
-0x100
-else_end:
