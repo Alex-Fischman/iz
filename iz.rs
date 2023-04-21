@@ -127,7 +127,7 @@ fn main() {
     passes.push_back(Pass::new("remove whitespace", remove_whitespace));
     passes.push_back(Pass::new("concat identifiers", concat_tokens(is_identifier, is_identifier)));
     passes.push_back(Pass::new("concat operators", concat_tokens(is_operator, is_operator)));
-    passes.push_back(Pass::new("parse labels and jumpzs", parse_postfixes(&[":", "?", "&"])));
+    passes.push_back(Pass::new("parse :?&", parse_postfixes(&[":", "?", "&"])));
     passes.push_back(Pass::new("translate instructions", translate_instructions));
     passes.push_back(Pass::new("get instructions", get_instructions));
     passes.push_back(Pass::new("get labels", get_labels));
@@ -207,8 +207,8 @@ enum Instruction {
     Add,
     Mul,
     Ltz,
-    Jumpz(String),
     Label(String),
+    Jumpz(String),
     Addr(String),
     Goto,
 }
@@ -228,13 +228,13 @@ fn translate_instructions(tree: &mut Tree) {
                     "add" => Instruction::Add,
                     "mul" => Instruction::Mul,
                     "ltz" => Instruction::Ltz,
-                    "?" => {
-                        let mut child = child.children.pop().unwrap();
-                        Instruction::Jumpz(child.remove::<Token>().unwrap().deref().to_owned())
-                    }
                     ":" => {
                         let mut child = child.children.pop().unwrap();
                         Instruction::Label(child.remove::<Token>().unwrap().deref().to_owned())
+                    }
+                    "?" => {
+                        let mut child = child.children.pop().unwrap();
+                        Instruction::Jumpz(child.remove::<Token>().unwrap().deref().to_owned())
                     }
                     "&" => {
                         let mut child = child.children.pop().unwrap();
@@ -317,10 +317,10 @@ fn compile_x86(tree: &mut Tree) {
             Instruction::Add => format!("\tpopq %rax\n\tadd %rax, (%rsp)\n"),
             Instruction::Mul => format!("\tpopq %rax\n\timul %rax, (%rsp)\n"),
             Instruction::Ltz => format!("TODO"),
+            Instruction::Label(label) => format!("{}:\n", label),
             Instruction::Jumpz(label) => {
                 format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
             }
-            Instruction::Label(label) => format!("{}:\n", label),
             Instruction::Addr(label) => format!("\tpushq {}\n", label),
             Instruction::Goto => format!("\tret\n"),
         })
