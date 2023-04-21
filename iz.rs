@@ -221,10 +221,10 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
                     panic!("no argument for {}", tree.children[i].token)
                 }
                 let child = tree.children.remove(i - 1);
-                i -= 1;
-                tree.children[i].children.push(child);
+                tree.children[i - 1].children.push(child);
+            } else {
+                i += 1;
             }
-            i += 1;
         }
     }
 }
