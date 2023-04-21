@@ -44,13 +44,14 @@ impl std::fmt::Display for Token {
 }
 
 struct Tree {
+    token: Token,
     children: Vec<Tree>,
     contents: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Tree {
-    fn new() -> Tree {
-        Tree { children: Vec::new(), contents: HashMap::new() }
+    fn new(token: Token) -> Tree {
+        Tree { token, children: Vec::new(), contents: HashMap::new() }
     }
 
     fn insert<T: 'static>(&mut self, value: T) -> Option<T> {
@@ -73,8 +74,8 @@ impl Tree {
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         fn fmt(tree: &Tree, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
-            if let Some(token) = tree.get::<Token>() {
-                writeln!(f, "{}{}", "\t".repeat(depth), token)?;
+            if !tree.token.deref().is_empty() {
+                writeln!(f, "{}{}", "\t".repeat(depth), tree.token)?;
             }
             tree.children.iter().map(|child| fmt(child, f, depth + 1)).collect()
         }
@@ -112,14 +113,12 @@ fn main() {
     };
     let source = Rc::new(Source { name, text });
 
-    let mut tree = Tree::new();
+    let mut tree = Tree::new(Token { source: source.clone(), lo: 0, hi: 0 });
     tree.insert(source.clone());
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
-        let mut child = Tree::new();
-        child.insert(Token { source: source.clone(), lo, hi });
-        tree.children.push(child);
+        tree.children.push(Tree::new(Token { source: source.clone(), lo, hi }));
     }
 
     let mut passes = VecDeque::new();
@@ -139,7 +138,7 @@ fn main() {
 fn remove_comments(tree: &mut Tree) {
     let mut in_comment = false;
     tree.children.retain(|child| {
-        match child.get::<Token>().unwrap().deref() {
+        match child.token.deref() {
             "#" if !in_comment => in_comment = true,
             "\n" if in_comment => in_comment = false,
             _ => {}
@@ -161,29 +160,30 @@ fn is_operator(s: &str) -> bool {
 }
 
 fn remove_whitespace(tree: &mut Tree) {
-    tree.children.retain(|child| !is_whitespace(child.get::<Token>().unwrap()));
+    tree.children.retain(|child| !is_whitespace(child.token.deref()));
 }
 
 fn concat_tokens(f: impl Fn(&str) -> bool, g: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
     move |tree: &mut Tree| {
         let mut i = 1;
         while i < tree.children.len() {
-            let prev = tree.children[i - 1].get::<Token>().unwrap();
-            let curr = tree.children[i].get::<Token>().unwrap();
-            if f(prev) && g(curr) && curr.source == prev.source && prev.hi == curr.lo {
-                let curr = tree.children.remove(i).remove::<Token>().unwrap();
-                i -= 1;
-                tree.children[i].get_mut::<Token>().unwrap().hi = curr.hi;
+            if f(tree.children[i - 1].token.deref())
+                && g(tree.children[i].token.deref())
+                && tree.children[i - 1].token.source == tree.children[i].token.source
+                && tree.children[i - 1].token.hi == tree.children[i].token.lo
+            {
+                tree.children[i - 1].token.hi = tree.children[i].token.hi;
+                tree.children.remove(i);
+            } else {
+                i += 1;
             }
-            i += 1;
         }
     }
 }
 
 fn parse_integers(tree: &mut Tree) {
     for child in &mut tree.children {
-        let token = child.get::<Token>().unwrap();
-        let chars: Vec<char> = token.deref().chars().collect();
+        let chars: Vec<char> = child.token.deref().chars().collect();
         let (chars, is_negative) = match chars[0] {
             '-' => (&chars[1..], true),
             _ => (&chars[..], false),
@@ -199,10 +199,10 @@ fn parse_integers(tree: &mut Tree) {
                     '0'..='9' => *c as i64 - '0' as i64,
                     'a'..='f' => *c as i64 - 'a' as i64 + 10,
                     '_' => return value,
-                    c => panic!("unknown digit {} in {}", c, token),
+                    c => panic!("unknown digit {} in {}", c, child.token),
                 };
                 if digit >= base {
-                    panic!("digit {} too large for base {} in {}", c, base, token)
+                    panic!("digit {} too large for base {} in {}", c, base, child.token)
                 }
                 base * value + digit
             });
@@ -216,10 +216,9 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
         tree.children.iter_mut().for_each(parse_postfixes(names));
         let mut i = 0;
         while i < tree.children.len() {
-            let curr = tree.children[i].get::<Token>().unwrap();
-            if names.contains(&curr.deref()) {
+            if names.contains(&tree.children[i].token.deref()) {
                 if i == 0 {
-                    panic!("no argument for {}", curr)
+                    panic!("no argument for {}", tree.children[i].token)
                 }
                 let child = tree.children.remove(i - 1);
                 i -= 1;
@@ -251,8 +250,7 @@ fn translate_instructions(tree: &mut Tree) {
             let instruction = if let Some(int) = child.get::<i64>() {
                 Instruction::Push(*int)
             } else {
-                let token = child.get::<Token>().unwrap();
-                match token.deref() {
+                match child.token.deref() {
                     "pop" => Instruction::Pop,
                     "sp" => Instruction::Sp,
                     "write" => Instruction::Write,
@@ -261,19 +259,19 @@ fn translate_instructions(tree: &mut Tree) {
                     "mul" => Instruction::Mul,
                     "ltz" => Instruction::Ltz,
                     ":" => {
-                        let mut child = child.children.pop().unwrap();
-                        Instruction::Label(child.remove::<Token>().unwrap().deref().to_owned())
+                        let grandchild = child.children.pop().unwrap();
+                        Instruction::Label(grandchild.token.deref().to_owned())
                     }
                     "?" => {
-                        let mut child = child.children.pop().unwrap();
-                        Instruction::Jumpz(child.remove::<Token>().unwrap().deref().to_owned())
+                        let grandchild = child.children.pop().unwrap();
+                        Instruction::Jumpz(grandchild.token.deref().to_owned())
                     }
                     "&" => {
-                        let mut child = child.children.pop().unwrap();
-                        Instruction::Addr(child.remove::<Token>().unwrap().deref().to_owned())
+                        let grandchild = child.children.pop().unwrap();
+                        Instruction::Addr(grandchild.token.deref().to_owned())
                     }
                     "goto" => Instruction::Goto,
-                    _ => panic!("could not translate {}", token),
+                    _ => panic!("could not translate {}", child.token),
                 }
             };
             child.insert(vec![instruction]);
@@ -291,12 +289,8 @@ fn get_instructions(tree: &mut Tree) {
         .flat_map(|mut child| match child.remove::<Vec<Instruction>>() {
             None => panic!("no instruction for tree\n{}", child),
             Some(instructions) => {
-                let token = child.get::<Token>().unwrap();
                 if child.children.is_empty() {
-                    instructions
-                        .into_iter()
-                        .map(|i| (i, token.clone()))
-                        .collect::<Vec<(Instruction, Token)>>()
+                    instructions.into_iter().map(move |i| (i, child.token.clone()))
                 } else {
                     panic!("tree had children\n{}", child)
                 }
