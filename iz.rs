@@ -231,19 +231,29 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
+// Instructions semantically target a VM with the following structure
+// - Memory is represented as an array of 64-bit 2's complement signed integers
+// - There are only two registers: a program counter `pc` and a stack pointer `sp`
+//   - pc points to the next instruction to run
+//   - sp points to the lowest address of the top element of the stack, which grows downward
 enum Instruction {
-    Push(i64),
-    Pop,
-    Sp,
-    Write,
-    Read,
-    Add,
-    Mul,
-    Ltz,
-    Label(String),
-    Jumpz(String),
-    Addr(String),
-    Goto,
+    // Memory
+    Push(i64), // increments sp, then writes an immediate there
+    Pop,       // decrements sp
+    Sp,        // pushes the value in sp onto the stack
+    Write,     // first pops an address, then pops a value, then writes the value to the address
+    Read,      // pops an address, then pushes the value at that address
+    // Integer
+    Add, // pops two values, then pushes their sum
+    Mul, // pops two values, then pushes their product     (subsumes neg)
+    And, // pops two values, then pushes their bitwise and (subsumes ltz)
+    Or,  // pops two values, then pushes their bitwise or
+    Xor, // pops two values, then pushes their bitwise xor (subsumes not)
+    // Control
+    Label(String), // does nothing except hold a label
+    Jumpz(String), // pops a value, if the value is zero sets pc to the label
+    Addr(String),  // pushes the address of the given label
+    Goto,          // pops an address and sets pc to it
 }
 
 fn translate_instructions(tree: &mut Tree) {
@@ -259,7 +269,9 @@ fn translate_instructions(tree: &mut Tree) {
                     "read" => Instruction::Read,
                     "add" => Instruction::Add,
                     "mul" => Instruction::Mul,
-                    "ltz" => Instruction::Ltz,
+                    "and" => Instruction::And,
+                    "or" => Instruction::Or,
+                    "xor" => Instruction::Xor,
                     ":" => {
                         let grandchild = child.children.pop().unwrap();
                         Instruction::Label(grandchild.token.deref().to_owned())
@@ -360,7 +372,9 @@ fn compile_x86(tree: &mut Tree) {
             }
             Instruction::Add => write!(stdin, "\tpopq %rax\n\taddq %rax, (%rsp)\n"),
             Instruction::Mul => write!(stdin, "\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
-            Instruction::Ltz => write!(stdin, "TODO"),
+            Instruction::And => write!(stdin, "\tpopq %rax\n\tandq %rax, (%rsp)\n"),
+            Instruction::Or => write!(stdin, "\tpopq %rax\n\torq %rax, (%rsp)\n"),
+            Instruction::Xor => write!(stdin, "\tpopq %rax\n\txorq %rax, (%rsp)\n"),
             Instruction::Label(label) => write!(stdin, "{}:\n", label),
             Instruction::Jumpz(label) => {
                 write!(stdin, "\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
