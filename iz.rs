@@ -385,7 +385,7 @@ fn compile_x64(tree: &mut Tree) {
     write!(stdin, "{}", PRELUDE_STR_X64).unwrap();
     for (instruction, _) in &code.0 {
         match instruction {
-            Instruction::Push(int) => write!(stdin, "\tpushq ${}\n", int),
+            Instruction::Push(int) => write!(stdin, "\tmovq ${}, %rax\n\tpushq %rax\n", int),
             Instruction::Pop => write!(stdin, "\tpopq %rax\n"),
             Instruction::Sp => write!(stdin, "\tpushq %rsp\n"),
             Instruction::Write => {
