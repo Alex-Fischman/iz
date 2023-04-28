@@ -133,7 +133,7 @@ fn main() {
     passes.push_back(Pass::new("translate instructions", translate_instructions));
     passes.push_back(Pass::new("get instructions", get_instructions));
     passes.push_back(Pass::new("get labels", get_labels));
-    passes.push_back(Pass::new("compile x86", compile_x86));
+    passes.push_back(Pass::new("compile x64", compile_x64));
     Pass::run_passes(passes, &mut tree);
 }
 
@@ -256,6 +256,27 @@ enum Instruction {
     Goto,          // pops an address and sets pc to it
 }
 
+// Since the prelude is just text, we have to provide its interface
+const PRELUDE_LABELS: &[&str] = &["leave", "panic"];
+
+// This prelude is always included before every program
+// It wraps syscalls with the same interface on every platform
+// (Without requiring linking against some other random file (libc))
+const PRELUDE_STR_X64: &str = "
+#include <sys/syscall.h>
+leave:
+    movq $SYS_exit, %rax
+    movq $0, %rdi
+    syscall
+panic:
+    movq $SYS_exit, %rax
+    movq $1, %rdi
+    syscall
+
+    .global _start
+_start:
+";
+
 fn translate_instructions(tree: &mut Tree) {
     for child in &mut tree.children {
         if child.get::<Instruction>().is_none() {
@@ -330,12 +351,12 @@ fn get_labels(tree: &mut Tree) {
     }
     for (instruction, token) in &code.0 {
         if let Instruction::Jumpz(label) = instruction {
-            if labels.0.get(label).is_none() {
+            if !PRELUDE_LABELS.contains(&label.as_str()) && labels.0.get(label).is_none() {
                 panic!("jumpz has no matching label: {}", token)
             }
         }
         if let Instruction::Addr(label) = instruction {
-            if labels.0.get(label).is_none() {
+            if !PRELUDE_LABELS.contains(&label.as_str()) && labels.0.get(label).is_none() {
                 panic!("addr has no matching label: {}", token)
             }
         }
@@ -343,7 +364,7 @@ fn get_labels(tree: &mut Tree) {
     tree.insert(labels);
 }
 
-fn compile_x86(tree: &mut Tree) {
+fn compile_x64(tree: &mut Tree) {
     let code: &Code = tree.get().expect("expected tree to contain code");
     let mut assembler = Command::new("gcc")
         .arg("-x")
@@ -358,14 +379,14 @@ fn compile_x86(tree: &mut Tree) {
         .unwrap();
     let stdin = assembler.stdin.as_mut().unwrap();
 
-    write!(stdin, "#include <sys/syscall.h>\n\t.global _start\n_start:\n").unwrap();
+    write!(stdin, "{}", PRELUDE_STR_X64).unwrap();
     for (instruction, _) in &code.0 {
         match instruction {
             Instruction::Push(int) => write!(stdin, "\tpushq ${}\n", int),
             Instruction::Pop => write!(stdin, "\tpopq %rax\n"),
             Instruction::Sp => write!(stdin, "\tpushq %rsp\n"),
             Instruction::Write => {
-                write!(stdin, "\tpopq %rax\n\tpopq %rbx\n\tmovq %rbx, (%rax)\n")
+                write!(stdin, "\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n")
             }
             Instruction::Read => {
                 write!(stdin, "\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
@@ -385,9 +406,12 @@ fn compile_x86(tree: &mut Tree) {
         .unwrap();
     }
 
-    write!(stdin, "\tmovq $SYS_exit, %rax\n\txorq %rdi, %rdi\n\tsyscall\n").unwrap();
-
     assembler.wait().unwrap();
     let output = Command::new("./a.out").output().unwrap();
-    println!("{:?}", if output.status.success() { output.stdout } else { output.stderr });
+    println!(
+        "status: {}\nstderr: {}\nstdout: {}",
+        output.status,
+        std::str::from_utf8(&output.stderr).unwrap(),
+        std::str::from_utf8(&output.stdout).unwrap(),
+    );
 }
