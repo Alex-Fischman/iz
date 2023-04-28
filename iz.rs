@@ -257,18 +257,21 @@ enum Instruction {
 }
 
 // Since the prelude is just text, we have to provide its interface
-const PRELUDE_LABELS: &[&str] = &["leave", "panic"];
+const PRELUDE_LABELS: &[&str] = &[
+    "exit", // exit with status code 0
+    "fail", // exit with status code 1
+];
 
 // This prelude is always included before every program
 // It wraps syscalls with the same interface on every platform
 // (Without requiring linking against some other random file (libc))
 const PRELUDE_STR_X64: &str = "
 #include <sys/syscall.h>
-leave:
+exit:
     movq $SYS_exit, %rax
     movq $0, %rdi
     syscall
-panic:
+fail:
     movq $SYS_exit, %rax
     movq $1, %rdi
     syscall
@@ -400,7 +403,9 @@ fn compile_x64(tree: &mut Tree) {
             Instruction::Jumpz(label) => {
                 write!(stdin, "\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
             }
-            Instruction::Addr(label) => write!(stdin, "\tpushq {}\n", label),
+            Instruction::Addr(label) => {
+                write!(stdin, "\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
+            }
             Instruction::Goto => write!(stdin, "\tret\n"),
         }
         .unwrap();

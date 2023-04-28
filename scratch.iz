@@ -8,4 +8,6 @@ while_end?
 0 while_start?
 while_end:
 
-0 leave?
+# Two different ways to do an unconditional jump to a label
+# 0 exit?
+exit& goto
