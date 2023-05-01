@@ -129,6 +129,9 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(concat_tokens(is_operator))));
     passes.push_back(Pass::Name("tokens".to_owned()));
     passes.push_back(Pass::Func(Box::new(parse_integers)));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("{", "}"))));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
     passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
     passes.push_back(Pass::Name("ast".to_owned()));
     passes.push_back(Pass::Func(Box::new(translate_instructions)));
@@ -211,6 +214,30 @@ fn parse_integers(tree: &mut Tree) {
                 base * value + digit
             });
             child.insert::<i64>(if is_negative { -value } else { value });
+        }
+    }
+}
+
+fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
+    move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(parse_brackets(open, close));
+        let mut indices = Vec::new(); // stack of open bracket indices
+        let mut i = 0;
+        while i < tree.children.len() {
+            let curr = &tree.children[i].token;
+            if curr.deref() == open {
+                indices.push(i);
+            } else if curr.deref() == close {
+                let j = indices.pop().unwrap_or_else(|| panic!("extra {}", curr));
+                let mut cs: Vec<Tree> = tree.children.drain(j + 1..=i).collect();
+                cs.pop(); // remove closing bracket
+                tree.children[j].children.append(&mut cs);
+                i = j;
+            }
+            i += 1;
+        }
+        if let Some(j) = indices.pop() {
+            panic!("extra {}", tree.children[j].token)
         }
     }
 }
