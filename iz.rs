@@ -417,42 +417,37 @@ impl Effect {
 
 fn type_check(tree: &mut Tree) {
     let code: &Code = tree.get().unwrap();
-    let _labels: &Labels = tree.get().unwrap();
+    let labels: &Labels = tree.get().unwrap();
 
-    // stores (prev, next) instruction indices
-    let mut stack = vec![(usize::MAX, 0)];
-    let mut cache = HashMap::from([(usize::MAX, Effect::new([], []))]);
-    while let Some((prev, curr)) = stack.pop() {
-        if curr + 1 < code.0.len() {
-            stack.push((curr, curr + 1));
+    fn type_check(code: &[(Instruction, Token)], _labels: &Labels) -> Effect {
+        let mut effect = Effect::new([], []);
+        for (instruction, _) in code {
+            effect.compose(match instruction {
+                Instruction::Push(_) => Effect::new([], [Type::Integer]),
+                Instruction::Pop => Effect::new([Type::Integer], []),
+                Instruction::Sp => Effect::new([], [Type::Integer]),
+                Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
+                Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
+                Instruction::Add => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
+                Instruction::Mul => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
+                Instruction::And => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
+                Instruction::Or => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
+                Instruction::Xor => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
+                Instruction::Label(_) => Effect::new([], []),
+                Instruction::Jumpz(_label) => todo!(),
+                Instruction::Addr(_label) => Effect::new([], [Type::Function(todo!())]),
+                Instruction::Goto => todo!(),
+            });
         }
-        let mut effect = cache.get(&prev).unwrap().clone();
-        effect.compose(match &code.0[curr].0 {
-            Instruction::Push(_) => Effect::new([], [Type::Integer]),
-            Instruction::Pop => Effect::new([Type::Integer], []),
-            Instruction::Sp => Effect::new([], [Type::Integer]),
-            Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
-            Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
-            Instruction::Add => todo!(),
-            Instruction::Mul => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-            Instruction::And => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-            Instruction::Or => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-            Instruction::Xor => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-            Instruction::Label(_label) => Effect::new([], []),
-            Instruction::Jumpz(_label) => todo!(),
-            Instruction::Addr(_label) => todo!(),
-            Instruction::Goto => todo!(),
-        });
-        cache.insert(curr, effect);
+        effect
     }
 
-    if let Some(effect) = cache.get(&code.0.len().wrapping_sub(1)) {
-        if !effect.inputs.is_empty() {
-            panic!("program expected inputs: {:?}", effect.inputs)
-        }
-        if !effect.outputs.is_empty() {
-            panic!("program returned outputs: {:?}", effect.outputs)
-        }
+    let effect = type_check(&code.0, labels);
+    if !effect.inputs.is_empty() {
+        panic!("program expected inputs: {:?}", effect.inputs)
+    }
+    if !effect.outputs.is_empty() {
+        panic!("program returned outputs: {:?}", effect.outputs)
     }
 }
 
