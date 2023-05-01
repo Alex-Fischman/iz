@@ -286,28 +286,17 @@ enum Instruction {
     Goto,          // pops an address and sets pc to it
 }
 
-// Since the prelude is just text, we have to provide its interface
-const PRELUDE_LABELS: &[&str] = &[
-    "exit", // exit with status code 0
-    "fail", // exit with status code 1
-];
-
-// This prelude is always included before every program
-// It wraps syscalls with the same interface on every platform
-// (Without requiring linking against some other random file (libc))
+// This prelude is wrapped around every program
 const PRELUDE_STR_X64: &str = "
 #include <sys/syscall.h>
-exit:
-    movq $SYS_exit, %rax
-    movq $0, %rdi
-    syscall
-fail:
-    movq $SYS_exit, %rax
-    movq $1, %rdi
-    syscall
 
     .global _start
 _start:
+";
+const POSTLUDE_STR_X64: &str = "
+    movq $SYS_exit, %rax
+    movq $0, %rdi
+    syscall
 ";
 
 fn translate_instructions(tree: &mut Tree) {
@@ -387,14 +376,14 @@ fn get_labels(tree: &mut Tree) {
         if let Instruction::Jumpz(label) = instruction {
             if labels.0.get(label).is_some() {
                 found.insert(label);
-            } else if !PRELUDE_LABELS.contains(&label.as_str()) {
+            } else {
                 panic!("jumpz has no matching label: {}", token)
             }
         }
         if let Instruction::Addr(label) = instruction {
             if labels.0.get(label).is_some() {
                 found.insert(label);
-            } else if !PRELUDE_LABELS.contains(&label.as_str()) {
+            } else {
                 panic!("addr has no matching label: {}", token)
             }
         }
@@ -406,6 +395,7 @@ fn get_labels(tree: &mut Tree) {
     tree.insert(labels);
 }
 
+// lo and hi index into code, exits indexes into blocks
 struct Block {
     lo: usize,
     hi: usize,
@@ -418,23 +408,48 @@ fn get_blocks(tree: &mut Tree) {
 
     let mut blocks = vec![Block { lo: 0, hi: code.0.len(), exits: vec![] }];
 
-    // split blocks on labels
-    for (_, (pc, _)) in &labels.0 {
-        let i = blocks.iter().position(|block| block.lo <= *pc && *pc < block.hi).unwrap();
-        for block in &mut blocks {
+    let split_blocks = |blocks: &mut Vec<Block>, pc: usize, mut exits: Vec<usize>, fallthrough| {
+        let i = blocks.iter().position(|block| block.lo <= pc && pc < block.hi).unwrap();
+        if fallthrough {
+            exits.push(i + 1);
+        }
+        for block in &mut *blocks {
             for exit in &mut block.exits {
                 if *exit > i {
                     *exit += 1;
                 }
             }
         }
-        let before = Block { lo: blocks[i].lo, hi: *pc, exits: vec![i + 1] };
-        let after = Block { lo: *pc, hi: blocks[i].hi, exits: blocks[i].exits.clone() };
+        let before = Block { lo: blocks[i].lo, hi: pc, exits };
+        let after = Block { lo: pc, hi: blocks[i].hi, exits: blocks[i].exits.clone() };
         blocks.splice(i..=i, [before, after]);
+    };
+
+    // split blocks on labels
+    for (_, (pc, _)) in &labels.0 {
+        split_blocks(&mut blocks, *pc, vec![], true);
     }
 
-    // split blocks on jumpzs
-    // split blocks on gotos
+    let labels: HashMap<String, usize> = labels
+        .0
+        .iter()
+        .map(|(label, (pc, _))| {
+            (
+                label.clone(),
+                blocks.iter().position(|block| block.lo <= *pc && *pc < block.hi).unwrap(),
+            )
+        })
+        .collect();
+    // split blocks on jumps
+    for (pc, (instruction, _)) in code.0.iter().enumerate() {
+        match instruction {
+            Instruction::Jumpz(label) => {
+                split_blocks(&mut blocks, pc, vec![*labels.get(label).unwrap()], true)
+            }
+            Instruction::Goto => todo!(),
+            _ => {}
+        }
+    }
 }
 
 fn compile_x64(tree: &mut Tree) {
@@ -486,6 +501,7 @@ fn compile_x64(tree: &mut Tree) {
         }
         .unwrap();
     }
+    write!(stdin, "{}", POSTLUDE_STR_X64).unwrap();
 
     assembler.wait().unwrap();
 

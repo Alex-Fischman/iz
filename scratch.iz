@@ -9,7 +9,3 @@ while_end?
 while_end:
 
 9223372036854775807
-
-# Two different ways to do an unconditional jump to a label
-# 0 exit?
-exit& goto
