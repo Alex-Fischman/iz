@@ -286,19 +286,6 @@ enum Instruction {
     Goto,          // pops an address and sets pc to it
 }
 
-// This prelude is wrapped around every program
-const PRELUDE_STR_X64: &str = "
-#include <sys/syscall.h>
-
-    .global _start
-_start:
-";
-const POSTLUDE_STR_X64: &str = "
-    movq $SYS_exit, %rax
-    movq $0, %rdi
-    syscall
-";
-
 fn translate_instructions(tree: &mut Tree) {
     for child in &mut tree.children {
         if child.get::<Instruction>().is_none() {
@@ -429,7 +416,6 @@ fn get_blocks(tree: &mut Tree) {
     for (_, (pc, _)) in &labels.0 {
         split_blocks(&mut blocks, *pc, vec![], true);
     }
-
     let labels: HashMap<String, usize> = labels
         .0
         .iter()
@@ -473,7 +459,7 @@ fn compile_x64(tree: &mut Tree) {
         .unwrap();
     let stdin = assembler.stdin.as_mut().unwrap();
 
-    write!(stdin, "{}", PRELUDE_STR_X64).unwrap();
+    write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:").unwrap();
     for (instruction, _) in &code.0 {
         match instruction {
             Instruction::Push(int) => write!(stdin, "\tmovq ${}, %rax\n\tpushq %rax\n", int),
@@ -501,7 +487,7 @@ fn compile_x64(tree: &mut Tree) {
         }
         .unwrap();
     }
-    write!(stdin, "{}", POSTLUDE_STR_X64).unwrap();
+    write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall").unwrap();
 
     assembler.wait().unwrap();
 
