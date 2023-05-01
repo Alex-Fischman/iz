@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     io::Write,
     ops::Deref,
     process::{Command, Stdio},
@@ -138,6 +138,7 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(get_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(get_labels)));
+    passes.push_back(Pass::Func(Box::new(get_blocks)));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
@@ -371,7 +372,7 @@ fn get_instructions(tree: &mut Tree) {
 struct Labels(HashMap<String, (usize, Token)>);
 
 fn get_labels(tree: &mut Tree) {
-    let code: &Code = tree.get().expect("expected tree to contain code");
+    let code: &Code = tree.get().unwrap();
     let mut labels = Labels(HashMap::new());
     for (pc, (instruction, token)) in code.0.iter().enumerate() {
         if let Instruction::Label(label) = instruction {
@@ -381,19 +382,59 @@ fn get_labels(tree: &mut Tree) {
             }
         }
     }
+    let mut found = HashSet::new();
     for (instruction, token) in &code.0 {
         if let Instruction::Jumpz(label) = instruction {
-            if !PRELUDE_LABELS.contains(&label.as_str()) && labels.0.get(label).is_none() {
+            if labels.0.get(label).is_some() {
+                found.insert(label);
+            } else if !PRELUDE_LABELS.contains(&label.as_str()) {
                 panic!("jumpz has no matching label: {}", token)
             }
         }
         if let Instruction::Addr(label) = instruction {
-            if !PRELUDE_LABELS.contains(&label.as_str()) && labels.0.get(label).is_none() {
+            if labels.0.get(label).is_some() {
+                found.insert(label);
+            } else if !PRELUDE_LABELS.contains(&label.as_str()) {
                 panic!("addr has no matching label: {}", token)
             }
         }
     }
+    if found.len() != labels.0.len() {
+        let labels: HashSet<&String> = labels.0.keys().collect();
+        panic!("unused labels: {:?}", labels.difference(&found))
+    }
     tree.insert(labels);
+}
+
+struct Block {
+    lo: usize,
+    hi: usize,
+    exits: Vec<usize>,
+}
+
+fn get_blocks(tree: &mut Tree) {
+    let code: &Code = tree.get().unwrap();
+    let labels: &Labels = tree.get().unwrap();
+
+    let mut blocks = vec![Block { lo: 0, hi: code.0.len(), exits: vec![] }];
+
+    // split blocks on labels
+    for (_, (pc, _)) in &labels.0 {
+        let i = blocks.iter().position(|block| block.lo <= *pc && *pc < block.hi).unwrap();
+        for block in &mut blocks {
+            for exit in &mut block.exits {
+                if *exit > i {
+                    *exit += 1;
+                }
+            }
+        }
+        let before = Block { lo: blocks[i].lo, hi: *pc, exits: vec![i + 1] };
+        let after = Block { lo: *pc, hi: blocks[i].hi, exits: blocks[i].exits.clone() };
+        blocks.splice(i..=i, [before, after]);
+    }
+
+    // split blocks on jumpzs
+    // split blocks on gotos
 }
 
 fn compile_x64(tree: &mut Tree) {
@@ -402,7 +443,7 @@ fn compile_x64(tree: &mut Tree) {
         None => "a.out",
     };
 
-    let code: &Code = tree.get().expect("expected tree to contain code");
+    let code: &Code = tree.get().unwrap();
     let mut assembler = Command::new("gcc")
         .arg("-x")
         .arg("assembler-with-cpp")
