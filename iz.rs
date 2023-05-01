@@ -397,6 +397,11 @@ fn get_labels(tree: &mut Tree) {
 }
 
 fn compile_x64(tree: &mut Tree) {
+    let name = match tree.token.source.name.rfind('.') {
+        Some(i) => &tree.token.source.name[..i],
+        None => "a.out",
+    };
+
     let code: &Code = tree.get().expect("expected tree to contain code");
     let mut assembler = Command::new("gcc")
         .arg("-x")
@@ -404,7 +409,8 @@ fn compile_x64(tree: &mut Tree) {
         .arg("-nostdlib")
         .arg("-Wall")
         .arg("-g")
-        .arg("-O")
+        .arg("-o")
+        .arg(name)
         .arg("-")
         .stdin(Stdio::piped())
         .spawn()
@@ -441,7 +447,8 @@ fn compile_x64(tree: &mut Tree) {
     }
 
     assembler.wait().unwrap();
-    let output = Command::new("./a.out").output().unwrap();
+
+    let output = Command::new(format!("./{}", name)).output().unwrap();
     println!(
         "status: {}\nstderr: {}\nstdout: {}",
         output.status,
