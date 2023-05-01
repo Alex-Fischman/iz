@@ -138,7 +138,6 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(get_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(get_labels)));
-    passes.push_back(Pass::Func(Box::new(get_blocks)));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
@@ -380,62 +379,6 @@ fn get_labels(tree: &mut Tree) {
         panic!("unused labels: {:?}", labels.difference(&found))
     }
     tree.insert(labels);
-}
-
-// lo and hi index into code, exits indexes into blocks
-struct Block {
-    lo: usize,
-    hi: usize,
-    exits: Vec<usize>,
-}
-
-fn get_blocks(tree: &mut Tree) {
-    let code: &Code = tree.get().unwrap();
-    let labels: &Labels = tree.get().unwrap();
-
-    let mut blocks = vec![Block { lo: 0, hi: code.0.len(), exits: vec![] }];
-
-    let split_blocks = |blocks: &mut Vec<Block>, pc: usize, mut exits: Vec<usize>, fallthrough| {
-        let i = blocks.iter().position(|block| block.lo <= pc && pc < block.hi).unwrap();
-        if fallthrough {
-            exits.push(i + 1);
-        }
-        for block in &mut *blocks {
-            for exit in &mut block.exits {
-                if *exit > i {
-                    *exit += 1;
-                }
-            }
-        }
-        let before = Block { lo: blocks[i].lo, hi: pc, exits };
-        let after = Block { lo: pc, hi: blocks[i].hi, exits: blocks[i].exits.clone() };
-        blocks.splice(i..=i, [before, after]);
-    };
-
-    // split blocks on labels
-    for (_, (pc, _)) in &labels.0 {
-        split_blocks(&mut blocks, *pc, vec![], true);
-    }
-    let labels: HashMap<String, usize> = labels
-        .0
-        .iter()
-        .map(|(label, (pc, _))| {
-            (
-                label.clone(),
-                blocks.iter().position(|block| block.lo <= *pc && *pc < block.hi).unwrap(),
-            )
-        })
-        .collect();
-    // split blocks on jumps
-    for (pc, (instruction, _)) in code.0.iter().enumerate() {
-        match instruction {
-            Instruction::Jumpz(label) => {
-                split_blocks(&mut blocks, pc, vec![*labels.get(label).unwrap()], true)
-            }
-            Instruction::Goto => todo!(),
-            _ => {}
-        }
-    }
 }
 
 fn compile_x64(tree: &mut Tree) {
