@@ -85,20 +85,18 @@ impl std::fmt::Display for Tree {
     }
 }
 
-struct Pass {
-    name: String,
-    func: Box<dyn Fn(&mut Tree)>,
+enum Pass {
+    Name(String),
+    Func(Box<dyn Fn(&mut Tree)>),
 }
 
 impl Pass {
-    fn new<F: Fn(&mut Tree) + 'static>(name: &str, func: F) -> Pass {
-        Pass { name: name.to_owned(), func: Box::new(func) }
-    }
-
     fn run_passes(passes: VecDeque<Pass>, tree: &mut Tree) {
         tree.insert(passes);
         while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
-            (pass.func)(tree)
+            if let Pass::Func(func) = pass {
+                func(tree);
+            }
         }
     }
 }
@@ -124,16 +122,20 @@ fn main() {
     }
 
     let mut passes = VecDeque::new();
-    passes.push_back(Pass::new("remove comments", remove_comments));
-    passes.push_back(Pass::new("remove whitespace", remove_whitespace));
-    passes.push_back(Pass::new("concat identifiers", concat_tokens(is_identifier, is_identifier)));
-    passes.push_back(Pass::new("concat operators", concat_tokens(is_operator, is_operator)));
-    passes.push_back(Pass::new("parse integers", parse_integers));
-    passes.push_back(Pass::new("parse :?&", parse_postfixes(&[":", "?", "&"])));
-    passes.push_back(Pass::new("translate instructions", translate_instructions));
-    passes.push_back(Pass::new("get instructions", get_instructions));
-    passes.push_back(Pass::new("get labels", get_labels));
-    passes.push_back(Pass::new("compile x64", compile_x64));
+    passes.push_back(Pass::Name("chars".to_owned()));
+    passes.push_back(Pass::Func(Box::new(remove_comments)));
+    passes.push_back(Pass::Func(Box::new(remove_whitespace)));
+    passes.push_back(Pass::Func(Box::new(concat_tokens(is_identifier))));
+    passes.push_back(Pass::Func(Box::new(concat_tokens(is_operator))));
+    passes.push_back(Pass::Name("tokens".to_owned()));
+    passes.push_back(Pass::Func(Box::new(parse_integers)));
+    passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
+    passes.push_back(Pass::Name("ast".to_owned()));
+    passes.push_back(Pass::Func(Box::new(translate_instructions)));
+    passes.push_back(Pass::Func(Box::new(get_instructions)));
+    passes.push_back(Pass::Func(Box::new(get_labels)));
+    passes.push_back(Pass::Name("instructions".to_owned()));
+    passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
 
@@ -165,12 +167,12 @@ fn remove_whitespace(tree: &mut Tree) {
     tree.children.retain(|child| !is_whitespace(child.token.deref()));
 }
 
-fn concat_tokens(f: impl Fn(&str) -> bool, g: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
+fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
     move |tree: &mut Tree| {
         let mut i = 1;
         while i < tree.children.len() {
             if f(tree.children[i - 1].token.deref())
-                && g(tree.children[i].token.deref())
+                && f(tree.children[i].token.deref())
                 && tree.children[i - 1].token.source == tree.children[i].token.source
                 && tree.children[i - 1].token.hi == tree.children[i].token.lo
             {
