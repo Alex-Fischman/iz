@@ -133,8 +133,8 @@ fn main() {
     passes.push_back(Pass::Name("ast".to_owned()));
     passes.push_back(Pass::Func(Box::new(translate_instructions)));
     passes.push_back(Pass::Func(Box::new(get_instructions)));
+    passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(get_labels)));
-    passes.push_back(Pass::Name("instructions".to_owned()));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
