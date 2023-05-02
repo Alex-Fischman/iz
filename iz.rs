@@ -51,6 +51,7 @@ struct Tree {
     contents: HashMap<TypeId, Box<dyn Any>>,
 }
 
+#[allow(dead_code)]
 impl Tree {
     fn new(token: Token) -> Tree {
         Tree { token, children: Vec::new(), contents: HashMap::new() }
@@ -95,9 +96,14 @@ impl Pass {
         tree.insert(passes);
         while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
             if let Pass::Func(func) = pass {
-                func(tree);
+                Pass::postorder(&func, tree);
             }
         }
+    }
+
+    fn postorder(func: &impl Fn(&mut Tree), tree: &mut Tree) {
+        tree.children.iter_mut().for_each(|child| Pass::postorder(func, child));
+        func(tree);
     }
 }
 
@@ -221,7 +227,6 @@ fn parse_integers(tree: &mut Tree) {
 
 fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(parse_brackets(open, close));
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
         while i < tree.children.len() {
@@ -245,7 +250,6 @@ fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
 
 fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(parse_postfixes(names));
         let mut i = 0;
         while i < tree.children.len() {
             if names.contains(&tree.children[i].token.deref()) {
@@ -289,97 +293,89 @@ enum Instruction {
 fn translate_instructions(tree: &mut Tree) {
     for child in &mut tree.children {
         if child.get::<Instruction>().is_none() {
-            let instruction = if let Some(int) = child.get::<i64>() {
-                Instruction::Push(*int)
+            let instructions = if let Some(int) = child.remove::<i64>() {
+                vec![Instruction::Push(int)]
             } else {
                 match child.token.deref() {
-                    "pop" => Instruction::Pop,
-                    "sp" => Instruction::Sp,
-                    "write" => Instruction::Write,
-                    "read" => Instruction::Read,
-                    "add" => Instruction::Add,
-                    "mul" => Instruction::Mul,
-                    "and" => Instruction::And,
-                    "or" => Instruction::Or,
-                    "xor" => Instruction::Xor,
+                    "pop" => vec![Instruction::Pop],
+                    "sp" => vec![Instruction::Sp],
+                    "write" => vec![Instruction::Write],
+                    "read" => vec![Instruction::Read],
+                    "add" => vec![Instruction::Add],
+                    "mul" => vec![Instruction::Mul],
+                    "and" => vec![Instruction::And],
+                    "or" => vec![Instruction::Or],
+                    "xor" => vec![Instruction::Xor],
                     ":" => {
                         let grandchild = child.children.pop().unwrap();
-                        Instruction::Label(grandchild.token.deref().to_owned())
+                        vec![Instruction::Label(grandchild.token.deref().to_owned())]
                     }
                     "?" => {
                         let grandchild = child.children.pop().unwrap();
-                        Instruction::Jumpz(grandchild.token.deref().to_owned())
+                        vec![Instruction::Jumpz(grandchild.token.deref().to_owned())]
                     }
                     "&" => {
                         let grandchild = child.children.pop().unwrap();
-                        Instruction::Addr(grandchild.token.deref().to_owned())
+                        vec![Instruction::Addr(grandchild.token.deref().to_owned())]
                     }
-                    "goto" => Instruction::Goto,
-                    _ => panic!("could not translate {}", child.token),
+                    "goto" => vec![Instruction::Goto],
+                    _ => continue,
                 }
             };
-            child.insert(vec![instruction]);
+            child.insert(instructions);
         }
     }
 }
 
-// we want the tokens for the location information
-struct Code(Vec<(Instruction, Token)>);
-
 fn get_instructions(tree: &mut Tree) {
-    let code = tree
-        .children
-        .drain(..)
-        .flat_map(|mut child| match child.remove::<Vec<Instruction>>() {
-            None => panic!("no instruction for tree\n{}", child),
-            Some(instructions) => {
-                if child.children.is_empty() {
-                    instructions.into_iter().map(move |i| (i, child.token.clone()))
-                } else {
+    for child in &tree.children {
+        match child.get::<Vec<Instruction>>() {
+            None => panic!("could not translate\n{}", child),
+            Some(_) => {
+                if !child.children.is_empty() {
                     panic!("tree had children\n{}", child)
+                } else if child.contents.len() != 1 {
+                    panic!("tree had extra contents\n{}", child)
                 }
             }
-        })
-        .collect();
-    tree.insert(Code(code));
+        }
+    }
 }
 
-// we want the tokens for the location information
-struct Labels(HashMap<String, (usize, Token)>);
-
 fn get_labels(tree: &mut Tree) {
-    let code: &Code = tree.get().unwrap();
-    let mut labels = Labels(HashMap::new());
-    for (pc, (instruction, token)) in code.0.iter().enumerate() {
-        if let Instruction::Label(label) = instruction {
-            let old = labels.0.insert(label.clone(), (pc, token.clone()));
-            if let Some((_, old)) = old {
-                panic!("label is declared twice:\n{}\n{}", token, old)
+    let mut labels = HashSet::new();
+    for child in &tree.children {
+        for instruction in child.get::<Vec<Instruction>>().unwrap() {
+            if let Instruction::Label(label) = instruction {
+                if !labels.insert(label) {
+                    panic!("label is declared twice: {} {}", label, child.token)
+                }
             }
         }
     }
     let mut found = HashSet::new();
-    for (instruction, token) in &code.0 {
-        if let Instruction::Jumpz(label) = instruction {
-            if labels.0.get(label).is_some() {
-                found.insert(label);
-            } else {
-                panic!("jumpz has no matching label: {}", token)
+    for child in &tree.children {
+        for instruction in child.get::<Vec<Instruction>>().unwrap() {
+            if let Instruction::Jumpz(label) = instruction {
+                if labels.get(label).is_some() {
+                    found.insert(label);
+                } else {
+                    panic!("jumpz has no matching label: {}", child.token)
+                }
             }
-        }
-        if let Instruction::Addr(label) = instruction {
-            if labels.0.get(label).is_some() {
-                found.insert(label);
-            } else {
-                panic!("addr has no matching label: {}", token)
+            if let Instruction::Addr(label) = instruction {
+                if labels.get(label).is_some() {
+                    found.insert(label);
+                } else {
+                    panic!("addr has no matching label: {}", child.token)
+                }
             }
         }
     }
-    if found.len() != labels.0.len() {
-        let labels: HashSet<&String> = labels.0.keys().collect();
-        panic!("unused labels: {:?}", labels.difference(&found))
+    let diff: HashSet<_> = labels.difference(&found).collect();
+    if !diff.is_empty() {
+        panic!("unused labels: {:?}", diff)
     }
-    tree.insert(labels);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -416,33 +412,33 @@ impl Effect {
 }
 
 fn type_check(tree: &mut Tree) {
-    let code: &Code = tree.get().unwrap();
-    let labels: &Labels = tree.get().unwrap();
-
-    fn type_check(code: &[(Instruction, Token)], _labels: &Labels) -> Effect {
+    fn type_check(children: &[Tree]) -> Effect {
         let mut effect = Effect::new([], []);
-        for (instruction, _) in code {
-            effect.compose(match instruction {
-                Instruction::Push(_) => Effect::new([], [Type::Integer]),
-                Instruction::Pop => Effect::new([Type::Integer], []),
-                Instruction::Sp => Effect::new([], [Type::Integer]),
-                Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
-                Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
-                Instruction::Add => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-                Instruction::Mul => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-                Instruction::And => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-                Instruction::Or => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-                Instruction::Xor => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-                Instruction::Label(_) => Effect::new([], []),
-                Instruction::Jumpz(_label) => todo!(),
-                Instruction::Addr(_label) => Effect::new([], [Type::Function(todo!())]),
-                Instruction::Goto => todo!(),
-            });
+        for child in children {
+            for instruction in child.get::<Vec<Instruction>>().unwrap() {
+                effect.compose(match instruction {
+                    Instruction::Push(_) | Instruction::Sp => Effect::new([], [Type::Integer]),
+                    Instruction::Pop => Effect::new([Type::Integer], []),
+                    Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
+                    Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
+                    Instruction::Add
+                    | Instruction::Mul
+                    | Instruction::And
+                    | Instruction::Or
+                    | Instruction::Xor => {
+                        Effect::new([Type::Integer, Type::Integer], [Type::Integer])
+                    }
+                    Instruction::Label(_) => Effect::new([], []),
+                    Instruction::Jumpz(_label) => todo!(),
+                    Instruction::Addr(_label) => Effect::new([], [Type::Function(todo!())]),
+                    Instruction::Goto => todo!(),
+                });
+            }
         }
         effect
     }
 
-    let effect = type_check(&code.0, labels);
+    let effect = type_check(&tree.children);
     if !effect.inputs.is_empty() {
         panic!("program expected inputs: {:?}", effect.inputs)
     }
@@ -457,7 +453,6 @@ fn compile_x64(tree: &mut Tree) {
         None => "a.out",
     };
 
-    let code: &Code = tree.get().unwrap();
     let mut assembler = Command::new("gcc")
         .arg("-x")
         .arg("assembler-with-cpp")
@@ -473,32 +468,34 @@ fn compile_x64(tree: &mut Tree) {
     let stdin = assembler.stdin.as_mut().unwrap();
 
     write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:").unwrap();
-    for (instruction, _) in &code.0 {
-        match instruction {
-            Instruction::Push(int) => write!(stdin, "\tmovq ${}, %rax\n\tpushq %rax\n", int),
-            Instruction::Pop => write!(stdin, "\tpopq %rax\n"),
-            Instruction::Sp => write!(stdin, "\tpushq %rsp\n"),
-            Instruction::Write => {
-                write!(stdin, "\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n")
+    for child in &tree.children {
+        for instruction in child.get::<Vec<Instruction>>().unwrap() {
+            match instruction {
+                Instruction::Push(int) => write!(stdin, "\tmovq ${}, %rax\n\tpushq %rax\n", int),
+                Instruction::Pop => write!(stdin, "\tpopq %rax\n"),
+                Instruction::Sp => write!(stdin, "\tpushq %rsp\n"),
+                Instruction::Write => {
+                    write!(stdin, "\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n")
+                }
+                Instruction::Read => {
+                    write!(stdin, "\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
+                }
+                Instruction::Add => write!(stdin, "\tpopq %rax\n\taddq %rax, (%rsp)\n"),
+                Instruction::Mul => write!(stdin, "\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
+                Instruction::And => write!(stdin, "\tpopq %rax\n\tandq %rax, (%rsp)\n"),
+                Instruction::Or => write!(stdin, "\tpopq %rax\n\torq %rax, (%rsp)\n"),
+                Instruction::Xor => write!(stdin, "\tpopq %rax\n\txorq %rax, (%rsp)\n"),
+                Instruction::Label(label) => write!(stdin, "{}:\n", label),
+                Instruction::Jumpz(label) => {
+                    write!(stdin, "\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
+                }
+                Instruction::Addr(label) => {
+                    write!(stdin, "\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
+                }
+                Instruction::Goto => write!(stdin, "\tret\n"),
             }
-            Instruction::Read => {
-                write!(stdin, "\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
-            }
-            Instruction::Add => write!(stdin, "\tpopq %rax\n\taddq %rax, (%rsp)\n"),
-            Instruction::Mul => write!(stdin, "\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
-            Instruction::And => write!(stdin, "\tpopq %rax\n\tandq %rax, (%rsp)\n"),
-            Instruction::Or => write!(stdin, "\tpopq %rax\n\torq %rax, (%rsp)\n"),
-            Instruction::Xor => write!(stdin, "\tpopq %rax\n\txorq %rax, (%rsp)\n"),
-            Instruction::Label(label) => write!(stdin, "{}:\n", label),
-            Instruction::Jumpz(label) => {
-                write!(stdin, "\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
-            }
-            Instruction::Addr(label) => {
-                write!(stdin, "\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
-            }
-            Instruction::Goto => write!(stdin, "\tret\n"),
+            .unwrap();
         }
-        .unwrap();
     }
     write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall").unwrap();
 
