@@ -146,7 +146,6 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(get_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(get_labels)));
-    passes.push_back(Pass::Func(Box::new(type_check)));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
@@ -380,70 +379,11 @@ fn get_labels(tree: &mut Tree) {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Type {
-    Integer,
-    Function(Effect),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct Effect {
-    inputs: Vec<Type>,
-    outputs: Vec<Type>,
-}
-
-impl Effect {
-    fn new<I, O>(inputs: I, outputs: O) -> Effect
-    where
-        I: IntoIterator<Item = Type>,
-        O: IntoIterator<Item = Type>,
-    {
-        Effect { inputs: inputs.into_iter().collect(), outputs: outputs.into_iter().collect() }
-    }
-
-    fn compose(&mut self, mut other: Effect) {
-        for input in other.inputs.into_iter().rev() {
-            match self.outputs.pop() {
-                Some(output) if input == output => {}
-                Some(output) => panic!("expected {:?}, found {:?}", output, input),
-                None => self.inputs.insert(0, input),
-            }
-        }
-        self.outputs.append(&mut other.outputs);
-    }
-}
-
-fn type_check(tree: &mut Tree) {
-    let mut effect = Effect::new([], []);
-    for child in &tree.children {
-        for instruction in child.get::<Vec<Instruction>>().unwrap() {
-            effect.compose(match instruction {
-                Instruction::Push(_) | Instruction::Sp => Effect::new([], [Type::Integer]),
-                Instruction::Pop => Effect::new([Type::Integer], []),
-                Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
-                Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
-                Instruction::Add
-                | Instruction::Mul
-                | Instruction::And
-                | Instruction::Or
-                | Instruction::Xor => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
-                Instruction::Label(_) => Effect::new([], []),
-                Instruction::Jumpz(_label) => todo!(),
-                Instruction::Addr(_label) => Effect::new([], [Type::Function(todo!())]),
-                Instruction::Goto => todo!(),
-            });
-        }
-    }
-
-    if !effect.inputs.is_empty() {
-        panic!("program expected inputs: {:?}", effect.inputs)
-    }
-    if !effect.outputs.is_empty() {
-        panic!("program returned outputs: {:?}", effect.outputs)
-    }
-}
-
 fn compile_x64(tree: &mut Tree) {
+    if tree.children.is_empty() {
+        return;
+    }
+
     let name = match tree.token.source.name.rfind('.') {
         Some(i) => &tree.token.source.name[..i],
         None => "a.out",
