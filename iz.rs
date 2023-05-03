@@ -128,6 +128,11 @@ fn main() {
     }
 
     let mut passes = VecDeque::new();
+    // needs to happen before tokenization in case someone wants to change that
+    passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("{", "}"))));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
+    // TODO: CTCE matching goes here
     passes.push_back(Pass::Name("chars".to_owned()));
     passes.push_back(Pass::Func(Box::new(remove_comments)));
     passes.push_back(Pass::Func(Box::new(remove_whitespace)));
@@ -135,9 +140,6 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(concat_tokens(is_operator))));
     passes.push_back(Pass::Name("tokens".to_owned()));
     passes.push_back(Pass::Func(Box::new(parse_integers)));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("{", "}"))));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
     passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
     passes.push_back(Pass::Name("ast".to_owned()));
     passes.push_back(Pass::Func(Box::new(translate_instructions)));
@@ -412,33 +414,27 @@ impl Effect {
 }
 
 fn type_check(tree: &mut Tree) {
-    fn type_check(children: &[Tree]) -> Effect {
-        let mut effect = Effect::new([], []);
-        for child in children {
-            for instruction in child.get::<Vec<Instruction>>().unwrap() {
-                effect.compose(match instruction {
-                    Instruction::Push(_) | Instruction::Sp => Effect::new([], [Type::Integer]),
-                    Instruction::Pop => Effect::new([Type::Integer], []),
-                    Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
-                    Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
-                    Instruction::Add
-                    | Instruction::Mul
-                    | Instruction::And
-                    | Instruction::Or
-                    | Instruction::Xor => {
-                        Effect::new([Type::Integer, Type::Integer], [Type::Integer])
-                    }
-                    Instruction::Label(_) => Effect::new([], []),
-                    Instruction::Jumpz(_label) => todo!(),
-                    Instruction::Addr(_label) => Effect::new([], [Type::Function(todo!())]),
-                    Instruction::Goto => todo!(),
-                });
-            }
+    let mut effect = Effect::new([], []);
+    for child in &tree.children {
+        for instruction in child.get::<Vec<Instruction>>().unwrap() {
+            effect.compose(match instruction {
+                Instruction::Push(_) | Instruction::Sp => Effect::new([], [Type::Integer]),
+                Instruction::Pop => Effect::new([Type::Integer], []),
+                Instruction::Write => Effect::new([Type::Integer, Type::Integer], []),
+                Instruction::Read => Effect::new([Type::Integer], [Type::Integer]),
+                Instruction::Add
+                | Instruction::Mul
+                | Instruction::And
+                | Instruction::Or
+                | Instruction::Xor => Effect::new([Type::Integer, Type::Integer], [Type::Integer]),
+                Instruction::Label(_) => Effect::new([], []),
+                Instruction::Jumpz(_label) => todo!(),
+                Instruction::Addr(_label) => Effect::new([], [Type::Function(todo!())]),
+                Instruction::Goto => todo!(),
+            });
         }
-        effect
     }
 
-    let effect = type_check(&tree.children);
     if !effect.inputs.is_empty() {
         panic!("program expected inputs: {:?}", effect.inputs)
     }
