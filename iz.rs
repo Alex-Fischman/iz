@@ -143,7 +143,7 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
     passes.push_back(Pass::Name("ast".to_owned()));
     passes.push_back(Pass::Func(Box::new(translate_instructions)));
-    passes.push_back(Pass::Func(Box::new(get_instructions)));
+    passes.push_back(Pass::Func(Box::new(check_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(get_labels)));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
@@ -328,7 +328,7 @@ fn translate_instructions(tree: &mut Tree) {
     }
 }
 
-fn get_instructions(tree: &mut Tree) {
+fn check_instructions(tree: &mut Tree) {
     for child in &tree.children {
         match child.get::<Vec<Instruction>>() {
             None => panic!("could not translate\n{}", child),
