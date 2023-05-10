@@ -146,6 +146,7 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(check_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(get_labels)));
+    // passes.push_back(Pass::Func(Box::new(get_cfg)));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
@@ -343,13 +344,19 @@ fn check_instructions(tree: &mut Tree) {
     }
 }
 
+// map from label name to (child index, instruction index)
+struct Labels(HashMap<String, (usize, usize)>);
 fn get_labels(tree: &mut Tree) {
-    let mut labels = HashSet::new();
-    for child in &tree.children {
-        for instruction in child.get::<Vec<Instruction>>().unwrap() {
+    let mut labels = HashMap::new();
+    for (i, child) in tree.children.iter().enumerate() {
+        for (j, instruction) in child.get::<Vec<Instruction>>().unwrap().iter().enumerate() {
             if let Instruction::Label(label) = instruction {
-                if !labels.insert(label) {
-                    panic!("label is declared twice: {} {}", label, child.token)
+                let old = labels.insert(label.clone(), (i, j));
+                if let Some((k, _)) = old {
+                    panic!(
+                        "label {} is declared twice:\n{}\n{}",
+                        label, child.token, tree.children[k].token
+                    )
                 }
             }
         }
@@ -373,10 +380,12 @@ fn get_labels(tree: &mut Tree) {
             }
         }
     }
-    let diff: HashSet<_> = labels.difference(&found).collect();
+    let labels_set = labels.keys().collect::<HashSet<_>>();
+    let diff: HashSet<_> = labels_set.difference(&found).collect();
     if !diff.is_empty() {
         panic!("unused labels: {:?}", diff)
     }
+    tree.insert(Labels(labels));
 }
 
 fn compile_x64(tree: &mut Tree) {
