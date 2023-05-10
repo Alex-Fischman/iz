@@ -127,12 +127,10 @@ fn main() {
         tree.children.push(Tree::new(Token { source: source.clone(), lo, hi }));
     }
 
+    // this is the only thing that needs to happen before trying to find macros
+    Pass::postorder(&parse_brackets("{", "}"), &mut tree);
+
     let mut passes = VecDeque::new();
-    // needs to happen before tokenization in case someone wants to change that
-    passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("{", "}"))));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
-    // TODO: CTCE matching goes here
     passes.push_back(Pass::Name("chars".to_owned()));
     passes.push_back(Pass::Func(Box::new(remove_comments)));
     passes.push_back(Pass::Func(Box::new(remove_whitespace)));
@@ -140,13 +138,14 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(concat_tokens(is_operator))));
     passes.push_back(Pass::Name("tokens".to_owned()));
     passes.push_back(Pass::Func(Box::new(parse_integers)));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
     passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
     passes.push_back(Pass::Name("ast".to_owned()));
     passes.push_back(Pass::Func(Box::new(translate_instructions)));
+    passes.push_back(Pass::Func(Box::new(get_labels)));
     passes.push_back(Pass::Func(Box::new(check_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
-    passes.push_back(Pass::Func(Box::new(get_labels)));
-    // passes.push_back(Pass::Func(Box::new(get_cfg)));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
     Pass::run_passes(passes, &mut tree);
 }
@@ -198,8 +197,8 @@ fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
 }
 
 fn parse_integers(tree: &mut Tree) {
-    for child in &mut tree.children {
-        let chars: Vec<char> = child.token.deref().chars().collect();
+    let chars: Vec<char> = tree.token.deref().chars().collect();
+    if !chars.is_empty() {
         let (chars, is_negative) = match chars[0] {
             '-' => (&chars[1..], true),
             _ => (&chars[..], false),
@@ -215,14 +214,14 @@ fn parse_integers(tree: &mut Tree) {
                     '0'..='9' => *c as i64 - '0' as i64,
                     'a'..='f' => *c as i64 - 'a' as i64 + 10,
                     '_' => return value,
-                    c => panic!("unknown digit {} in {}", c, child.token),
+                    c => panic!("unknown digit {} in {}", c, tree.token),
                 };
                 if digit >= base {
-                    panic!("digit {} too large for base {} in {}", c, base, child.token)
+                    panic!("digit {} too large for base {} in {}", c, base, tree.token)
                 }
                 base * value + digit
             });
-            child.insert::<i64>(if is_negative { -value } else { value });
+            tree.insert::<i64>(if is_negative { -value } else { value });
         }
     }
 }
@@ -293,54 +292,37 @@ enum Instruction {
 }
 
 fn translate_instructions(tree: &mut Tree) {
-    for child in &mut tree.children {
-        if child.get::<Instruction>().is_none() {
-            let instructions = if let Some(int) = child.remove::<i64>() {
-                vec![Instruction::Push(int)]
-            } else {
-                match child.token.deref() {
-                    "pop" => vec![Instruction::Pop],
-                    "sp" => vec![Instruction::Sp],
-                    "write" => vec![Instruction::Write],
-                    "read" => vec![Instruction::Read],
-                    "add" => vec![Instruction::Add],
-                    "mul" => vec![Instruction::Mul],
-                    "and" => vec![Instruction::And],
-                    "or" => vec![Instruction::Or],
-                    "xor" => vec![Instruction::Xor],
-                    ":" => {
-                        let grandchild = child.children.pop().unwrap();
-                        vec![Instruction::Label(grandchild.token.deref().to_owned())]
-                    }
-                    "?" => {
-                        let grandchild = child.children.pop().unwrap();
-                        vec![Instruction::Jumpz(grandchild.token.deref().to_owned())]
-                    }
-                    "&" => {
-                        let grandchild = child.children.pop().unwrap();
-                        vec![Instruction::Addr(grandchild.token.deref().to_owned())]
-                    }
-                    "goto" => vec![Instruction::Goto],
-                    _ => continue,
+    if tree.get::<Vec<Instruction>>().is_none() {
+        let instruction = if let Some(int) = tree.remove::<i64>() {
+            Instruction::Push(int)
+        } else {
+            match tree.token.deref() {
+                "pop" => Instruction::Pop,
+                "sp" => Instruction::Sp,
+                "write" => Instruction::Write,
+                "read" => Instruction::Read,
+                "add" => Instruction::Add,
+                "mul" => Instruction::Mul,
+                "and" => Instruction::And,
+                "or" => Instruction::Or,
+                "xor" => Instruction::Xor,
+                ":" => {
+                    let grandchild = tree.children.pop().unwrap();
+                    Instruction::Label(grandchild.token.deref().to_owned())
                 }
-            };
-            child.insert(instructions);
-        }
-    }
-}
-
-fn check_instructions(tree: &mut Tree) {
-    for child in &tree.children {
-        match child.get::<Vec<Instruction>>() {
-            None => panic!("could not translate\n{}", child),
-            Some(_) => {
-                if !child.children.is_empty() {
-                    panic!("tree had children\n{}", child)
-                } else if child.contents.len() != 1 {
-                    panic!("tree had extra contents\n{}", child)
+                "?" => {
+                    let grandchild = tree.children.pop().unwrap();
+                    Instruction::Jumpz(grandchild.token.deref().to_owned())
                 }
+                "&" => {
+                    let grandchild = tree.children.pop().unwrap();
+                    Instruction::Addr(grandchild.token.deref().to_owned())
+                }
+                "goto" => Instruction::Goto,
+                _ => return,
             }
-        }
+        };
+        tree.insert(vec![instruction]);
     }
 }
 
@@ -349,33 +331,37 @@ struct Labels(HashMap<String, (usize, usize)>);
 fn get_labels(tree: &mut Tree) {
     let mut labels = HashMap::new();
     for (i, child) in tree.children.iter().enumerate() {
-        for (j, instruction) in child.get::<Vec<Instruction>>().unwrap().iter().enumerate() {
-            if let Instruction::Label(label) = instruction {
-                let old = labels.insert(label.clone(), (i, j));
-                if let Some((k, _)) = old {
-                    panic!(
-                        "label {} is declared twice:\n{}\n{}",
-                        label, child.token, tree.children[k].token
-                    )
+        if let Some(instructions) = child.get::<Vec<Instruction>>() {
+            for (j, instruction) in instructions.iter().enumerate() {
+                if let Instruction::Label(label) = instruction {
+                    let old = labels.insert(label.clone(), (i, j));
+                    if let Some((k, _)) = old {
+                        panic!(
+                            "label {} is declared twice:\n{}\n{}",
+                            label, child.token, tree.children[k].token
+                        )
+                    }
                 }
             }
         }
     }
     let mut found = HashSet::new();
     for child in &tree.children {
-        for instruction in child.get::<Vec<Instruction>>().unwrap() {
-            if let Instruction::Jumpz(label) = instruction {
-                if labels.get(label).is_some() {
-                    found.insert(label);
-                } else {
-                    panic!("jumpz has no matching label: {}", child.token)
+        if let Some(instructions) = child.get::<Vec<Instruction>>() {
+            for instruction in instructions {
+                if let Instruction::Jumpz(label) = instruction {
+                    if labels.get(label).is_some() {
+                        found.insert(label);
+                    } else {
+                        panic!("jumpz has no matching label: {}", child.token)
+                    }
                 }
-            }
-            if let Instruction::Addr(label) = instruction {
-                if labels.get(label).is_some() {
-                    found.insert(label);
-                } else {
-                    panic!("addr has no matching label: {}", child.token)
+                if let Instruction::Addr(label) = instruction {
+                    if labels.get(label).is_some() {
+                        found.insert(label);
+                    } else {
+                        panic!("addr has no matching label: {}", child.token)
+                    }
                 }
             }
         }
@@ -386,6 +372,22 @@ fn get_labels(tree: &mut Tree) {
         panic!("unused labels: {:?}", diff)
     }
     tree.insert(Labels(labels));
+}
+
+fn check_instructions(tree: &mut Tree) {
+    for child in &tree.children {
+        match (child.get::<Vec<Instruction>>(), child.get::<Labels>()) {
+            (None, _) => panic!("could not translate to instructions: {}", child.token),
+            (_, None) => panic!("could not get labels: {}", child.token),
+            (Some(_), Some(_)) => {
+                if !child.children.is_empty() {
+                    panic!("tree had children\n{}", child)
+                } else if child.contents.len() > 2 {
+                    panic!("tree had extra contents: {}", child.token);
+                }
+            }
+        }
+    }
 }
 
 fn compile_x64(tree: &mut Tree) {
