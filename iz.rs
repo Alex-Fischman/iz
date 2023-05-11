@@ -127,9 +127,6 @@ fn main() {
         tree.children.push(Tree::new(Token { source: source.clone(), lo, hi }));
     }
 
-    // this is the only thing that needs to happen before trying to find macros
-    Pass::postorder(&parse_brackets("{", "}"), &mut tree);
-
     let mut passes = VecDeque::new();
     passes.push_back(Pass::Name("chars".to_owned()));
     passes.push_back(Pass::Func(Box::new(remove_comments)));
@@ -139,11 +136,13 @@ fn main() {
     passes.push_back(Pass::Name("tokens".to_owned()));
     passes.push_back(Pass::Func(Box::new(parse_integers)));
     passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
+    passes.push_back(Pass::Func(Box::new(parse_brackets("{", "}"))));
     passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
     passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
     passes.push_back(Pass::Name("ast".to_owned()));
     passes.push_back(Pass::Func(Box::new(translate_instructions)));
     passes.push_back(Pass::Func(Box::new(get_labels)));
+    passes.push_back(Pass::Func(Box::new(get_cfg)));
     passes.push_back(Pass::Func(Box::new(check_instructions)));
     passes.push_back(Pass::Name("code".to_owned()));
     passes.push_back(Pass::Func(Box::new(compile_x64)));
@@ -326,16 +325,19 @@ fn translate_instructions(tree: &mut Tree) {
     }
 }
 
-// map from label name to (child index, instruction index)
-struct Labels(HashMap<String, (usize, usize)>);
+struct InstructionIndex {
+    child: usize,
+    index: usize,
+}
+struct Labels(HashMap<String, InstructionIndex>);
 fn get_labels(tree: &mut Tree) {
     let mut labels = HashMap::new();
     for (i, child) in tree.children.iter().enumerate() {
         if let Some(instructions) = child.get::<Vec<Instruction>>() {
             for (j, instruction) in instructions.iter().enumerate() {
                 if let Instruction::Label(label) = instruction {
-                    let old = labels.insert(label.clone(), (i, j));
-                    if let Some((k, _)) = old {
+                    let old = labels.insert(label.clone(), InstructionIndex { child: i, index: j });
+                    if let Some(InstructionIndex { child: k, .. }) = old {
                         panic!(
                             "label {} is declared twice:\n{}\n{}",
                             label, child.token, tree.children[k].token
@@ -372,6 +374,18 @@ fn get_labels(tree: &mut Tree) {
         panic!("unused labels: {:?}", diff)
     }
     tree.insert(Labels(labels));
+}
+
+struct Cfg(HashMap<InstructionIndex, Vec<InstructionIndex>>);
+fn get_cfg(tree: &mut Tree) {
+    let labels = &tree.get::<Labels>().unwrap().0;
+    for (i, child) in tree.children.iter().enumerate() {
+        if let Some(instructions) = child.get::<Vec<Instruction>>() {
+            for (j, instruction) in instructions.iter().enumerate() {
+                todo!()
+            }
+        }
+    }
 }
 
 fn check_instructions(tree: &mut Tree) {
