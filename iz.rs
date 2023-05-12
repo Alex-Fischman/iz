@@ -287,7 +287,7 @@ enum Instruction {
     Label(String), // does nothing except hold a label
     Jumpz(String), // pops a value, if the value is zero sets pc to the label
     Addr(String),  // pushes the address of the given label
-    Goto,          // pops an address and sets pc to it
+    Return,        // pops an address and sets pc to it
 }
 
 fn translate_instructions(tree: &mut Tree) {
@@ -317,7 +317,7 @@ fn translate_instructions(tree: &mut Tree) {
                     let grandchild = tree.children.pop().unwrap();
                     Instruction::Addr(grandchild.token.deref().to_owned())
                 }
-                "goto" => Instruction::Goto,
+                "return" => Instruction::Return,
                 _ => return,
             }
         };
@@ -396,7 +396,7 @@ fn get_cfg(tree: &mut Tree) {
                         entry.push(next);
                         entry.push(*labels.get(label).unwrap());
                     }
-                    Instruction::Goto => todo!(),
+                    Instruction::Return => todo!(),
                     _ => entry.push(next),
                 }
             }
@@ -464,7 +464,7 @@ fn compile_x64(tree: &mut Tree) {
                 Instruction::Addr(label) => {
                     write!(stdin, "\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
                 }
-                Instruction::Goto => write!(stdin, "\tret\n"),
+                Instruction::Return => write!(stdin, "\tret\n"),
             }
             .unwrap();
         }
