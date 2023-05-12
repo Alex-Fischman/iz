@@ -325,6 +325,7 @@ fn translate_instructions(tree: &mut Tree) {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct InstructionIndex {
     child: usize,
     index: usize,
@@ -379,27 +380,37 @@ fn get_labels(tree: &mut Tree) {
 struct Cfg(HashMap<InstructionIndex, Vec<InstructionIndex>>);
 fn get_cfg(tree: &mut Tree) {
     let labels = &tree.get::<Labels>().unwrap().0;
+    let mut cfg: HashMap<InstructionIndex, Vec<InstructionIndex>> = HashMap::new();
     for (i, child) in tree.children.iter().enumerate() {
         if let Some(instructions) = child.get::<Vec<Instruction>>() {
             for (j, instruction) in instructions.iter().enumerate() {
-                todo!()
+                let curr = InstructionIndex { child: i, index: j };
+                let entry: &mut _ = cfg.entry(curr).or_default();
+                let next = if j + 1 < instructions.len() {
+                    InstructionIndex { child: i, index: j + 1 }
+                } else {
+                    InstructionIndex { child: i + 1, index: 0 }
+                };
+                match instruction {
+                    Instruction::Jumpz(label) => {
+                        entry.push(next);
+                        entry.push(*labels.get(label).unwrap());
+                    }
+                    Instruction::Goto => todo!(),
+                    _ => entry.push(next),
+                }
             }
         }
     }
+    tree.insert(Cfg(cfg));
 }
 
 fn check_instructions(tree: &mut Tree) {
     for child in &tree.children {
-        match (child.get::<Vec<Instruction>>(), child.get::<Labels>()) {
-            (None, _) => panic!("could not translate to instructions: {}", child.token),
-            (_, None) => panic!("could not get labels: {}", child.token),
-            (Some(_), Some(_)) => {
-                if !child.children.is_empty() {
-                    panic!("tree had children\n{}", child)
-                } else if child.contents.len() > 2 {
-                    panic!("tree had extra contents: {}", child.token);
-                }
-            }
+        if child.get::<Vec<Instruction>>().is_none() {
+            panic!("could not translate to instructions: {}", child.token)
+        } else if !child.children.is_empty() {
+            panic!("tree had children\n{}", child)
         }
     }
 }

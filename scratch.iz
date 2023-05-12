@@ -7,5 +7,3 @@ while_end?
 1 add
 0 while_start?
 while_end:
-
-{9223372036854775807}
