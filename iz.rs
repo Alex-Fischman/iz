@@ -385,19 +385,21 @@ fn get_cfg(tree: &mut Tree) {
         if let Some(instructions) = child.get::<Vec<Instruction>>() {
             for (j, instruction) in instructions.iter().enumerate() {
                 let curr = InstructionIndex { child: i, index: j };
-                let entry: &mut _ = cfg.entry(curr).or_default();
                 let next = if j + 1 < instructions.len() {
-                    InstructionIndex { child: i, index: j + 1 }
+                    Some(InstructionIndex { child: i, index: j + 1 })
+                } else if i + 1 < tree.children.len() {
+                    Some(InstructionIndex { child: i + 1, index: 0 })
                 } else {
-                    InstructionIndex { child: i + 1, index: 0 }
+                    None
                 };
-                match instruction {
-                    Instruction::Jumpz(label) => {
-                        entry.push(next);
-                        entry.push(*labels.get(label).unwrap());
+                let entry: &mut _ = cfg.entry(curr).or_default();
+                match (instruction, next) {
+                    (Instruction::Return, _) => {}
+                    (Instruction::Jumpz(label), Some(next)) => {
+                        entry.extend([next, *labels.get(label).unwrap()])
                     }
-                    Instruction::Return => todo!(),
-                    _ => entry.push(next),
+                    (_, Some(next)) => entry.push(next),
+                    (_, None) => {}
                 }
             }
         }
