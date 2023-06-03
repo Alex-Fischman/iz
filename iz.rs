@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     io::Write,
     ops::Deref,
     process::{Command, Stdio},
@@ -140,12 +140,8 @@ fn main() {
     passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
     passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
     passes.push_back(Pass::Name("ast".to_owned()));
-    passes.push_back(Pass::Func(Box::new(translate_instructions)));
-    passes.push_back(Pass::Func(Box::new(get_labels)));
-    passes.push_back(Pass::Func(Box::new(get_cfg)));
-    passes.push_back(Pass::Func(Box::new(check_instructions)));
-    passes.push_back(Pass::Name("code".to_owned()));
-    passes.push_back(Pass::Func(Box::new(compile_x64)));
+    passes.push_back(Pass::Func(Box::new(compile_intrinsics_x64)));
+    passes.push_back(Pass::Func(Box::new(compile_program_x64)));
     Pass::run_passes(passes, &mut tree);
 }
 
@@ -265,159 +261,41 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
-// Instructions semantically target a VM with the following structure
-// - Memory is represented as an array of 64-bit 2's complement signed integers
-// - There are only two registers: a program counter `pc` and a stack pointer `sp`
-//   - pc points to the next instruction to run
-//   - sp points to the lowest address of the top element of the stack, which grows downward
-enum Instruction {
-    // Memory
-    Push(i64), // increments sp, then writes an immediate there
-    Pop,       // decrements sp
-    Sp,        // pushes the value in sp onto the stack
-    Write,     // first pops an address, then pops a value, then writes the value to the address
-    Read,      // pops an address, then pushes the value at that address
-    // Integer
-    Add, // pops two values, then pushes their sum
-    Mul, // pops two values, then pushes their product     (subsumes neg)
-    And, // pops two values, then pushes their bitwise and (subsumes ltz)
-    Or,  // pops two values, then pushes their bitwise or
-    Xor, // pops two values, then pushes their bitwise xor (subsumes not)
-    // Control
-    Label(String), // does nothing except hold a label
-    Jumpz(String), // pops a value, if the value is zero sets pc to the label
-    Addr(String),  // pushes the address of the given label
-    Return,        // pops an address and sets pc to it
-}
-
-fn translate_instructions(tree: &mut Tree) {
-    if tree.get::<Vec<Instruction>>().is_none() {
-        let instruction = if let Some(int) = tree.remove::<i64>() {
-            Instruction::Push(int)
-        } else {
-            match tree.token.deref() {
-                "pop" => Instruction::Pop,
-                "sp" => Instruction::Sp,
-                "write" => Instruction::Write,
-                "read" => Instruction::Read,
-                "add" => Instruction::Add,
-                "mul" => Instruction::Mul,
-                "and" => Instruction::And,
-                "or" => Instruction::Or,
-                "xor" => Instruction::Xor,
-                ":" => {
-                    let grandchild = tree.children.pop().unwrap();
-                    Instruction::Label(grandchild.token.deref().to_owned())
-                }
-                "?" => {
-                    let grandchild = tree.children.pop().unwrap();
-                    Instruction::Jumpz(grandchild.token.deref().to_owned())
-                }
-                "&" => {
-                    let grandchild = tree.children.pop().unwrap();
-                    Instruction::Addr(grandchild.token.deref().to_owned())
-                }
-                "return" => Instruction::Return,
-                _ => return,
+struct Assembly(String);
+fn compile_intrinsics_x64(tree: &mut Tree) {
+    let assembly = if let Some(int) = tree.remove::<i64>() {
+        format!("\tmovq ${}, %rax\n\tpushq %rax\n", int)
+    } else {
+        match tree.token.deref() {
+            "pop" => format!("\tpopq %rax\n"),
+            "sp" => format!("\tpushq %rsp\n"),
+            "write" => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
+            "read" => format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n"),
+            "add" => format!("\tpopq %rax\n\taddq %rax, (%rsp)\n"),
+            "mul" => format!("\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
+            "and" => format!("\tpopq %rax\n\tandq %rax, (%rsp)\n"),
+            "or" => format!("\tpopq %rax\n\torq %rax, (%rsp)\n"),
+            "xor" => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
+            ":" => {
+                let label = tree.children.pop().unwrap();
+                format!("{}:\n", label.token.deref())
             }
-        };
-        tree.insert(vec![instruction]);
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct InstructionIndex {
-    child: usize,
-    index: usize,
-}
-struct Labels(HashMap<String, InstructionIndex>);
-fn get_labels(tree: &mut Tree) {
-    let mut labels = HashMap::new();
-    for (i, child) in tree.children.iter().enumerate() {
-        if let Some(instructions) = child.get::<Vec<Instruction>>() {
-            for (j, instruction) in instructions.iter().enumerate() {
-                if let Instruction::Label(label) = instruction {
-                    let old = labels.insert(label.clone(), InstructionIndex { child: i, index: j });
-                    if let Some(InstructionIndex { child: k, .. }) = old {
-                        panic!(
-                            "label {} is declared twice:\n{}\n{}",
-                            label, child.token, tree.children[k].token
-                        )
-                    }
-                }
+            "?" => {
+                let label = tree.children.pop().unwrap();
+                format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label.token.deref())
             }
-        }
-    }
-    let mut found = HashSet::new();
-    for child in &tree.children {
-        if let Some(instructions) = child.get::<Vec<Instruction>>() {
-            for instruction in instructions {
-                if let Instruction::Jumpz(label) = instruction {
-                    if labels.get(label).is_some() {
-                        found.insert(label);
-                    } else {
-                        panic!("jumpz has no matching label: {}", child.token)
-                    }
-                }
-                if let Instruction::Addr(label) = instruction {
-                    if labels.get(label).is_some() {
-                        found.insert(label);
-                    } else {
-                        panic!("addr has no matching label: {}", child.token)
-                    }
-                }
+            "&" => {
+                let label = tree.children.pop().unwrap();
+                format!("\tleaq {}(%rip), %rax\n\tpushq %rax\n", label.token.deref())
             }
+            "ret" => format!("\tret\n"),
+            _ => return,
         }
-    }
-    let labels_set = labels.keys().collect::<HashSet<_>>();
-    let diff: HashSet<_> = labels_set.difference(&found).collect();
-    if !diff.is_empty() {
-        panic!("unused labels: {:?}", diff)
-    }
-    tree.insert(Labels(labels));
+    };
+    tree.insert(Assembly(assembly));
 }
 
-struct Cfg(HashMap<InstructionIndex, Vec<InstructionIndex>>);
-fn get_cfg(tree: &mut Tree) {
-    let labels = &tree.get::<Labels>().unwrap().0;
-    let mut cfg: HashMap<InstructionIndex, Vec<InstructionIndex>> = HashMap::new();
-    for (i, child) in tree.children.iter().enumerate() {
-        if let Some(instructions) = child.get::<Vec<Instruction>>() {
-            for (j, instruction) in instructions.iter().enumerate() {
-                let curr = InstructionIndex { child: i, index: j };
-                let next = if j + 1 < instructions.len() {
-                    Some(InstructionIndex { child: i, index: j + 1 })
-                } else if i + 1 < tree.children.len() {
-                    Some(InstructionIndex { child: i + 1, index: 0 })
-                } else {
-                    None
-                };
-                let entry: &mut _ = cfg.entry(curr).or_default();
-                match (instruction, next) {
-                    (Instruction::Return, _) => {}
-                    (Instruction::Jumpz(label), Some(next)) => {
-                        entry.extend([next, *labels.get(label).unwrap()])
-                    }
-                    (_, Some(next)) => entry.push(next),
-                    (_, None) => {}
-                }
-            }
-        }
-    }
-    tree.insert(Cfg(cfg));
-}
-
-fn check_instructions(tree: &mut Tree) {
-    for child in &tree.children {
-        if child.get::<Vec<Instruction>>().is_none() {
-            panic!("could not translate to instructions: {}", child.token)
-        } else if !child.children.is_empty() {
-            panic!("tree had children\n{}", child)
-        }
-    }
-}
-
-fn compile_x64(tree: &mut Tree) {
+fn compile_program_x64(tree: &mut Tree) {
     if tree.children.is_empty() {
         return;
     }
@@ -443,37 +321,18 @@ fn compile_x64(tree: &mut Tree) {
 
     write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:").unwrap();
     for child in &tree.children {
-        for instruction in child.get::<Vec<Instruction>>().unwrap() {
-            match instruction {
-                Instruction::Push(int) => write!(stdin, "\tmovq ${}, %rax\n\tpushq %rax\n", int),
-                Instruction::Pop => write!(stdin, "\tpopq %rax\n"),
-                Instruction::Sp => write!(stdin, "\tpushq %rsp\n"),
-                Instruction::Write => {
-                    write!(stdin, "\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n")
-                }
-                Instruction::Read => {
-                    write!(stdin, "\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
-                }
-                Instruction::Add => write!(stdin, "\tpopq %rax\n\taddq %rax, (%rsp)\n"),
-                Instruction::Mul => write!(stdin, "\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
-                Instruction::And => write!(stdin, "\tpopq %rax\n\tandq %rax, (%rsp)\n"),
-                Instruction::Or => write!(stdin, "\tpopq %rax\n\torq %rax, (%rsp)\n"),
-                Instruction::Xor => write!(stdin, "\tpopq %rax\n\txorq %rax, (%rsp)\n"),
-                Instruction::Label(label) => write!(stdin, "{}:\n", label),
-                Instruction::Jumpz(label) => {
-                    write!(stdin, "\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label)
-                }
-                Instruction::Addr(label) => {
-                    write!(stdin, "\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
-                }
-                Instruction::Return => write!(stdin, "\tret\n"),
-            }
-            .unwrap();
+        match child.get::<Assembly>() {
+            Some(Assembly(assembly)) => write!(stdin, "{}", assembly).unwrap(),
+            _ => panic!("no assembly for {}", child),
         }
     }
     write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall").unwrap();
 
-    assembler.wait().unwrap();
+    match assembler.wait() {
+        Err(_) => return,
+        Ok(status) if !status.success() => return,
+        _ => {}
+    }
 
     let output = Command::new(format!("./{}", name)).output().unwrap();
     println!(
