@@ -270,10 +270,6 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
                 let label = tree.children.pop().unwrap();
                 format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label.token.deref())
             }
-            "&" => {
-                let label = tree.children.pop().unwrap();
-                format!("\tleaq {}(%rip), %rax\n\tpushq %rax\n", label.token.deref())
-            }
             "ret" => format!("\tret\n"),
             _ => return,
         }
