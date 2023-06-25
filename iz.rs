@@ -1,11 +1,9 @@
-use std::{
-    any::{Any, TypeId},
-    collections::{HashMap, VecDeque},
-    io::Write,
-    ops::Deref,
-    process::{Command, Stdio},
-    rc::Rc,
-};
+use std::any::{Any, TypeId};
+use std::collections::{HashMap, VecDeque};
+use std::io::Write;
+use std::ops::Deref;
+use std::process::{Command, Stdio};
+use std::rc::Rc;
 
 #[derive(Clone)]
 struct Token {
