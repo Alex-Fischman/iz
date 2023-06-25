@@ -84,25 +84,11 @@ impl std::fmt::Display for Tree {
     }
 }
 
-enum Pass {
-    Name(String),
-    Func(Box<dyn Fn(&mut Tree)>),
-}
+type Pass = Box<dyn Fn(&mut Tree)>;
 
-impl Pass {
-    fn run_passes(passes: VecDeque<Pass>, tree: &mut Tree) {
-        tree.insert(passes);
-        while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
-            if let Pass::Func(func) = pass {
-                Pass::postorder(&func, tree);
-            }
-        }
-    }
-
-    fn postorder(func: &impl Fn(&mut Tree), tree: &mut Tree) {
-        tree.children.iter_mut().for_each(|child| Pass::postorder(func, child));
-        func(tree);
-    }
+fn postorder(func: &impl Fn(&mut Tree), tree: &mut Tree) {
+    tree.children.iter_mut().for_each(|child| postorder(func, child));
+    func(tree);
 }
 
 fn main() {
@@ -125,22 +111,24 @@ fn main() {
         tree.children.push(Tree::new(Token { source: source.clone(), lo, hi }));
     }
 
-    let mut passes = VecDeque::new();
-    passes.push_back(Pass::Name("chars".to_owned()));
-    passes.push_back(Pass::Func(Box::new(remove_comments)));
-    passes.push_back(Pass::Func(Box::new(remove_whitespace)));
-    passes.push_back(Pass::Func(Box::new(concat_tokens(is_identifier))));
-    passes.push_back(Pass::Func(Box::new(concat_tokens(is_operator))));
-    passes.push_back(Pass::Name("tokens".to_owned()));
-    passes.push_back(Pass::Func(Box::new(parse_integers)));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("(", ")"))));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("{", "}"))));
-    passes.push_back(Pass::Func(Box::new(parse_brackets("[", "]"))));
-    passes.push_back(Pass::Func(Box::new(parse_postfixes(&[":", "?", "&"]))));
-    passes.push_back(Pass::Name("ast".to_owned()));
-    passes.push_back(Pass::Func(Box::new(compile_intrinsics_x64)));
-    passes.push_back(Pass::Func(Box::new(compile_program_x64)));
-    Pass::run_passes(passes, &mut tree);
+    let mut passes: VecDeque<Pass> = VecDeque::new();
+    passes.push_back(Box::new(remove_comments));
+    passes.push_back(Box::new(remove_whitespace));
+    passes.push_back(Box::new(concat_tokens(is_identifier)));
+    passes.push_back(Box::new(concat_tokens(is_operator)));
+    passes.push_back(Box::new(parse_integers));
+    passes.push_back(Box::new(parse_brackets("(", ")")));
+    passes.push_back(Box::new(parse_brackets("{", "}")));
+    passes.push_back(Box::new(parse_brackets("[", "]")));
+    passes.push_back(Box::new(parse_postfixes(&[":", "?", "&"])));
+    passes.push_back(Box::new(compile_intrinsics_x64));
+    passes.push_back(Box::new(compile_program_x64));
+
+    tree.insert(passes);
+
+    while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
+        postorder(&pass, &mut tree);
+    }
 }
 
 fn remove_comments(tree: &mut Tree) {
@@ -164,7 +152,7 @@ fn is_whitespace(s: &str) -> bool {
 }
 
 fn is_operator(s: &str) -> bool {
-    s.chars().all(|c| !(c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c)))
+    !s.chars().any(|c| c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c))
 }
 
 fn remove_whitespace(tree: &mut Tree) {
@@ -326,10 +314,8 @@ fn compile_program_x64(tree: &mut Tree) {
     }
     write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall").unwrap();
 
-    match assembler.wait() {
-        Err(_) => return,
-        Ok(status) if !status.success() => return,
-        _ => {}
+    if !assembler.wait().unwrap().success() {
+        panic!("assembler failed")
     }
 
     let output = Command::new(format!("./{}", name)).output().unwrap();
