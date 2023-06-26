@@ -121,6 +121,7 @@ fn main() {
     passes.push_back(Box::new(parse_brackets("{", "}")));
     passes.push_back(Box::new(parse_brackets("[", "]")));
     passes.push_back(Box::new(parse_postfixes(&[":", "?", "&"])));
+    passes.push_back(Box::new(compute_types));
     passes.push_back(Box::new(compile_intrinsics_x64));
     passes.push_back(Box::new(compile_program_x64));
 
@@ -247,13 +248,73 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct Effect {
+    inputs: Vec<Type>,
+    outputs: Vec<Type>,
+}
+#[derive(Clone, Debug, PartialEq)]
+enum Type {
+    Int,
+    Ptr,
+    Fun(Effect),
+    Ret,
+}
+
+macro_rules! effect {
+    ($($inputs:expr)* ; $($outputs:expr)*) => (Effect {
+        inputs: vec![$($inputs),*],
+        outputs: vec![$($outputs),*],
+    });
+}
+
+fn compute_types(tree: &mut Tree) {
+    use Type::*;
+    let effect = if tree.get::<i64>().is_some() {
+        effect!(; Int)
+    } else {
+        match tree.token.deref() {
+            "sp" => effect!(; Ptr),
+            "write" => effect!(Int Ptr ;),
+            "read" => effect!(Ptr ; Int),
+            "add" => effect!(Int Int ; Int),
+            "mul" => effect!(Int Int ; Int),
+            "and" => effect!(Int Int ; Int),
+            "or" => effect!(Int Int ; Int),
+            "xor" => effect!(Int Int ; Int),
+            ":" => effect!(;),
+            "?" => effect!(Int ;),
+            "{" => {
+                let mut effect = effect!(;);
+                for child in &tree.children {
+                    if let Some(Effect { inputs, outputs }) = child.get::<Effect>().cloned() {
+                        for input in inputs.into_iter().rev() {
+                            match effect.outputs.pop() {
+                                Some(output) if input == output => {}
+                                Some(output) => panic!("expected {:?}, found {:?}", input, output),
+                                None => effect.inputs.insert(0, input),
+                            }
+                        }
+                        effect.outputs.extend(outputs);
+                    } else {
+                        panic!("could not type {}", tree.token)
+                    }
+                }
+                effect!(; Fun(effect))
+            }
+            "ret" => effect!(Ret ;),
+            _ => return,
+        }
+    };
+    tree.insert(effect);
+}
+
 struct Assembly(String);
 fn compile_intrinsics_x64(tree: &mut Tree) {
     let assembly = if let Some(int) = tree.remove::<i64>() {
         format!("\tmovq ${}, %rax\n\tpushq %rax\n", int)
     } else {
         match tree.token.deref() {
-            "pop" => format!("\tpopq %rax\n"),
             "sp" => format!("\tpushq %rsp\n"),
             "write" => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
             "read" => format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n"),
