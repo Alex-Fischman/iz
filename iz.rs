@@ -84,13 +84,6 @@ impl std::fmt::Display for Tree {
     }
 }
 
-type Pass = Box<dyn Fn(&mut Tree)>;
-
-fn postorder(func: &impl Fn(&mut Tree), tree: &mut Tree) {
-    tree.children.iter_mut().for_each(|child| postorder(func, child));
-    func(tree);
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let name = match args.get(1) {
@@ -111,16 +104,20 @@ fn main() {
         tree.children.push(Tree::new(Token { source: source.clone(), lo, hi }));
     }
 
+    type Pass = Box<dyn Fn(&mut Tree)>;
     let mut passes: VecDeque<Pass> = VecDeque::new();
+    // flat
     passes.push_back(Box::new(remove_comments));
     passes.push_back(Box::new(remove_whitespace));
     passes.push_back(Box::new(concat_tokens(is_identifier)));
     passes.push_back(Box::new(concat_tokens(is_operator)));
     passes.push_back(Box::new(parse_integers));
+    // nested
     passes.push_back(Box::new(parse_brackets("(", ")")));
     passes.push_back(Box::new(parse_brackets("{", "}")));
     passes.push_back(Box::new(parse_brackets("[", "]")));
     passes.push_back(Box::new(parse_postfixes(&[":", "?", "&"])));
+    // structured
     passes.push_back(Box::new(compute_types));
     passes.push_back(Box::new(compile_intrinsics_x64));
     passes.push_back(Box::new(compile_program_x64));
@@ -128,7 +125,7 @@ fn main() {
     tree.insert(passes);
 
     while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
-        postorder(&pass, &mut tree);
+        pass(&mut tree);
     }
 }
 
@@ -179,37 +176,41 @@ fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
 }
 
 fn parse_integers(tree: &mut Tree) {
-    let chars: Vec<char> = tree.token.deref().chars().collect();
-    if !chars.is_empty() {
-        let (chars, is_negative) = match chars[0] {
-            '-' => (&chars[1..], true),
-            _ => (&chars[..], false),
-        };
-        if let Some('0'..='9') = chars.get(0) {
-            let (chars, base) = match chars {
-                ['0', 'x', ..] => (&chars[2..], 16),
-                ['0', 'b', ..] => (&chars[2..], 2),
-                _ => (chars, 10),
+    for child in &mut tree.children {
+        let chars: Vec<char> = child.token.deref().chars().collect();
+        if !chars.is_empty() {
+            let (chars, is_negative) = match chars[0] {
+                '-' => (&chars[1..], true),
+                _ => (&chars[..], false),
             };
-            let value = chars.iter().fold(0, |value, c| {
-                let digit = match c {
-                    '0'..='9' => *c as i64 - '0' as i64,
-                    'a'..='f' => *c as i64 - 'a' as i64 + 10,
-                    '_' => return value,
-                    c => panic!("unknown digit {} in {}", c, tree.token),
+            if let Some('0'..='9') = chars.get(0) {
+                let (chars, base) = match chars {
+                    ['0', 'x', ..] => (&chars[2..], 16),
+                    ['0', 'b', ..] => (&chars[2..], 2),
+                    _ => (chars, 10),
                 };
-                if digit >= base {
-                    panic!("digit {} too large for base {} in {}", c, base, tree.token)
-                }
-                base * value + digit
-            });
-            tree.insert::<i64>(if is_negative { -value } else { value });
+                let value = chars.iter().fold(0, |value, c| {
+                    let digit = match c {
+                        '0'..='9' => *c as i64 - '0' as i64,
+                        'a'..='f' => *c as i64 - 'a' as i64 + 10,
+                        '_' => return value,
+                        c => panic!("unknown digit {} in {}", c, child.token),
+                    };
+                    if digit >= base {
+                        panic!("digit {} too large for base {} in {}", c, base, child.token)
+                    }
+                    base * value + digit
+                });
+                child.insert::<i64>(if is_negative { -value } else { value });
+            }
         }
     }
 }
 
 fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(parse_brackets(open, close));
+
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
         while i < tree.children.len() {
@@ -233,6 +234,8 @@ fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
 
 fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
+        tree.children.iter_mut().for_each(parse_postfixes(names));
+
         let mut i = 0;
         while i < tree.children.len() {
             if names.contains(&tree.children[i].token.deref()) {
@@ -248,69 +251,47 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct Effect {
-    inputs: Vec<Type>,
-    outputs: Vec<Type>,
-}
-#[derive(Clone, Debug, PartialEq)]
-enum Type {
-    Int,
-    Ptr,
-    Fun(Effect),
-    Ret,
-}
+// #[derive(Clone, Debug, PartialEq)]
+// struct Effect {
+//     inputs: Vec<Type>,
+//     outputs: Vec<Type>,
+// }
+// #[derive(Clone, Debug, PartialEq)]
+// enum Type {
+//     Int,
+//     Ptr,
+//     Fun(Effect),
+//     Ret,
+// }
 
-macro_rules! effect {
-    ($($inputs:expr)* ; $($outputs:expr)*) => (Effect {
-        inputs: vec![$($inputs),*],
-        outputs: vec![$($outputs),*],
-    });
-}
+// macro_rules! effect {
+//     ($($inputs:expr)* ; $($outputs:expr)*) => (Effect {
+//         inputs: vec![$($inputs),*],
+//         outputs: vec![$($outputs),*],
+//     });
+// }
 
-fn compute_types(tree: &mut Tree) {
-    use Type::*;
-    let effect = if tree.get::<i64>().is_some() {
-        effect!(; Int)
-    } else {
-        match tree.token.deref() {
-            "sp" => effect!(; Ptr),
-            "write" => effect!(Int Ptr ;),
-            "read" => effect!(Ptr ; Int),
-            "add" => effect!(Int Int ; Int),
-            "mul" => effect!(Int Int ; Int),
-            "and" => effect!(Int Int ; Int),
-            "or" => effect!(Int Int ; Int),
-            "xor" => effect!(Int Int ; Int),
-            ":" => effect!(;),
-            "?" => effect!(Int ;),
-            "{" => {
-                let mut effect = effect!(;);
-                for child in &tree.children {
-                    if let Some(Effect { inputs, outputs }) = child.get::<Effect>().cloned() {
-                        for input in inputs.into_iter().rev() {
-                            match effect.outputs.pop() {
-                                Some(output) if input == output => {}
-                                Some(output) => panic!("expected {:?}, found {:?}", input, output),
-                                None => effect.inputs.insert(0, input),
-                            }
-                        }
-                        effect.outputs.extend(outputs);
-                    } else {
-                        panic!("could not type {}", tree.token)
-                    }
-                }
-                effect!(; Fun(effect))
-            }
-            "ret" => effect!(Ret ;),
-            _ => return,
-        }
-    };
-    tree.insert(effect);
+// impl Effect {
+//     fn compose(&mut self, other: &mut Effect) {
+//         while let Some(input) = other.inputs.pop() {
+//             match self.outputs.pop() {
+//                 Some(output) if input == output => {}
+//                 Some(output) => panic!("expected {:?}, found {:?}", input, output),
+//                 None => self.inputs.insert(0, input.clone()),
+//             }
+//         }
+//         self.outputs.append(&mut other.outputs);
+//     }
+// }
+
+fn compute_types(_tree: &mut Tree) {
+    // todo: types
 }
 
 struct Assembly(String);
 fn compile_intrinsics_x64(tree: &mut Tree) {
+    tree.children.iter_mut().for_each(compile_intrinsics_x64);
+
     let assembly = if let Some(int) = tree.remove::<i64>() {
         format!("\tmovq ${}, %rax\n\tpushq %rax\n", int)
     } else {
@@ -339,10 +320,6 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
 }
 
 fn compile_program_x64(tree: &mut Tree) {
-    if tree.children.is_empty() {
-        return;
-    }
-
     let name = match tree.token.source.name.rfind('.') {
         Some(i) => &tree.token.source.name[..i],
         None => "a.out",
