@@ -251,41 +251,83 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
-// #[derive(Clone, Debug, PartialEq)]
-// struct Effect {
-//     inputs: Vec<Type>,
-//     outputs: Vec<Type>,
-// }
-// #[derive(Clone, Debug, PartialEq)]
-// enum Type {
-//     Int,
-//     Ptr,
-//     Fun(Effect),
-//     Ret,
-// }
+#[derive(Clone, Debug, PartialEq)]
+struct Effect {
+    inputs: Vec<Type>,
+    outputs: Vec<Type>,
+}
+#[derive(Clone, Debug, PartialEq)]
+enum Type {
+    Int,
+    Ptr,
+    Fun(Effect),
+    Ret,
+}
 
-// macro_rules! effect {
-//     ($($inputs:expr)* ; $($outputs:expr)*) => (Effect {
-//         inputs: vec![$($inputs),*],
-//         outputs: vec![$($outputs),*],
-//     });
-// }
+macro_rules! effect {
+    ($($inputs:expr)* ; $($outputs:expr)*) => (Effect {
+        inputs: vec![$($inputs),*],
+        outputs: vec![$($outputs),*],
+    });
+}
 
-// impl Effect {
-//     fn compose(&mut self, other: &mut Effect) {
-//         while let Some(input) = other.inputs.pop() {
-//             match self.outputs.pop() {
-//                 Some(output) if input == output => {}
-//                 Some(output) => panic!("expected {:?}, found {:?}", input, output),
-//                 None => self.inputs.insert(0, input.clone()),
-//             }
-//         }
-//         self.outputs.append(&mut other.outputs);
-//     }
-// }
+impl Effect {
+    fn compose(&mut self, mut other: Effect) -> Result<(), (Type, Type)> {
+        while let Some(input) = other.inputs.pop() {
+            match self.outputs.pop() {
+                Some(output) if input == output => {}
+                Some(output) => return Err((output, input)),
+                None => self.inputs.insert(0, input.clone()),
+            }
+        }
+        self.outputs.append(&mut other.outputs);
+        Ok(())
+    }
+}
 
-fn compute_types(_tree: &mut Tree) {
-    // todo: types
+impl Type {
+    fn size(&self) -> usize {
+        match self {
+            Type::Int | Type::Ptr | Type::Fun(_) | Type::Ret => 8,
+        }
+    }
+}
+
+fn compute_types(tree: &mut Tree) {
+    use Type::*;
+    let mut effect = effect!(;);
+    for child in &mut tree.children {
+        let e = match child.token.deref() {
+            _ if child.get::<i64>().is_some() => effect!(; Int),
+            "pop" => match effect.outputs.pop() {
+                Some(popped) if popped.size() == 8 => effect!(popped ;),
+                Some(popped) => panic!("expected an 8-byte type, found {:?} for {}", popped, child),
+                None => panic!("could not infer type for {}", child),
+            },
+            "sp" => effect!(; Ptr),
+            "write" => effect!(Int Ptr ;),
+            "read" => effect!(Ptr ; Int),
+            "add" => effect!(Int Int ; Int),
+            "mul" => effect!(Int Int ; Int),
+            "and" => effect!(Int Int ; Int),
+            "or" => effect!(Int Int ; Int),
+            "xor" => effect!(Int Int ; Int),
+            ":" => effect!(;),
+            // todo: assert types are the same at the destination after a jump
+            "?" => effect!(Int ;),
+            "ret" => effect!(Ret ;),
+            _ => child.remove::<Effect>().unwrap_or_else(|| panic!("no effect for {}", child)),
+        };
+        if let Some(old) = child.insert(e.clone()) {
+            if old != e {
+                panic!("expected {:?}, found {:?} for {}", old, e, child)
+            }
+        }
+        if let Err((expected, found)) = effect.compose(e) {
+            panic!("expected {:?}, found {:?} for {}", expected, found, child)
+        }
+    }
+    tree.insert(effect!(; Fun(effect)));
 }
 
 struct Assembly(String);
@@ -296,6 +338,7 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
         format!("\tmovq ${}, %rax\n\tpushq %rax\n", int)
     } else {
         match tree.token.deref() {
+            "pop" => format!("\tpopq %rax\n"),
             "sp" => format!("\tpushq %rsp\n"),
             "write" => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
             "read" => format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n"),
