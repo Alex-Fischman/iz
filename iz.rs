@@ -1,5 +1,5 @@
 use std::any::{Any, TypeId};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::ops::Deref;
 use std::process::{Command, Stdio};
@@ -251,12 +251,12 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Effect {
     inputs: Vec<Type>,
     outputs: Vec<Type>,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Type {
     Int,
     Ptr,
@@ -272,16 +272,15 @@ macro_rules! effect {
 }
 
 impl Effect {
-    fn compose(&mut self, mut other: Effect) -> Result<(), (Type, Type)> {
+    fn compose(&mut self, mut other: Effect, tree: &Tree) {
         while let Some(input) = other.inputs.pop() {
             match self.outputs.pop() {
                 Some(output) if input == output => {}
-                Some(output) => return Err((output, input)),
+                Some(output) => panic!("expected {:?}, found {:?} for {}", output, input, tree),
                 None => self.inputs.insert(0, input.clone()),
             }
         }
         self.outputs.append(&mut other.outputs);
-        Ok(())
     }
 }
 
@@ -295,14 +294,34 @@ impl Type {
 
 fn compute_types(tree: &mut Tree) {
     use Type::*;
-    let mut effect = effect!(;);
-    for child in &mut tree.children {
-        let e = match child.token.deref() {
-            _ if child.get::<i64>().is_some() => effect!(; Int),
-            "pop" => match effect.outputs.pop() {
-                Some(popped) if popped.size() == 8 => effect!(popped ;),
-                Some(popped) => panic!("expected an 8-byte type, found {:?} for {}", popped, child),
-                None => panic!("could not infer type for {}", child),
+
+    let mut queue: VecDeque<(usize, Effect)> = VecDeque::from([(0, effect!(;))]);
+    let mut cache: HashSet<(usize, Effect)> = HashSet::new();
+
+    let mut effects: Vec<Option<Effect>> = Vec::with_capacity(tree.children.len());
+    effects.resize(tree.children.len(), None);
+    let mut ret_val: Option<Effect> = None;
+
+    let update_option = |o: &mut Option<Effect>, next: Effect, tree: &Tree| match o {
+        None => *o = Some(next),
+        Some(old) if *old == next => {}
+        Some(_) => panic!("found branching types for {}", tree),
+    };
+
+    while let Some((i, mut prev)) = queue.pop_front() {
+        if !cache.insert((i, prev.clone())) {
+            continue;
+        }
+
+        let mut targets = HashSet::from([i + 1]);
+        let curr = match tree.children[i].token.deref() {
+            _ if tree.children[i].get::<i64>().is_some() => effect!(; Int),
+            "pop" => match prev.outputs.pop() {
+                Some(t) if t.size() == 8 => effect!(t ;),
+                Some(t) => {
+                    panic!("expected a type of size 8, found {:?} for {}", t, tree.children[i])
+                }
+                None => panic!("could not infer type for {}", tree.children[i]),
             },
             "sp" => effect!(; Ptr),
             "write" => effect!(Int Ptr ;),
@@ -313,21 +332,47 @@ fn compute_types(tree: &mut Tree) {
             "or" => effect!(Int Int ; Int),
             "xor" => effect!(Int Int ; Int),
             ":" => effect!(;),
-            // todo: assert types are the same at the destination after a jump
-            "?" => effect!(Int ;),
-            "ret" => effect!(Ret ;),
-            _ => child.remove::<Effect>().unwrap_or_else(|| panic!("no effect for {}", child)),
-        };
-        if let Some(old) = child.insert(e.clone()) {
-            if old != e {
-                panic!("expected {:?}, found {:?} for {}", old, e, child)
+            "?" => {
+                let labels: Vec<usize> = (0..tree.children.len())
+                    .filter(|j| {
+                        tree.children[*j].token.deref() == ":"
+                            && tree.children[*j].children[0].token.deref()
+                                == tree.children[i].children[0].token.deref()
+                    })
+                    .collect();
+                let target = match labels.as_slice() {
+                    [target] => target,
+                    [] => panic!("could not find the matching label for {}", tree.children[i]),
+                    _ => panic!("too many matching labels for {}", tree.children[i]),
+                };
+                targets.insert(*target);
+                effect!(Int ;)
             }
+            "!" => {
+                targets.remove(&(i + 1));
+                effect!(Ret ;)
+            }
+            _ => tree.children[i]
+                .remove::<Effect>()
+                .unwrap_or_else(|| panic!("no effect for {}", tree.children[i])),
+        };
+
+        tree.children[i].insert(curr.clone());
+        prev.compose(curr, &tree.children[i]);
+        update_option(&mut effects[i], prev.clone(), &tree.children[i]);
+        if tree.children[i].token.deref() == "!" || targets.remove(&tree.children.len()) {
+            update_option(&mut ret_val, prev.clone(), &tree.children[i]);
         }
-        if let Err((expected, found)) = effect.compose(e) {
-            panic!("expected {:?}, found {:?} for {}", expected, found, child)
+
+        for target in targets {
+            queue.push_back((target, prev.clone()));
         }
     }
-    tree.insert(effect!(; Fun(effect)));
+    if let Some(effect) = ret_val {
+        tree.insert(effect!(; Fun(effect)));
+    } else {
+        panic!("could not compute return type for {}", tree);
+    }
 }
 
 struct Assembly(String);
@@ -355,7 +400,7 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
                 let label = tree.children.pop().unwrap();
                 format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label.token.deref())
             }
-            "ret" => format!("\tret\n"),
+            "!" => format!("\tret\n"),
             _ => return,
         }
     };

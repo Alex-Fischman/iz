@@ -1,8 +1,5 @@
-# this is a comment
-
-# 1
+1
 while_start:
-1 # this should be a type error
 sp read -5 add
 while_end?
 1 add
