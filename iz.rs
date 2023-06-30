@@ -1,5 +1,5 @@
 use std::any::{Any, TypeId};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::ops::Deref;
 use std::process::{Command, Stdio};
@@ -256,13 +256,6 @@ struct Effect {
     inputs: Vec<Type>,
     outputs: Vec<Type>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Type {
-    Int,
-    Ptr,
-    Fun(Effect),
-    Ret,
-}
 
 macro_rules! effect {
     ($($inputs:expr)* ; $($outputs:expr)*) => (Effect {
@@ -271,17 +264,12 @@ macro_rules! effect {
     });
 }
 
-impl Effect {
-    fn compose(&mut self, mut other: Effect, tree: &Tree) {
-        while let Some(input) = other.inputs.pop() {
-            match self.outputs.pop() {
-                Some(output) if input == output => {}
-                Some(output) => panic!("expected {:?}, found {:?} for {}", output, input, tree),
-                None => self.inputs.insert(0, input.clone()),
-            }
-        }
-        self.outputs.append(&mut other.outputs);
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Type {
+    Int,
+    Ptr,
+    Fun(Effect),
+    Ret,
 }
 
 impl Type {
@@ -295,29 +283,16 @@ impl Type {
 fn compute_types(tree: &mut Tree) {
     use Type::*;
 
-    let mut queue: VecDeque<(usize, Effect)> = VecDeque::from([(0, effect!(;))]);
-    let mut cache: HashSet<(usize, Effect)> = HashSet::new();
+    // tree.children.len() as a key holds the returned effect
+    let mut inputs: HashMap<usize, Effect> = HashMap::from([(0, effect!(;))]);
 
-    let mut effects: Vec<Option<Effect>> = Vec::with_capacity(tree.children.len());
-    effects.resize(tree.children.len(), None);
-    let mut ret_val: Option<Effect> = None;
-
-    let update_option = |o: &mut Option<Effect>, next: Effect, tree: &Tree| match o {
-        None => *o = Some(next),
-        Some(old) if *old == next => {}
-        Some(_) => panic!("found branching types for {}", tree),
-    };
-
-    while let Some((i, mut prev)) = queue.pop_front() {
-        if !cache.insert((i, prev.clone())) {
-            continue;
-        }
-
-        let mut targets = HashSet::from([i + 1]);
-        let curr = match tree.children[i].token.deref() {
+    let mut i = 0;
+    while i < tree.children.len() {
+        let mut targets = vec![i + 1];
+        let mut curr = match tree.children[i].token.deref() {
             _ if tree.children[i].get::<i64>().is_some() => effect!(; Int),
-            "pop" => match prev.outputs.pop() {
-                Some(t) if t.size() == 8 => effect!(t ;),
+            "pop" => match inputs[&i].outputs.last() {
+                Some(t) if t.size() == 8 => effect!(t.clone() ;),
                 Some(t) => {
                     panic!("expected a type of size 8, found {:?} for {}", t, tree.children[i])
                 }
@@ -333,23 +308,22 @@ fn compute_types(tree: &mut Tree) {
             "xor" => effect!(Int Int ; Int),
             ":" => effect!(;),
             "?" => {
-                let labels: Vec<usize> = (0..tree.children.len())
-                    .filter(|j| {
-                        tree.children[*j].token.deref() == ":"
-                            && tree.children[*j].children[0].token.deref()
-                                == tree.children[i].children[0].token.deref()
-                    })
-                    .collect();
+                let labels = (0..tree.children.len()).filter(|j| {
+                    tree.children[*j].token.deref() == ":"
+                        && tree.children[*j].children[0].token.deref()
+                            == tree.children[i].children[0].token.deref()
+                });
+                let labels: Vec<usize> = labels.collect();
                 let target = match labels.as_slice() {
                     [target] => target,
                     [] => panic!("could not find the matching label for {}", tree.children[i]),
                     _ => panic!("too many matching labels for {}", tree.children[i]),
                 };
-                targets.insert(*target);
+                targets.push(*target);
                 effect!(Int ;)
             }
             "!" => {
-                targets.remove(&(i + 1));
+                targets = vec![tree.children.len()];
                 effect!(Ret ;)
             }
             _ => tree.children[i]
@@ -358,20 +332,37 @@ fn compute_types(tree: &mut Tree) {
         };
 
         tree.children[i].insert(curr.clone());
-        prev.compose(curr, &tree.children[i]);
-        update_option(&mut effects[i], prev.clone(), &tree.children[i]);
-        if tree.children[i].token.deref() == "!" || targets.remove(&tree.children.len()) {
-            update_option(&mut ret_val, prev.clone(), &tree.children[i]);
+
+        let mut next = inputs[&i].clone();
+        while let Some(input) = curr.inputs.pop() {
+            match next.outputs.pop() {
+                Some(output) if input == output => {}
+                Some(output) => {
+                    panic!("expected {:?}, found {:?} for {}", output, input, tree.children[i])
+                }
+                None => next.inputs.insert(0, input.clone()),
+            }
         }
+        next.outputs.append(&mut curr.outputs);
 
         for target in targets {
-            queue.push_back((target, prev.clone()));
+            match inputs.get(&target) {
+                Some(old) if *old == next => {}
+                Some(_) => panic!("found branching types for {}", tree.children[target]),
+                None => {
+                    inputs.insert(target, next.clone());
+                }
+            }
         }
+
+        i += 1;
     }
-    if let Some(effect) = ret_val {
-        tree.insert(effect!(; Fun(effect)));
-    } else {
-        panic!("could not compute return type for {}", tree);
+
+    match inputs.get(&tree.children.len()) {
+        None => panic!("could not compute return type for {}", tree),
+        Some(effect) => {
+            tree.insert(effect!(; Fun(effect.clone())));
+        }
     }
 }
 
