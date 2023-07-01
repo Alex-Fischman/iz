@@ -118,6 +118,7 @@ fn main() {
     passes.push_back(Box::new(parse_brackets("[", "]")));
     passes.push_back(Box::new(parse_postfixes(&[":", "?", "&"])));
     // structured
+    passes.push_back(Box::new(annotate_intrinsics));
     passes.push_back(Box::new(compute_types));
     passes.push_back(Box::new(compile_intrinsics_x64));
     passes.push_back(Box::new(compile_program_x64));
@@ -251,6 +252,50 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
     }
 }
 
+use Intrinsic::*;
+#[derive(Debug, PartialEq)]
+enum Intrinsic {
+    Push(i64),
+    Pop,
+    Write,
+    Read,
+    Sp,
+    Add,
+    Mul,
+    And,
+    Or,
+    Xor,
+    Label(String),
+    Jumpz(String),
+    Call,
+    Return,
+    Func,
+}
+
+fn annotate_intrinsics(tree: &mut Tree) {
+    tree.children.iter_mut().for_each(annotate_intrinsics);
+
+    let intrinsic = match tree.token.deref() {
+        _ if tree.get::<i64>().is_some() => Push(*tree.get::<i64>().unwrap()),
+        "pop" => Pop,
+        "read" => Read,
+        "write" => Write,
+        "sp" => Sp,
+        "add" => Add,
+        "mul" => Mul,
+        "and" => And,
+        "or" => Or,
+        "xor" => Xor,
+        ":" => Label(tree.children.remove(0).token.deref().to_string()),
+        "?" => Jumpz(tree.children.remove(0).token.deref().to_string()),
+        "call" => Call,
+        "ret" => Return,
+        "{" => Func,
+        _ => return,
+    };
+    tree.insert(intrinsic);
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Effect {
     inputs: Vec<Type>,
@@ -289,30 +334,28 @@ fn compute_types(tree: &mut Tree) {
     let mut i = 0;
     while i < tree.children.len() {
         let mut targets = vec![i + 1];
-        let mut curr = match tree.children[i].token.deref() {
-            _ if tree.children[i].get::<i64>().is_some() => effect!(; Int),
-            "pop" => match inputs[&i].outputs.last() {
+        let mut curr = match tree.children[i].get::<Intrinsic>() {
+            Some(Push(_)) => effect!(; Int),
+            Some(Pop) => match inputs[&i].outputs.last() {
                 Some(t) if t.size() == 8 => effect!(t.clone() ;),
                 Some(t) => {
                     panic!("expected a type of size 8, found {:?} for {}", t, tree.children[i])
                 }
                 None => panic!("could not infer type for {}", tree.children[i]),
             },
-            "sp" => effect!(; Ptr),
-            "write" => effect!(Int Ptr ;),
-            "read" => effect!(Ptr ; Int),
-            "add" => effect!(Int Int ; Int),
-            "mul" => effect!(Int Int ; Int),
-            "and" => effect!(Int Int ; Int),
-            "or" => effect!(Int Int ; Int),
-            "xor" => effect!(Int Int ; Int),
-            ":" => effect!(;),
-            "?" => {
-                let labels = (0..tree.children.len()).filter(|j| {
-                    tree.children[*j].token.deref() == ":"
-                        && tree.children[*j].children[0].token.deref()
-                            == tree.children[i].children[0].token.deref()
-                });
+            Some(Read) => effect!(Ptr ; Int),
+            Some(Write) => effect!(Int Ptr ;),
+            Some(Sp) => effect!(; Ptr),
+            Some(Add) => effect!(Int Int ; Int),
+            Some(Mul) => effect!(Int Int ; Int),
+            Some(And) => effect!(Int Int ; Int),
+            Some(Or) => effect!(Int Int ; Int),
+            Some(Xor) => effect!(Int Int ; Int),
+            Some(Label(_)) => effect!(;),
+            Some(Jumpz(s)) => {
+                let labels = (0..tree.children.len()).filter(
+                    |j| matches!(tree.children[*j].get::<Intrinsic>(), Some(Label(t)) if s == t),
+                );
                 let labels: Vec<usize> = labels.collect();
                 let target = match labels.as_slice() {
                     [target] => target,
@@ -322,13 +365,13 @@ fn compute_types(tree: &mut Tree) {
                 targets.push(*target);
                 effect!(Int ;)
             }
-            "!" => {
+            Some(Call) => todo!(),
+            Some(Return) => {
                 targets = vec![tree.children.len()];
                 effect!(Ret ;)
             }
-            _ => tree.children[i]
-                .remove::<Effect>()
-                .unwrap_or_else(|| panic!("no effect for {}", tree.children[i])),
+            Some(Func) => todo!(),
+            None => todo!("compute_types callback for non-intrinsics?"),
         };
 
         tree.children[i].insert(curr.clone());
@@ -370,30 +413,25 @@ struct Assembly(String);
 fn compile_intrinsics_x64(tree: &mut Tree) {
     tree.children.iter_mut().for_each(compile_intrinsics_x64);
 
-    let assembly = if let Some(int) = tree.remove::<i64>() {
-        format!("\tmovq ${}, %rax\n\tpushq %rax\n", int)
-    } else {
-        match tree.token.deref() {
-            "pop" => format!("\tpopq %rax\n"),
-            "sp" => format!("\tpushq %rsp\n"),
-            "write" => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
-            "read" => format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n"),
-            "add" => format!("\tpopq %rax\n\taddq %rax, (%rsp)\n"),
-            "mul" => format!("\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
-            "and" => format!("\tpopq %rax\n\tandq %rax, (%rsp)\n"),
-            "or" => format!("\tpopq %rax\n\torq %rax, (%rsp)\n"),
-            "xor" => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
-            ":" => {
-                let label = tree.children.pop().unwrap();
-                format!("{}:\n", label.token.deref())
-            }
-            "?" => {
-                let label = tree.children.pop().unwrap();
-                format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", label.token.deref())
-            }
-            "!" => format!("\tret\n"),
-            _ => return,
+    let assembly = match tree.get::<Intrinsic>() {
+        Some(Push(int)) => format!("\tmovq ${}, %rax\n\tpushq %rax\n", int),
+        Some(Pop) => format!("\tpopq %rax\n"),
+        Some(Read) => {
+            format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
         }
+        Some(Write) => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
+        Some(Sp) => format!("\tpushq %rsp\n"),
+        Some(Add) => format!("\tpopq %rax\n\taddq %rax, (%rsp)\n"),
+        Some(Mul) => format!("\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
+        Some(And) => format!("\tpopq %rax\n\tandq %rax, (%rsp)\n"),
+        Some(Or) => format!("\tpopq %rax\n\torq %rax, (%rsp)\n"),
+        Some(Xor) => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
+        Some(Label(s)) => format!("{}:\n", s),
+        Some(Jumpz(s)) => format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", s),
+        Some(Call) => todo!(),
+        Some(Return) => format!("\tret\n"),
+        Some(Func) => todo!(),
+        None => return,
     };
     tree.insert(Assembly(assembly));
 }
