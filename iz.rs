@@ -415,30 +415,82 @@ fn compute_types(tree: &mut Tree) {
     }
 }
 
-struct Assembly(String);
+#[derive(Debug)]
+struct Assembly {
+    body: String,
+    func: String,
+}
 fn compile_intrinsics_x64(tree: &mut Tree) {
-    tree.children.iter_mut().for_each(compile_intrinsics_x64);
+    fn compile_intrinsics_x64(tree: &mut Tree, labels: &mut usize) {
+        use std::fmt::Write;
 
-    let assembly = match tree.get::<Intrinsic>() {
-        Some(Push(int)) => format!("\tmovq ${}, %rax\n\tpushq %rax\n", int),
-        Some(Pop) => format!("\tpopq %rax\n"),
-        Some(Read) => {
-            format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
+        let mut body = String::new();
+        let mut func = String::new();
+        for child in &mut tree.children {
+            body.push_str(&match child.get::<Intrinsic>() {
+                Some(Push(int)) => format!("\tmovq ${}, %rax\n\tpushq %rax\n", int),
+                Some(Pop) => format!("\tpopq %rax\n"),
+                Some(Read) => {
+                    format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
+                }
+                Some(Write) => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
+                Some(Sp) => format!("\tpushq %rsp\n"),
+                Some(Add) => format!("\tpopq %rax\n\taddq %rax, (%rsp)\n"),
+                Some(Mul) => format!("\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
+                Some(And) => format!("\tpopq %rax\n\tandq %rax, (%rsp)\n"),
+                Some(Or) => format!("\tpopq %rax\n\torq %rax, (%rsp)\n"),
+                Some(Xor) => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
+                Some(Label(s)) => format!("{}:\n", s),
+                Some(Jumpz(s)) => format!("\tpopq %rax\n\ttestq %rax, %rax\n\tjz {}\n", s),
+                Some(Call) => format!("\tpopq %rax\n\tcallq *%rax\n"),
+                Some(Func) => {
+                    compile_intrinsics_x64(child, labels);
+                    let assembly = child.get::<Assembly>().unwrap();
+                    let effect = match &child.get::<Effect>().unwrap().outputs[0] {
+                        Type::Fun(e) => e,
+                        _ => unreachable!(),
+                    };
+                    let inputs = effect.inputs.iter().fold(0, |a, t| a + t.size());
+                    let outputs = effect.outputs.iter().fold(0, |a, t| a + t.size());
+
+                    let mut prologue = String::new();
+                    for _ in 0..(inputs / 8) {
+                        write!(prologue, "\tmovq {}(%rsp), %rax\n\tpushq %rax\n", inputs).unwrap();
+                    }
+
+                    let mut epilogue = String::new();
+                    write!(epilogue, "\tmovq {}(%rsp), %rcx\n", outputs).unwrap();
+                    for i in 0..(outputs / 8) {
+                        let offset = outputs - 8 - i * 8;
+                        write!(
+                            epilogue,
+                            "\tmovq {}(%rsp), %rax\n\tmovq %rax, {}(%rsp)\n",
+                            offset,
+                            offset + inputs + 8
+                        )
+                        .unwrap();
+                    }
+                    write!(epilogue, "\taddq ${}, %rsp\n", inputs + 8).unwrap();
+                    write!(epilogue, "\tpushq %rcx\n\tretq\n").unwrap();
+
+                    *labels += 1;
+                    let label = format!("_${}", *labels - 1);
+
+                    write!(
+                        func,
+                        "{}:\n{}{}{}\n\n{}",
+                        label, prologue, assembly.body, epilogue, assembly.func
+                    )
+                    .unwrap();
+                    format!("\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
+                }
+                None => return,
+            });
         }
-        Some(Write) => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
-        Some(Sp) => format!("\tpushq %rsp\n"),
-        Some(Add) => format!("\tpopq %rax\n\taddq %rax, (%rsp)\n"),
-        Some(Mul) => format!("\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
-        Some(And) => format!("\tpopq %rax\n\tandq %rax, (%rsp)\n"),
-        Some(Or) => format!("\tpopq %rax\n\torq %rax, (%rsp)\n"),
-        Some(Xor) => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
-        Some(Label(s)) => format!("{}:\n", s),
-        Some(Jumpz(s)) => format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", s),
-        Some(Call) => todo!("x86 call"),
-        Some(Func) => todo!("x86 func"),
-        None => return,
-    };
-    tree.insert(Assembly(assembly));
+
+        tree.insert(Assembly { body, func });
+    }
+    compile_intrinsics_x64(tree, &mut 0)
 }
 
 fn compile_program_x64(tree: &mut Tree) {
@@ -461,14 +513,11 @@ fn compile_program_x64(tree: &mut Tree) {
         .unwrap();
     let stdin = assembler.stdin.as_mut().unwrap();
 
-    write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:").unwrap();
-    for child in &tree.children {
-        match child.get::<Assembly>() {
-            Some(Assembly(assembly)) => write!(stdin, "{}", assembly).unwrap(),
-            _ => panic!("no assembly for {}", child),
-        }
-    }
-    write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall").unwrap();
+    let assembly = tree.get::<Assembly>().unwrap();
+    write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:\n").unwrap();
+    write!(stdin, "{}", assembly.body).unwrap();
+    write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall\n\n").unwrap();
+    write!(stdin, "{}", assembly.func).unwrap();
 
     if !assembler.wait().unwrap().success() {
         panic!("assembler failed")
