@@ -314,13 +314,12 @@ enum Type {
     Int,
     Ptr,
     Fun(Effect),
-    Ret,
 }
 
 impl Type {
     fn size(&self) -> usize {
         match self {
-            Type::Int | Type::Ptr | Type::Fun(_) | Type::Ret => 8,
+            Type::Int | Type::Ptr | Type::Fun(_) => 8,
         }
     }
 }
@@ -378,7 +377,7 @@ fn compute_types(tree: &mut Tree) {
             },
             Some(Return) => {
                 targets = vec![tree.children.len()];
-                effect!(Ret ;)
+                effect!(;)
             }
             Some(Func) => {
                 compute_types(&mut tree.children[i]);
