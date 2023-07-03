@@ -365,12 +365,25 @@ fn compute_types(tree: &mut Tree) {
                 targets.push(*target);
                 effect!(Int ;)
             }
-            Some(Call) => todo!(),
+            Some(Call) => match inputs[&i].outputs.last() {
+                Some(Fun(e)) => {
+                    let mut e = e.clone();
+                    e.inputs.push(Fun(e.clone()));
+                    e
+                }
+                Some(t) => {
+                    panic!("expected a function type, found {:?} for {}", t, tree.children[i])
+                }
+                None => panic!("could not infer type for {}", tree.children[i]),
+            },
             Some(Return) => {
                 targets = vec![tree.children.len()];
                 effect!(Ret ;)
             }
-            Some(Func) => todo!(),
+            Some(Func) => {
+                compute_types(&mut tree.children[i]);
+                tree.children[i].remove::<Effect>().unwrap()
+            }
             None => todo!("compute_types callback for non-intrinsics?"),
         };
 
