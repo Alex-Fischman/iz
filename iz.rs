@@ -268,7 +268,6 @@ enum Intrinsic {
     Label(String),
     Jumpz(String),
     Call,
-    Return,
     Func,
 }
 
@@ -289,7 +288,6 @@ fn annotate_intrinsics(tree: &mut Tree) {
         ":" => Label(tree.children.remove(0).token.deref().to_string()),
         "?" => Jumpz(tree.children.remove(0).token.deref().to_string()),
         "call" => Call,
-        "ret" => Return,
         "{" => Func,
         _ => return,
     };
@@ -375,15 +373,11 @@ fn compute_types(tree: &mut Tree) {
                 }
                 None => panic!("could not infer type for {}", tree.children[i]),
             },
-            Some(Return) => {
-                targets = vec![tree.children.len()];
-                effect!(;)
-            }
             Some(Func) => {
                 compute_types(&mut tree.children[i]);
                 tree.children[i].remove::<Effect>().unwrap()
             }
-            None => todo!("compute_types callback for non-intrinsics?"),
+            None => todo!("compute_types callback for non-intrinsics? {}", tree.children[i]),
         };
 
         tree.children[i].insert(curr.clone());
@@ -440,9 +434,8 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
         Some(Xor) => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
         Some(Label(s)) => format!("{}:\n", s),
         Some(Jumpz(s)) => format!("\tpopq %rax\n\ttest %rax, %rax\n\tjz {}\n", s),
-        Some(Call) => todo!(),
-        Some(Return) => format!("\tret\n"),
-        Some(Func) => todo!(),
+        Some(Call) => todo!("x86 call"),
+        Some(Func) => todo!("x86 func"),
         None => return,
     };
     tree.insert(Assembly(assembly));
