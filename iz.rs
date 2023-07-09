@@ -1,7 +1,6 @@
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
-use std::ops::Deref;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 
@@ -18,9 +17,8 @@ struct Source {
     text: String,
 }
 
-impl Deref for Token {
-    type Target = str;
-    fn deref(&self) -> &str {
+impl Token {
+    fn as_str(&self) -> &str {
         &self.source.text[self.lo..self.hi]
     }
 }
@@ -39,7 +37,7 @@ impl std::fmt::Display for Token {
                 _ => col += 1,
             }
         }
-        write!(f, "{:?} at {}:{}:{}", self.deref(), self.source.name, row, col)
+        write!(f, "{:?} at {}:{}:{}", self.as_str(), self.source.name, row, col)
     }
 }
 
@@ -75,7 +73,7 @@ impl Tree {
 impl std::fmt::Display for Tree {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         fn fmt(tree: &Tree, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
-            if !tree.token.deref().is_empty() {
+            if !tree.token.as_str().is_empty() {
                 writeln!(f, "{}{}", "\t".repeat(depth), tree.token)?;
             }
             tree.children.iter().map(|child| fmt(child, f, depth + 1)).collect()
@@ -133,7 +131,7 @@ fn main() {
 fn remove_comments(tree: &mut Tree) {
     let mut in_comment = false;
     tree.children.retain(|child| {
-        match child.token.deref() {
+        match child.token.as_str() {
             "#" if !in_comment => in_comment = true,
             "\n" if in_comment => in_comment = false,
             _ => {}
@@ -155,15 +153,15 @@ fn is_operator(s: &str) -> bool {
 }
 
 fn remove_whitespace(tree: &mut Tree) {
-    tree.children.retain(|child| !is_whitespace(child.token.deref()));
+    tree.children.retain(|child| !is_whitespace(child.token.as_str()));
 }
 
 fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
     move |tree: &mut Tree| {
         let mut i = 1;
         while i < tree.children.len() {
-            if f(tree.children[i - 1].token.deref())
-                && f(tree.children[i].token.deref())
+            if f(tree.children[i - 1].token.as_str())
+                && f(tree.children[i].token.as_str())
                 && tree.children[i - 1].token.source == tree.children[i].token.source
                 && tree.children[i - 1].token.hi == tree.children[i].token.lo
             {
@@ -178,7 +176,7 @@ fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
 
 fn parse_integers(tree: &mut Tree) {
     for child in &mut tree.children {
-        let chars: Vec<char> = child.token.deref().chars().collect();
+        let chars: Vec<char> = child.token.as_str().chars().collect();
         if !chars.is_empty() {
             let (chars, is_negative) = match chars[0] {
                 '-' => (&chars[1..], true),
@@ -216,9 +214,9 @@ fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a 
         let mut i = 0;
         while i < tree.children.len() {
             let curr = &tree.children[i].token;
-            if curr.deref() == open {
+            if curr.as_str() == open {
                 indices.push(i);
-            } else if curr.deref() == close {
+            } else if curr.as_str() == close {
                 let j = indices.pop().unwrap_or_else(|| panic!("extra {}", curr));
                 let mut cs: Vec<Tree> = tree.children.drain(j + 1..=i).collect();
                 cs.pop(); // remove closing bracket
@@ -239,7 +237,7 @@ fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
 
         let mut i = 0;
         while i < tree.children.len() {
-            if names.contains(&tree.children[i].token.deref()) {
+            if names.contains(&tree.children[i].token.as_str()) {
                 if i == 0 {
                     panic!("no argument for {}", tree.children[i].token)
                 }
@@ -274,7 +272,7 @@ enum Intrinsic {
 fn annotate_intrinsics(tree: &mut Tree) {
     tree.children.iter_mut().for_each(annotate_intrinsics);
 
-    let intrinsic = match tree.token.deref() {
+    let intrinsic = match tree.token.as_str() {
         _ if tree.get::<i64>().is_some() => Push(*tree.get::<i64>().unwrap()),
         "pop" => Pop,
         "read" => Read,
@@ -285,8 +283,8 @@ fn annotate_intrinsics(tree: &mut Tree) {
         "and" => And,
         "or" => Or,
         "xor" => Xor,
-        ":" => Label(tree.children.remove(0).token.deref().to_string()),
-        "?" => Jumpz(tree.children.remove(0).token.deref().to_string()),
+        ":" => Label(tree.children.remove(0).token.as_str().to_string()),
+        "?" => Jumpz(tree.children.remove(0).token.as_str().to_string()),
         "call" => Call,
         "{" => Func,
         _ => return,
