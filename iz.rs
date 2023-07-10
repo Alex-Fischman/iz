@@ -415,17 +415,17 @@ fn compute_types(tree: &mut Tree) {
 
 #[derive(Debug)]
 struct Assembly {
-    body: String,
-    func: String,
+    main: String,
+    rest: String,
 }
 fn compile_intrinsics_x64(tree: &mut Tree) {
     fn compile_intrinsics_x64(tree: &mut Tree, labels: &mut usize) {
         use std::fmt::Write;
 
-        let mut body = String::new();
-        let mut func = String::new();
+        let mut main = String::new();
+        let mut rest = String::new();
         for child in &mut tree.children {
-            body.push_str(&match child.get::<Intrinsic>() {
+            main.push_str(&match child.get::<Intrinsic>() {
                 Some(Push(int)) => format!("\tmovq ${}, %rax\n\tpushq %rax\n", int),
                 Some(Pop) => format!("\tpopq %rax\n"),
                 Some(Read) => {
@@ -475,9 +475,9 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
                     let label = format!("_${}", *labels - 1);
 
                     write!(
-                        func,
+                        rest,
                         "{}:\n{}{}{}\n\n{}",
-                        label, prologue, assembly.body, epilogue, assembly.func
+                        label, prologue, assembly.main, epilogue, assembly.rest
                     )
                     .unwrap();
                     format!("\tleaq {}(%rip), %rax\n\tpushq %rax\n", label)
@@ -486,7 +486,7 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
             });
         }
 
-        tree.insert(Assembly { body, func });
+        tree.insert(Assembly { main, rest });
     }
     compile_intrinsics_x64(tree, &mut 0)
 }
@@ -513,9 +513,9 @@ fn compile_program_x64(tree: &mut Tree) {
 
     let assembly = tree.get::<Assembly>().unwrap();
     write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:\n").unwrap();
-    write!(stdin, "{}", assembly.body).unwrap();
+    write!(stdin, "{}", assembly.main).unwrap();
     write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall\n\n").unwrap();
-    write!(stdin, "{}", assembly.func).unwrap();
+    write!(stdin, "{}", assembly.rest).unwrap();
 
     if !assembler.wait().unwrap().success() {
         panic!("assembler failed")
