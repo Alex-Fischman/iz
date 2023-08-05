@@ -84,14 +84,8 @@ impl std::fmt::Display for Tree {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let name = match args.get(1) {
-        Some(name) => name.to_owned(),
-        None => panic!("usage: pass a .iz file"),
-    };
-    let text = match std::fs::read_to_string(&name) {
-        Ok(text) => text,
-        Err(_) => panic!("could not read {}", name),
-    };
+    let name = args.get(1).unwrap_or_else(|| panic!("usage: pass a .iz file")).to_string();
+    let text = std::fs::read_to_string(&name).unwrap_or_else(|_| panic!("could not read {}", name));
     let source = Rc::new(Source { name, text });
 
     let mut tree = Tree::new(Token { source: source.clone(), lo: 0, hi: 0 });
