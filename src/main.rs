@@ -1,5 +1,5 @@
 use crate::pass::Passes;
-use crate::token::{Source, Token};
+use crate::token::{Source, Token, TokenKind};
 use crate::tree::Tree;
 use std::collections::HashMap;
 
@@ -33,8 +33,8 @@ fn main() {
     // flat
     passes.push(remove_comments);
     passes.push(remove_whitespace);
-    passes.push(concat_tokens(is_identifier));
-    passes.push(concat_tokens(is_operator));
+    passes.push(concat_tokens(|t| t.kind() == TokenKind::Identifier));
+    passes.push(concat_tokens(|t| t.kind() == TokenKind::Operator));
     passes.push(parse_integers);
     // nested
     passes.push(parse_brackets("(", ")"));
@@ -63,31 +63,17 @@ fn remove_comments(tree: &mut Tree) {
     });
 }
 
-fn is_identifier(s: &str) -> bool {
-    s.chars()
-        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-}
-
-fn is_whitespace(s: &str) -> bool {
-    s.chars().all(|c| c.is_whitespace())
-}
-
-fn is_operator(s: &str) -> bool {
-    !s.chars()
-        .any(|c| c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c))
-}
-
 fn remove_whitespace(tree: &mut Tree) {
     tree.children
-        .retain(|child| !is_whitespace(child.token.as_str()));
+        .retain(|child| child.token.kind() != TokenKind::Whitespace);
 }
 
-fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
+fn concat_tokens(f: impl Fn(&Token) -> bool) -> impl Fn(&mut Tree) {
     move |tree: &mut Tree| {
         let mut i = 1;
         while i < tree.children.len() {
-            if f(tree.children[i - 1].token.as_str())
-                && f(tree.children[i].token.as_str())
+            if f(&tree.children[i - 1].token)
+                && f(&tree.children[i].token)
                 && tree.children[i - 1].token.source == tree.children[i].token.source
                 && tree.children[i - 1].token.range.end == tree.children[i].token.range.start
             {

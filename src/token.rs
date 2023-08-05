@@ -35,3 +35,31 @@ impl Display for Token {
         write!(f, "{:?} at {}:{row}:{col}", self.as_str(), self.source.name)
     }
 }
+
+#[derive(PartialEq)]
+pub enum TokenKind {
+    Whitespace,
+    Identifier,
+    Bracket,
+    Operator,
+}
+
+impl Token {
+    pub fn kind(&self) -> TokenKind {
+        if matches!(self.as_str(), "(" | ")" | "{" | "}" | "[" | "]") {
+            return TokenKind::Bracket;
+        }
+        assert!(!self.as_str().chars().any(|c| "(){}[]".contains(c)));
+
+        if self.as_str().chars().all(char::is_whitespace) {
+            return TokenKind::Whitespace;
+        }
+        assert!(!self.as_str().chars().any(char::is_whitespace));
+
+        if self.as_str().chars().any(char::is_alphanumeric) {
+            TokenKind::Identifier
+        } else {
+            TokenKind::Operator
+        }
+    }
+}
