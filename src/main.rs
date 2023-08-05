@@ -1,99 +1,32 @@
-use std::any::{Any, TypeId};
+use crate::token::{Source, Token};
+use crate::tree::Tree;
 use std::collections::{HashMap, VecDeque};
-use std::io::Write;
-use std::process::{Command, Stdio};
-use std::rc::Rc;
 
-#[derive(Clone)]
-struct Token {
-    source: Rc<Source>,
-    lo: usize,
-    hi: usize,
-}
-
-#[derive(PartialEq)]
-struct Source {
-    name: String,
-    text: String,
-}
-
-impl Token {
-    fn as_str(&self) -> &str {
-        &self.source.text[self.lo..self.hi]
-    }
-}
-
-impl std::fmt::Display for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let mut row = 1;
-        let mut col = 1;
-        for (i, c) in self.source.text.char_indices() {
-            match (i, c) {
-                (i, _) if i == self.lo => break,
-                (_, '\n') => {
-                    row += 1;
-                    col = 1;
-                }
-                _ => col += 1,
-            }
-        }
-        write!(f, "{:?} at {}:{}:{}", self.as_str(), self.source.name, row, col)
-    }
-}
-
-struct Tree {
-    token: Token,
-    children: Vec<Tree>,
-    contents: HashMap<TypeId, Box<dyn Any>>,
-}
-
-#[allow(dead_code)]
-impl Tree {
-    fn new(token: Token) -> Tree {
-        Tree { token, children: Vec::new(), contents: HashMap::new() }
-    }
-
-    fn insert<T: 'static>(&mut self, value: T) -> Option<T> {
-        self.contents.insert(TypeId::of::<T>(), Box::new(value)).map(|any| *any.downcast().unwrap())
-    }
-
-    fn remove<T: 'static>(&mut self) -> Option<T> {
-        self.contents.remove(&TypeId::of::<T>()).map(|any| *any.downcast().unwrap())
-    }
-
-    fn get<T: 'static>(&self) -> Option<&T> {
-        self.contents.get(&TypeId::of::<T>()).map(|any| any.downcast_ref().unwrap())
-    }
-
-    fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.contents.get_mut(&TypeId::of::<T>()).map(|any| any.downcast_mut().unwrap())
-    }
-}
-
-impl std::fmt::Display for Tree {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        fn fmt(tree: &Tree, f: &mut std::fmt::Formatter, depth: usize) -> std::fmt::Result {
-            if !tree.token.as_str().is_empty() {
-                writeln!(f, "{}{}", "\t".repeat(depth), tree.token)?;
-            }
-            tree.children.iter().map(|child| fmt(child, f, depth + 1)).collect()
-        }
-        fmt(self, f, 0)
-    }
-}
+mod token;
+mod tree;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let name = args.get(1).unwrap_or_else(|| panic!("usage: pass a .iz file")).to_string();
-    let text = std::fs::read_to_string(&name).unwrap_or_else(|_| panic!("could not read {}", name));
-    let source = Rc::new(Source { name, text });
+    let name = args
+        .get(1)
+        .unwrap_or_else(|| panic!("usage: pass a .iz file"))
+        .to_string();
+    let text =
+        std::fs::read_to_string(&name).unwrap_or_else(|_| panic!("could not read file: {}", name));
+    let source = std::rc::Rc::new(Source { name, text });
 
-    let mut tree = Tree::new(Token { source: source.clone(), lo: 0, hi: 0 });
+    let mut tree = Tree::new(Token {
+        source: source.clone(),
+        range: 0..0,
+    });
     tree.insert(source.clone());
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
-        tree.children.push(Tree::new(Token { source: source.clone(), lo, hi }));
+        tree.children.push(Tree::new(Token {
+            source: source.clone(),
+            range: lo..hi,
+        }));
     }
 
     type Pass = Box<dyn Fn(&mut Tree)>;
@@ -135,7 +68,8 @@ fn remove_comments(tree: &mut Tree) {
 }
 
 fn is_identifier(s: &str) -> bool {
-    s.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    s.chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }
 
 fn is_whitespace(s: &str) -> bool {
@@ -143,11 +77,13 @@ fn is_whitespace(s: &str) -> bool {
 }
 
 fn is_operator(s: &str) -> bool {
-    !s.chars().any(|c| c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c))
+    !s.chars()
+        .any(|c| c.is_alphanumeric() || c.is_whitespace() || "(){}[]".contains(c))
 }
 
 fn remove_whitespace(tree: &mut Tree) {
-    tree.children.retain(|child| !is_whitespace(child.token.as_str()));
+    tree.children
+        .retain(|child| !is_whitespace(child.token.as_str()));
 }
 
 fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
@@ -157,9 +93,10 @@ fn concat_tokens(f: impl Fn(&str) -> bool) -> impl Fn(&mut Tree) {
             if f(tree.children[i - 1].token.as_str())
                 && f(tree.children[i].token.as_str())
                 && tree.children[i - 1].token.source == tree.children[i].token.source
-                && tree.children[i - 1].token.hi == tree.children[i].token.lo
+                && tree.children[i - 1].token.range.end == tree.children[i].token.range.start
             {
-                tree.children[i - 1].token.hi = tree.children[i].token.hi;
+                tree.children[i - 1].token.range.end = tree.children[i].token.range.end;
+                assert!(tree.children[i].children.is_empty());
                 tree.children.remove(i);
             } else {
                 i += 1;
@@ -176,7 +113,7 @@ fn parse_integers(tree: &mut Tree) {
                 '-' => (&chars[1..], true),
                 _ => (&chars[..], false),
             };
-            if let Some('0'..='9') = chars.get(0) {
+            if let Some('0'..='9') = chars.first() {
                 let (chars, base) = match chars {
                     ['0', 'x', ..] => (&chars[2..], 16),
                     ['0', 'b', ..] => (&chars[2..], 2),
@@ -202,7 +139,9 @@ fn parse_integers(tree: &mut Tree) {
 
 fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
     move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(parse_brackets(open, close));
+        tree.children
+            .iter_mut()
+            .for_each(parse_brackets(open, close));
 
         let mut indices = Vec::new(); // stack of open bracket indices
         let mut i = 0;
@@ -328,7 +267,10 @@ fn compute_types(tree: &mut Tree) {
             Some(Pop) => match inputs[&i].outputs.last() {
                 Some(t) if t.size() == 8 => effect!(t.clone() ;),
                 Some(t) => {
-                    panic!("expected a type of size 8, found {:?} for {}", t, tree.children[i])
+                    panic!(
+                        "expected a type of size 8, found {:?} for {}",
+                        t, tree.children[i]
+                    )
                 }
                 None => panic!("could not infer type for {}", tree.children[i]),
             },
@@ -361,7 +303,10 @@ fn compute_types(tree: &mut Tree) {
                     e
                 }
                 Some(t) => {
-                    panic!("expected a function type, found {:?} for {}", t, tree.children[i])
+                    panic!(
+                        "expected a function type, found {:?} for {}",
+                        t, tree.children[i]
+                    )
                 }
                 None => panic!("could not infer type for {}", tree.children[i]),
             },
@@ -369,7 +314,10 @@ fn compute_types(tree: &mut Tree) {
                 compute_types(&mut tree.children[i]);
                 tree.children[i].remove::<Effect>().unwrap()
             }
-            None => todo!("compute_types callback for non-intrinsics? {}", tree.children[i]),
+            None => todo!(
+                "compute_types callback for non-intrinsics? {}",
+                tree.children[i]
+            ),
         };
 
         tree.children[i].insert(curr.clone());
@@ -379,7 +327,10 @@ fn compute_types(tree: &mut Tree) {
             match next.outputs.pop() {
                 Some(output) if input == output => {}
                 Some(output) => {
-                    panic!("expected {:?}, found {:?} for {}", output, input, tree.children[i])
+                    panic!(
+                        "expected {:?}, found {:?} for {}",
+                        output, input, tree.children[i]
+                    )
                 }
                 None => next.inputs.insert(0, input.clone()),
             }
@@ -421,20 +372,20 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
         for child in &mut tree.children {
             main.push_str(&match child.get::<Intrinsic>() {
                 Some(Push(int)) => format!("\tmovq ${}, %rax\n\tpushq %rax\n", int),
-                Some(Pop) => format!("\tpopq %rax\n"),
+                Some(Pop) => "\tpopq %rax\n".to_string(),
                 Some(Read) => {
-                    format!("\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n")
+                    "\tmovq (%rsp), %rax\n\tmovq (%rax), %rax\n\tmovq %rax, (%rsp)\n".to_string()
                 }
-                Some(Write) => format!("\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n"),
-                Some(Sp) => format!("\tpushq %rsp\n"),
-                Some(Add) => format!("\tpopq %rax\n\taddq %rax, (%rsp)\n"),
-                Some(Mul) => format!("\tpopq %rax\n\tmulq %rax, (%rsp)\n"),
-                Some(And) => format!("\tpopq %rax\n\tandq %rax, (%rsp)\n"),
-                Some(Or) => format!("\tpopq %rax\n\torq %rax, (%rsp)\n"),
-                Some(Xor) => format!("\tpopq %rax\n\txorq %rax, (%rsp)\n"),
+                Some(Write) => "\tpopq %rax\n\tpopq %rcx\n\tmovq %rcx, (%rax)\n".to_string(),
+                Some(Sp) => "\tpushq %rsp\n".to_string(),
+                Some(Add) => "\tpopq %rax\n\taddq %rax, (%rsp)\n".to_string(),
+                Some(Mul) => "\tpopq %rax\n\tmulq %rax, (%rsp)\n".to_string(),
+                Some(And) => "\tpopq %rax\n\tandq %rax, (%rsp)\n".to_string(),
+                Some(Or) => "\tpopq %rax\n\torq %rax, (%rsp)\n".to_string(),
+                Some(Xor) => "\tpopq %rax\n\txorq %rax, (%rsp)\n".to_string(),
                 Some(Label(s)) => format!("{}:\n", s),
                 Some(Jumpz(s)) => format!("\tpopq %rax\n\ttestq %rax, %rax\n\tjz {}\n", s),
-                Some(Call) => format!("\tpopq %rax\n\tcallq *%rax\n"),
+                Some(Call) => "\tpopq %rax\n\tcallq *%rax\n".to_string(),
                 Some(Func) => {
                     compile_intrinsics_x64(child, labels);
                     let assembly = child.get::<Assembly>().unwrap();
@@ -451,7 +402,7 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
                     }
 
                     let mut epilogue = String::new();
-                    write!(epilogue, "\tmovq {}(%rsp), %rcx\n", outputs).unwrap();
+                    writeln!(epilogue, "\tmovq {}(%rsp), %rcx", outputs).unwrap();
                     for i in 0..(outputs / 8) {
                         let offset = outputs - 8 - i * 8;
                         write!(
@@ -462,7 +413,7 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
                         )
                         .unwrap();
                     }
-                    write!(epilogue, "\taddq ${}, %rsp\n", inputs + 8).unwrap();
+                    writeln!(epilogue, "\taddq ${}, %rsp", inputs + 8).unwrap();
                     write!(epilogue, "\tpushq %rcx\n\tretq\n").unwrap();
 
                     *labels += 1;
@@ -486,12 +437,14 @@ fn compile_intrinsics_x64(tree: &mut Tree) {
 }
 
 fn compile_program_x64(tree: &mut Tree) {
+    use std::io::Write;
+
     let name = match tree.token.source.name.rfind('.') {
         Some(i) => &tree.token.source.name[..i],
         None => "a.out",
     };
 
-    let mut assembler = Command::new("gcc")
+    let mut assembler = std::process::Command::new("gcc")
         .arg("-x")
         .arg("assembler-with-cpp")
         .arg("-nostdlib")
@@ -500,22 +453,32 @@ fn compile_program_x64(tree: &mut Tree) {
         .arg("-o")
         .arg(name)
         .arg("-")
-        .stdin(Stdio::piped())
+        .stdin(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     let stdin = assembler.stdin.as_mut().unwrap();
 
     let assembly = tree.get::<Assembly>().unwrap();
-    write!(stdin, "#include <sys/syscall.h>\n\n\t.global _start\n_start:\n").unwrap();
+    write!(
+        stdin,
+        "#include <sys/syscall.h>\n\n\t.global _start\n_start:\n"
+    )
+    .unwrap();
     write!(stdin, "{}", assembly.main).unwrap();
-    write!(stdin, "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall\n\n").unwrap();
+    write!(
+        stdin,
+        "\tmovq $SYS_exit, %rax\n\tmovq $0, %rdi\n\tsyscall\n\n"
+    )
+    .unwrap();
     write!(stdin, "{}", assembly.rest).unwrap();
 
     if !assembler.wait().unwrap().success() {
         panic!("assembler failed")
     }
 
-    let output = Command::new(format!("./{}", name)).output().unwrap();
+    let output = std::process::Command::new(format!("./{}", name))
+        .output()
+        .unwrap();
     println!(
         "status: {}\nstderr: {}\nstdout: {}",
         output.status,
