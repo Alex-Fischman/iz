@@ -1,25 +1,25 @@
+use crate::pass::Passes;
 use crate::token::{Source, Token};
 use crate::tree::Tree;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
+mod pass;
 mod token;
 mod tree;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let name = args
+    let name = std::env::args()
+        .collect::<Vec<String>>()
         .get(1)
         .unwrap_or_else(|| panic!("usage: pass a .iz file"))
         .to_string();
-    let text =
-        std::fs::read_to_string(&name).unwrap_or_else(|_| panic!("could not read file: {}", name));
+    let text = std::fs::read_to_string(&name).unwrap_or_else(|_| panic!("could not read {}", name));
     let source = std::rc::Rc::new(Source { name, text });
 
     let mut tree = Tree::new(Token {
         source: source.clone(),
         range: 0..0,
     });
-    tree.insert(source.clone());
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
@@ -29,30 +29,26 @@ fn main() {
         }));
     }
 
-    type Pass = Box<dyn Fn(&mut Tree)>;
-    let mut passes: VecDeque<Pass> = VecDeque::new();
+    let mut passes = Passes::default();
     // flat
-    passes.push_back(Box::new(remove_comments));
-    passes.push_back(Box::new(remove_whitespace));
-    passes.push_back(Box::new(concat_tokens(is_identifier)));
-    passes.push_back(Box::new(concat_tokens(is_operator)));
-    passes.push_back(Box::new(parse_integers));
+    passes.push(remove_comments);
+    passes.push(remove_whitespace);
+    passes.push(concat_tokens(is_identifier));
+    passes.push(concat_tokens(is_operator));
+    passes.push(parse_integers);
     // nested
-    passes.push_back(Box::new(parse_brackets("(", ")")));
-    passes.push_back(Box::new(parse_brackets("{", "}")));
-    passes.push_back(Box::new(parse_brackets("[", "]")));
-    passes.push_back(Box::new(parse_postfixes(&[":", "?", "&"])));
+    passes.push(parse_brackets("(", ")"));
+    passes.push(parse_brackets("{", "}"));
+    passes.push(parse_brackets("[", "]"));
+    passes.push(parse_postfixes(&[":", "?", "&"]));
     // structured
-    passes.push_back(Box::new(annotate_intrinsics));
-    passes.push_back(Box::new(compute_types));
-    passes.push_back(Box::new(compile_intrinsics_x64));
-    passes.push_back(Box::new(compile_program_x64));
+    passes.push(annotate_intrinsics);
+    passes.push(compute_types);
+    passes.push(compile_intrinsics_x64);
+    passes.push(compile_program_x64);
 
     tree.insert(passes);
-
-    while let Some(pass) = tree.get_mut::<VecDeque<Pass>>().unwrap().pop_front() {
-        pass(&mut tree);
-    }
+    tree.run();
 }
 
 fn remove_comments(tree: &mut Tree) {
