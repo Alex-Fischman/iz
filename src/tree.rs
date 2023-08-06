@@ -40,6 +40,10 @@ impl Tree {
             .get_mut(&std::any::TypeId::of::<T>())
             .map(|any| any.downcast_mut().unwrap())
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty() && self.contents.is_empty()
+    }
 }
 
 impl Display for Tree {

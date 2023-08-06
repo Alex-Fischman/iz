@@ -37,29 +37,43 @@ impl Display for Token {
 }
 
 #[derive(PartialEq)]
-pub enum TokenKind {
+enum TokenKind {
     Whitespace,
     Identifier,
     Bracket,
     Operator,
 }
 
-impl Token {
-    pub fn kind(&self) -> TokenKind {
-        if matches!(self.as_str(), "(" | ")" | "{" | "}" | "[" | "]") {
+impl TokenKind {
+    fn classify(s: &str) -> TokenKind {
+        if matches!(s, "(" | ")" | "{" | "}" | "[" | "]") {
             return TokenKind::Bracket;
         }
-        assert!(!self.as_str().chars().any(|c| "(){}[]".contains(c)));
+        assert!(!s.chars().any(|c| "(){}[]".contains(c)));
 
-        if self.as_str().chars().all(char::is_whitespace) {
+        if s.chars().all(char::is_whitespace) {
             return TokenKind::Whitespace;
         }
-        assert!(!self.as_str().chars().any(char::is_whitespace));
+        assert!(!s.chars().any(char::is_whitespace));
 
-        if self.as_str().chars().any(char::is_alphanumeric) {
+        if s.chars().any(char::is_alphanumeric) {
             TokenKind::Identifier
         } else {
             TokenKind::Operator
         }
+    }
+}
+
+impl Token {
+    pub fn is_whitespace(&self) -> bool {
+        TokenKind::classify(self.as_str()) == TokenKind::Whitespace
+    }
+
+    pub fn is_identifier(&self) -> bool {
+        TokenKind::classify(self.as_str()) == TokenKind::Identifier
+    }
+
+    pub fn is_operator(&self) -> bool {
+        TokenKind::classify(self.as_str()) == TokenKind::Operator
     }
 }
