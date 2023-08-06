@@ -1,4 +1,4 @@
-use crate::token::Token;
+use crate::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
