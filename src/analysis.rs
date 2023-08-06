@@ -4,6 +4,7 @@ use crate::Tree;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+#[derive(PartialEq)]
 pub enum Intrinsic {
     Push(i64),
     Pop,
@@ -103,9 +104,7 @@ pub fn compute_types(tree: &mut Tree) {
             Some(Intrinsic::Push(_)) => effect!(; Int),
             Some(Intrinsic::Pop) => match input.outputs.last() {
                 Some(t) if t.size() == 8 => effect!(t.clone() ;),
-                Some(t) => {
-                    panic!("expected a type of size 8, found {} for {}", t, token)
-                }
+                Some(t) => panic!("expected a type of size 8, found {} for {}", t, token),
                 None => panic!("could not infer type for {}", token),
             },
             Some(Intrinsic::Read) => effect!(Ptr ; Int),
@@ -114,10 +113,11 @@ pub fn compute_types(tree: &mut Tree) {
             Some(Intrinsic::Add) => effect!(Int Int ; Int),
             Some(Intrinsic::Label(_)) => effect!(;),
             Some(Intrinsic::Jumpz(s)) => {
-                let labels = (0..tree.children.len()).filter(
-                    |j| matches!(tree.children[*j].get::<Intrinsic>(), Some(Intrinsic::Label(t)) if s == t),
-                );
-                let labels: Vec<usize> = labels.collect();
+                let labels: Vec<usize> = (0..tree.children.len())
+                    .filter(|j| {
+                        tree.children[*j].get::<Intrinsic>() == Some(&Intrinsic::Label(s.clone()))
+                    })
+                    .collect();
                 let target = match labels.as_slice() {
                     [target] => target,
                     [] => panic!("could not find the matching label for {}", token),
@@ -132,9 +132,7 @@ pub fn compute_types(tree: &mut Tree) {
                     e.inputs.push(Fun(e.clone()));
                     e
                 }
-                Some(t) => {
-                    panic!("expected a function type, found {} for {}", t, token)
-                }
+                Some(t) => panic!("expected a function type, found {} for {}", t, token),
                 None => panic!("could not infer type for {}", token),
             },
             Some(Intrinsic::Func) => {
@@ -150,13 +148,13 @@ pub fn compute_types(tree: &mut Tree) {
         while let Some(input) = curr.inputs.pop() {
             match next.outputs.pop() {
                 Some(output) if input == output => {}
+                None => next.inputs.insert(0, input.clone()),
                 Some(output) => {
                     panic!(
                         "expected {}, found {} for {}",
                         output, input, tree.children[i].token
                     )
                 }
-                None => next.inputs.insert(0, input.clone()),
             }
         }
         next.outputs.append(&mut curr.outputs);
