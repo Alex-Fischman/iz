@@ -1,3 +1,5 @@
+//! A structure to hold a small continuous fragment of some larger source text.
+
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 #[derive(Clone)]

@@ -1,3 +1,5 @@
+//! The command line interface to the compiler.
+
 use crate::pass::Passes;
 use crate::token::{Source, Token};
 use crate::tree::Tree;
@@ -8,6 +10,7 @@ mod token;
 mod tree;
 
 mod lexing;
+mod parsing;
 
 fn main() {
     let name = std::env::args()
@@ -37,11 +40,10 @@ fn main() {
     passes.push(lexing::concat_tokens(Token::is_identifier));
     passes.push(lexing::concat_tokens(Token::is_operator));
     passes.push(lexing::parse_integers);
-    // nested
-    passes.push(parse_brackets("(", ")"));
-    passes.push(parse_brackets("{", "}"));
-    passes.push(parse_brackets("[", "]"));
-    passes.push(parse_postfixes(&[":", "?", "&"]));
+    passes.push(parsing::parse_brackets("(", ")"));
+    passes.push(parsing::parse_brackets("{", "}"));
+    passes.push(parsing::parse_brackets("[", "]"));
+    passes.push(parsing::parse_postfixes(&[":", "?", "&"]));
     // structured
     passes.push(annotate_intrinsics);
     passes.push(compute_types);
@@ -49,52 +51,6 @@ fn main() {
     passes.push(compile_program_x64);
 
     passes.run(&mut tree);
-}
-
-fn parse_brackets<'a>(open: &'a str, close: &'a str) -> impl Fn(&mut Tree) + 'a {
-    move |tree: &mut Tree| {
-        tree.children
-            .iter_mut()
-            .for_each(parse_brackets(open, close));
-
-        let mut indices = Vec::new(); // stack of open bracket indices
-        let mut i = 0;
-        while i < tree.children.len() {
-            let curr = &tree.children[i].token;
-            if curr.as_str() == open {
-                indices.push(i);
-            } else if curr.as_str() == close {
-                let j = indices.pop().unwrap_or_else(|| panic!("extra {}", curr));
-                let mut cs: Vec<Tree> = tree.children.drain(j + 1..=i).collect();
-                cs.pop(); // remove closing bracket
-                tree.children[j].children.append(&mut cs);
-                i = j;
-            }
-            i += 1;
-        }
-        if let Some(j) = indices.pop() {
-            panic!("extra {}", tree.children[j].token)
-        }
-    }
-}
-
-fn parse_postfixes<'a>(names: &'a [&'a str]) -> impl Fn(&mut Tree) + 'a {
-    move |tree: &mut Tree| {
-        tree.children.iter_mut().for_each(parse_postfixes(names));
-
-        let mut i = 0;
-        while i < tree.children.len() {
-            if names.contains(&tree.children[i].token.as_str()) {
-                if i == 0 {
-                    panic!("no argument for {}", tree.children[i].token)
-                }
-                let child = tree.children.remove(i - 1);
-                tree.children[i - 1].children.push(child);
-            } else {
-                i += 1;
-            }
-        }
-    }
 }
 
 use Intrinsic::*;

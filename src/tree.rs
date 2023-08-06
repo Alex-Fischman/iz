@@ -1,3 +1,5 @@
+//! A structure that can represent any intermediate form used in the compiler.
+
 use crate::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};

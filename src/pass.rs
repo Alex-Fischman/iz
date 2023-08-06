@@ -1,3 +1,5 @@
+//! A structure to hold the functions to run on a tree.
+
 use crate::Tree;
 use std::collections::VecDeque;
 

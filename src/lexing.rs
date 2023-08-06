@@ -1,3 +1,5 @@
+//! Functions to reorganize and combine lists of tokens, given as single-level trees.
+
 use crate::{Token, Tree};
 
 pub fn remove_comments(tree: &mut Tree) {
