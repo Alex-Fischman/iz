@@ -2,7 +2,7 @@
 
 use crate::Token;
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 
 pub struct Tree {
     pub token: Token,
@@ -48,7 +48,7 @@ impl Tree {
     }
 }
 
-impl Display for Tree {
+impl Debug for Tree {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         fn fmt(tree: &Tree, f: &mut Formatter, depth: usize) -> FmtResult {
             if !tree.token.as_str().is_empty() {
