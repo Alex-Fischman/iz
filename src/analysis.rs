@@ -90,8 +90,6 @@ impl Type {
 }
 
 pub fn compute_types(tree: &mut Tree) {
-    use Type::*;
-
     // tree.children.len() as a key holds the returned effect
     let mut inputs: HashMap<usize, Effect> = HashMap::from([(0, effect!(;))]);
 
@@ -101,16 +99,16 @@ pub fn compute_types(tree: &mut Tree) {
         let token = &tree.children[i].token;
         let mut targets = vec![i + 1];
         let mut curr = match tree.children[i].get::<Intrinsic>() {
-            Some(Intrinsic::Push(_)) => effect!(; Int),
+            Some(Intrinsic::Push(_)) => effect!(; Type::Int),
             Some(Intrinsic::Pop) => match input.outputs.last() {
                 Some(t) if t.size() == 8 => effect!(t.clone() ;),
                 Some(t) => panic!("expected a type of size 8, found {} for {}", t, token),
                 None => panic!("could not infer type for {}", token),
             },
-            Some(Intrinsic::Read) => effect!(Ptr ; Int),
-            Some(Intrinsic::Write) => effect!(Int Ptr ;),
-            Some(Intrinsic::Sp) => effect!(; Ptr),
-            Some(Intrinsic::Add) => effect!(Int Int ; Int),
+            Some(Intrinsic::Read) => effect!(Type::Ptr ; Type::Int),
+            Some(Intrinsic::Write) => effect!(Type::Int Type::Ptr ;),
+            Some(Intrinsic::Sp) => effect!(; Type::Ptr),
+            Some(Intrinsic::Add) => effect!(Type::Int Type::Int ; Type::Int),
             Some(Intrinsic::Label(_)) => effect!(;),
             Some(Intrinsic::Jumpz(s)) => {
                 let labels: Vec<usize> = (0..tree.children.len())
@@ -124,12 +122,12 @@ pub fn compute_types(tree: &mut Tree) {
                     _ => panic!("too many matching labels for {}", token),
                 };
                 targets.push(*target);
-                effect!(Int ;)
+                effect!(Type::Int ;)
             }
             Some(Intrinsic::Call) => match input.outputs.last() {
-                Some(Fun(e)) => {
+                Some(Type::Fun(e)) => {
                     let mut e = e.clone();
-                    e.inputs.push(Fun(e.clone()));
+                    e.inputs.push(Type::Fun(e.clone()));
                     e
                 }
                 Some(t) => panic!("expected a function type, found {} for {}", t, token),
@@ -175,7 +173,7 @@ pub fn compute_types(tree: &mut Tree) {
     match inputs.get(&tree.children.len()) {
         None => panic!("could not compute return type for {}", tree.token),
         Some(effect) => {
-            tree.insert(effect!(; Fun(effect.clone())));
+            tree.insert(effect!(; Type::Fun(effect.clone())));
         }
     }
 }
