@@ -14,6 +14,36 @@ pub fn remove_comments(tree: &mut Tree) {
     });
 }
 
+pub fn concat_strings(tree: &mut Tree) {
+    let mut in_string = false;
+    let mut in_escape = false;
+    let mut i = 1;
+    while i < tree.children.len() {
+        if in_escape {
+            tree.children[i - 1].token.range.end = tree.children[i].token.range.end;
+            assert!(tree.children[i].is_empty());
+            tree.children.remove(i);
+            in_escape = false;
+        } else if in_string {
+            if tree.children[i].token.as_str() == "\"" {
+                in_string = false;
+            } else if tree.children[i].token.as_str() == "\\" {
+                in_escape = true;
+            }
+            tree.children[i - 1].token.range.end = tree.children[i].token.range.end;
+            assert!(tree.children[i].is_empty());
+            tree.children.remove(i);
+        } else if tree.children[i].token.as_str() == "\"" {
+            in_string = true;
+        } else {
+            i += 1;
+        }
+    }
+    if in_string {
+        panic!("missing final ending quote");
+    }
+}
+
 pub fn remove_whitespace(tree: &mut Tree) {
     tree.children.retain(|child| !child.token.is_whitespace());
 }
@@ -63,6 +93,28 @@ pub fn parse_integers(tree: &mut Tree) {
                 base * value + digit
             });
             child.insert::<i64>(if is_negative { -value } else { value });
+        }
+    }
+}
+
+pub fn parse_strings(tree: &mut Tree) {
+    for child in &mut tree.children {
+        if child.token.is_string() {
+            let mut string = String::new();
+            let mut in_escape = false;
+            for c in child.token.as_str().chars().skip(1) {
+                match c {
+                    c if in_escape => match c {
+                        'n' => string.push('\n'),
+                        't' => string.push('\t'),
+                        c => string.push(c),
+                    },
+                    '\\' => in_escape = true,
+                    c => string.push(c),
+                }
+            }
+            assert_eq!(Some('"'), string.pop());
+            child.insert::<String>(string);
         }
     }
 }

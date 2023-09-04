@@ -40,6 +40,7 @@ impl Display for Token {
 
 #[derive(PartialEq)]
 enum TokenKind {
+    String,
     Whitespace,
     Identifier,
     Bracket,
@@ -53,7 +54,9 @@ impl TokenKind {
         }
         assert!(!s.chars().any(|c| "(){}[]".contains(c)));
 
-        if s.chars().all(char::is_whitespace) {
+        if s.starts_with('"') {
+            return TokenKind::String;
+        } else if s.chars().all(char::is_whitespace) {
             return TokenKind::Whitespace;
         }
         assert!(!s.chars().any(char::is_whitespace));
@@ -67,6 +70,10 @@ impl TokenKind {
 }
 
 impl Token {
+    pub fn is_string(&self) -> bool {
+        TokenKind::classify(self.as_str()) == TokenKind::String
+    }
+
     pub fn is_whitespace(&self) -> bool {
         TokenKind::classify(self.as_str()) == TokenKind::Whitespace
     }

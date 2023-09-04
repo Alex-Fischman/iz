@@ -36,11 +36,13 @@ fn main() {
     }
 
     let mut passes = Passes::default();
+    passes.push(lexing::concat_strings);
     passes.push(lexing::remove_comments);
     passes.push(lexing::remove_whitespace);
     passes.push(lexing::concat_tokens(Token::is_identifier));
     passes.push(lexing::concat_tokens(Token::is_operator));
     passes.push(lexing::parse_integers);
+    passes.push(lexing::parse_strings);
     passes.push(parsing::parse_brackets("(", ")"));
     passes.push(parsing::parse_brackets("{", "}"));
     passes.push(parsing::parse_brackets("[", "]"));
