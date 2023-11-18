@@ -38,7 +38,7 @@ fn run() -> Result<(), String> {
     parse_brackets("(", ")")(&mut tree, ROOT)?;
 
     for child in tree.get_children(ROOT) {
-        println!("{}", tree.get_token(*child));
+        println!("{}", tree.get_printable(*child));
     }
 
     Ok(())

@@ -74,13 +74,28 @@ impl<'a> Tree<'a> {
         &self.children[parent]
     }
 
+    /// Get a mutable vector of the children of a node
+    pub fn get_children_mut(&mut self, parent: Node) -> &mut Vec<Node> {
+        &mut self.children[parent]
+    }
+
+    /// Get the range of a `Node`
+    pub fn get_range(&self, node: Node) -> (usize, usize) {
+        self.ranges[node]
+    }
+
+    /// Set the range of a `Node`
+    pub fn set_range(&mut self, node: Node, range: (usize, usize)) {
+        self.ranges[node] = range;
+    }
+
     /// Get the text of the source code that labels a node
     pub fn get_slice(&self, node: Node) -> &str {
         &self.source.text[self.ranges[node].0..self.ranges[node].1]
     }
 
     /// Get a printable representation of a node, containing location information
-    pub fn get_token(&self, node: Node) -> String {
+    pub fn get_printable(&self, node: Node) -> String {
         let range = self.ranges[node];
         let mut row = 1;
         let mut col = 1;
@@ -99,5 +114,14 @@ impl<'a> Tree<'a> {
             self.get_slice(node),
             self.source.name
         )
+    }
+
+    /// Run a `Pass` over all the children of a `Node`
+    pub fn run_pass_over_children(&mut self, parent: Node, pass: Pass) -> Result<(), String> {
+        let children: Vec<_> = self.get_children(parent).to_vec();
+        for &child in &children {
+            pass(self, child)?;
+        }
+        Ok(())
     }
 }
