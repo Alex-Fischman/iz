@@ -47,6 +47,9 @@ pub struct Tree<'a> {
 /// The identifier for the root node of any `Tree`
 pub const ROOT: Node = Node(0);
 
+/// The type of a compiler pass
+pub type Pass<'a> = Box<dyn Fn(&mut Tree, Node) -> Result<(), String> + 'a>;
+
 impl<'a> Tree<'a> {
     /// Create a new, empty `Tree`
     pub fn new_tree(source: &Source) -> Tree {

@@ -10,9 +10,10 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::must_use_candidate)]
 
+pub mod parse;
 pub mod tree;
 
-pub use crate::tree::*;
+pub use crate::{parse::*, tree::*};
 
 fn main() {
     match run() {
@@ -33,6 +34,8 @@ fn run() -> Result<(), String> {
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
         tree.new_child(ROOT, lo, hi);
     }
+
+    parse_brackets("(", ")")(&mut tree, ROOT)?;
 
     for child in tree.get_children(ROOT) {
         println!("{}", tree.get_token(*child));
