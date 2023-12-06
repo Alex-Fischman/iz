@@ -20,7 +20,7 @@ impl<T> Annotation<T> {
     }
 
     fn push(&mut self, x: T) {
-        self.0.push(x)
+        self.0.push(x);
     }
 }
 
@@ -48,7 +48,9 @@ pub struct Tree<'a> {
 pub const ROOT: Node = Node(0);
 
 /// The type of a compiler pass
-pub type Pass<'a> = Box<dyn Fn(&mut Tree, Node) -> Result<(), String> + 'a>;
+pub type Pass<'a> = Box<dyn Fn(&mut Tree, Node) -> Result + 'a>;
+/// An specialized alias for the return value of compiler passes
+pub type Result = std::result::Result<(), String>;
 
 impl<'a> Tree<'a> {
     /// Create a new, empty `Tree`
@@ -117,7 +119,7 @@ impl<'a> Tree<'a> {
     }
 
     /// Run a `Pass` over all the children of a `Node`
-    pub fn run_pass_over_children(&mut self, parent: Node, pass: Pass) -> Result<(), String> {
+    pub fn run_pass_over_children(&mut self, parent: Node, pass: &Pass) -> Result {
         let children: Vec<_> = self.get_children(parent).to_vec();
         for &child in &children {
             pass(self, child)?;

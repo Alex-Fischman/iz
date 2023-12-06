@@ -4,16 +4,12 @@
 #![deny(missing_docs)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
-#![allow(clippy::type_complexity)]
-#![allow(clippy::similar_names)]
-#![allow(clippy::many_single_char_names)]
-#![allow(clippy::too_many_lines)]
 #![allow(clippy::must_use_candidate)]
 
 pub mod parse;
 pub mod tree;
 
-pub use crate::{parse::*, tree::*};
+pub use tree::*;
 
 fn main() {
     match run() {
@@ -22,10 +18,10 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), String> {
+fn run() -> Result {
     let args = std::env::args().collect::<Vec<String>>();
     let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
-    let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {}", name))?;
+    let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
     let source = Source { name, text };
 
     let mut tree = Tree::new_tree(&source);
@@ -35,7 +31,7 @@ fn run() -> Result<(), String> {
         tree.new_child(ROOT, lo, hi);
     }
 
-    parse_brackets("(", ")")(&mut tree, ROOT)?;
+    parse::brackets("(", ")")(&mut tree, ROOT)?;
 
     for child in tree.get_children(ROOT) {
         println!("{}", tree.get_printable(*child));
