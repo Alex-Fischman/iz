@@ -8,6 +8,47 @@ pub struct Source {
     pub text: String,
 }
 
+/// Represents one part of the source code of an iz program
+#[derive(Clone, Copy)]
+pub struct Slice<'a> {
+    /// A reference to the `Source`
+    pub source: &'a Source,
+    /// The byte index of the start of the slice
+    pub lo: usize,
+    /// The byte index of the end of the slice (exclusive)
+    pub hi: usize,
+}
+
+impl<'a> Slice<'a> {
+    /// Create a new slice
+    pub fn new(source: &Source, lo: usize, hi: usize) -> Slice {
+        Slice { source, lo, hi }
+    }
+
+    /// Get the string that this slice represents
+    pub fn str(&self) -> &str {
+        &self.source.text[self.lo..self.hi]
+    }
+}
+
+impl<'a> std::fmt::Display for Slice<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut row = 1;
+        let mut col = 1;
+        for (i, c) in self.source.text.char_indices() {
+            match (i, c) {
+                (i, _) if i == self.lo => break,
+                (_, '\n') => {
+                    row += 1;
+                    col = 1;
+                }
+                _ => col += 1,
+            }
+        }
+        write!(f, "{:?} at {}:{row}:{col}", self.str(), self.source.name)
+    }
+}
+
 /// An identifier for a node of a `Tree`
 #[derive(Clone, Copy)]
 pub struct Node(usize);
@@ -39,8 +80,7 @@ impl<T> std::ops::IndexMut<Node> for Annotation<T> {
 
 /// The intermediate representation of a program
 pub struct Tree<'a> {
-    source: &'a Source,
-    ranges: Annotation<(usize, usize)>,
+    slices: Annotation<Slice<'a>>,
     children: Annotation<Vec<Node>>,
 }
 
@@ -54,18 +94,17 @@ pub type Result = std::result::Result<(), String>;
 
 impl<'a> Tree<'a> {
     /// Create a new, empty `Tree`
-    pub fn new_tree(source: &Source) -> Tree {
+    pub fn new_tree(slice: Slice) -> Tree {
         Tree {
-            source,
-            ranges: Annotation(vec![(0, 0)]),
+            slices: Annotation(vec![slice]),
             children: Annotation(vec![vec![]]),
         }
     }
 
     /// Create a new child node
-    pub fn new_child(&mut self, parent: Node, lo: usize, hi: usize) -> Node {
-        let child = Node(self.ranges.len());
-        self.ranges.push((lo, hi));
+    pub fn new_child(&mut self, parent: Node, slice: Slice<'a>) -> Node {
+        let child = Node(self.slices.len());
+        self.slices.push(slice);
         self.children.push(vec![]);
         self.children[parent].push(child);
         child
@@ -81,41 +120,14 @@ impl<'a> Tree<'a> {
         &mut self.children[parent]
     }
 
-    /// Get the range of a `Node`
-    pub fn get_range(&self, node: Node) -> (usize, usize) {
-        self.ranges[node]
+    /// Get the `Slice` of a `Node`
+    pub fn get_slice(&self, node: Node) -> Slice<'a> {
+        self.slices[node]
     }
 
-    /// Set the range of a `Node`
-    pub fn set_range(&mut self, node: Node, range: (usize, usize)) {
-        self.ranges[node] = range;
-    }
-
-    /// Get the text of the source code that labels a node
-    pub fn get_slice(&self, node: Node) -> &str {
-        &self.source.text[self.ranges[node].0..self.ranges[node].1]
-    }
-
-    /// Get a printable representation of a node, containing location information
-    pub fn get_printable(&self, node: Node) -> String {
-        let range = self.ranges[node];
-        let mut row = 1;
-        let mut col = 1;
-        for (i, c) in self.source.text.char_indices() {
-            match (i, c) {
-                (i, _) if i == range.0 => break,
-                (_, '\n') => {
-                    row += 1;
-                    col = 1;
-                }
-                _ => col += 1,
-            }
-        }
-        format!(
-            "{:?} at {}:{row}:{col}",
-            self.get_slice(node),
-            self.source.name
-        )
+    /// Set the `Slice` of a `Node`
+    pub fn set_slice(&mut self, node: Node, slice: Slice<'a>) {
+        self.slices[node] = slice;
     }
 
     /// Run a `Pass` over all the children of a `Node`
