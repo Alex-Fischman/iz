@@ -132,7 +132,7 @@ impl<'a> Tree<'a> {
 
     /// Run a `Pass` over all the children of a `Node`
     pub fn run_pass_over_children(&mut self, parent: Node, pass: &Pass) -> Result {
-        let children: Vec<_> = self.get_children(parent).to_vec();
+        let children = self.get_children(parent).to_vec();
         for &child in &children {
             pass(self, child)?;
         }
