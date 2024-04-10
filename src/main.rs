@@ -5,6 +5,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
+#![allow(clippy::wildcard_imports)]
 
 pub mod parse;
 pub mod tree;
