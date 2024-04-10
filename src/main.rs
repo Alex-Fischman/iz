@@ -1,9 +1,7 @@
 //! The command line interface
 
-#![deny(missing_docs)]
-#![deny(clippy::pedantic)]
-#![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_panics_doc)]
+#![deny(clippy::all, clippy::pedantic, missing_docs)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::wildcard_imports)]
 
