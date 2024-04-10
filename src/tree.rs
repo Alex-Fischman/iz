@@ -87,8 +87,11 @@ pub struct Tree<'a> {
 /// The identifier for the root node of any `Tree`
 pub const ROOT: Node = Node(0);
 
+#[allow(clippy::type_complexity)] // can't factor out the trait from Pass
+
 /// The type of a compiler pass
-pub type Pass<'a> = Box<dyn Fn(&mut Tree, Node) -> Result + 'a>;
+pub struct Pass<'a>(Box<dyn Fn(&mut Tree, Node) -> Result + 'a>);
+
 /// An specialized alias for the return value of compiler passes
 pub type Result = std::result::Result<(), String>;
 
@@ -131,11 +134,19 @@ impl<'a> Tree<'a> {
     }
 
     /// Run a `Pass` over all the children of a `Node`
-    pub fn run_pass_over_children(&mut self, parent: Node, pass: &Pass) -> Result {
+    pub fn run_pass(&mut self, parent: Node, pass: &Pass) -> Result {
         let children = self.get_children(parent).to_vec();
         for &child in &children {
-            pass(self, child)?;
+            self.run_pass(child, pass)?;
+            pass.0(self, child)?;
         }
         Ok(())
+    }
+}
+
+impl<'a> Pass<'a> {
+    /// Wrap a `Fn(&mut Tree, Node) -> Result` into a `Pass`
+    pub fn new(func: impl Fn(&mut Tree, Node) -> Result + 'a) -> Pass<'a> {
+        Pass(Box::new(func))
     }
 }

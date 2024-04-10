@@ -33,7 +33,7 @@ fn run() -> Result {
         tree.new_child(ROOT, Span::new(&source, lo, hi));
     }
 
-    parse::brackets("(", ")")(&mut tree, ROOT)?;
+    tree.run_pass(ROOT, &parse::brackets("(", ")"))?;
 
     for child in tree.get_children(ROOT) {
         println!("{}", tree.get_span(*child));

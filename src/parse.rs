@@ -4,9 +4,7 @@ use crate::*;
 
 /// Parse matching bracket tokens
 pub fn brackets<'a>(open: &'a str, close: &'a str) -> Pass<'a> {
-    Box::new(move |tree: &mut Tree, parent: Node| {
-        tree.run_pass_over_children(parent, &brackets(open, close))?;
-
+    Pass::new(move |tree: &mut Tree, parent: Node| {
         let mut openers: Vec<(Node, usize)> = vec![];
         let mut i = 0;
         while i < tree.get_children(parent).len() {
