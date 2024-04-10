@@ -27,17 +27,17 @@ fn run() -> Result {
     let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
     let source = Source { name, text };
 
-    let mut tree = Tree::new_tree(Slice::new(&source, 0, 0));
+    let mut tree = Tree::new_tree(Span::new(&source, 0, 0));
     let los = source.text.char_indices().map(|(i, _)| i);
     let his = source.text.char_indices().map(|(i, _)| i);
     for (lo, hi) in los.zip(his.skip(1).chain([source.text.len()])) {
-        tree.new_child(ROOT, Slice::new(&source, lo, hi));
+        tree.new_child(ROOT, Span::new(&source, lo, hi));
     }
 
     parse::brackets("(", ")")(&mut tree, ROOT)?;
 
     for child in tree.get_children(ROOT) {
-        println!("{}", tree.get_slice(*child));
+        println!("{}", tree.get_span(*child));
     }
 
     Ok(())

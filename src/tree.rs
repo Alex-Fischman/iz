@@ -10,28 +10,28 @@ pub struct Source {
 
 /// Represents one part of the source code of an iz program
 #[derive(Clone, Copy)]
-pub struct Slice<'a> {
+pub struct Span<'a> {
     /// A reference to the `Source`
     pub source: &'a Source,
-    /// The byte index of the start of the slice
+    /// The byte index of the start of the span
     pub lo: usize,
-    /// The byte index of the end of the slice (exclusive)
+    /// The byte index of the end of the span (exclusive)
     pub hi: usize,
 }
 
-impl<'a> Slice<'a> {
-    /// Create a new slice
-    pub fn new(source: &Source, lo: usize, hi: usize) -> Slice {
-        Slice { source, lo, hi }
+impl<'a> Span<'a> {
+    /// Create a new span
+    pub fn new(source: &Source, lo: usize, hi: usize) -> Span {
+        Span { source, lo, hi }
     }
 
-    /// Get the string that this slice represents
+    /// Get the string that this span represents
     pub fn str(&self) -> &str {
         &self.source.text[self.lo..self.hi]
     }
 }
 
-impl<'a> std::fmt::Display for Slice<'a> {
+impl<'a> std::fmt::Display for Span<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let mut row = 1;
         let mut col = 1;
@@ -80,7 +80,7 @@ impl<T> std::ops::IndexMut<Node> for Annotation<T> {
 
 /// The intermediate representation of a program
 pub struct Tree<'a> {
-    slices: Annotation<Slice<'a>>,
+    spans: Annotation<Span<'a>>,
     children: Annotation<Vec<Node>>,
 }
 
@@ -94,17 +94,17 @@ pub type Result = std::result::Result<(), String>;
 
 impl<'a> Tree<'a> {
     /// Create a new, empty `Tree`
-    pub fn new_tree(slice: Slice) -> Tree {
+    pub fn new_tree(span: Span) -> Tree {
         Tree {
-            slices: Annotation(vec![slice]),
+            spans: Annotation(vec![span]),
             children: Annotation(vec![vec![]]),
         }
     }
 
     /// Create a new child node
-    pub fn new_child(&mut self, parent: Node, slice: Slice<'a>) -> Node {
-        let child = Node(self.slices.len());
-        self.slices.push(slice);
+    pub fn new_child(&mut self, parent: Node, span: Span<'a>) -> Node {
+        let child = Node(self.spans.len());
+        self.spans.push(span);
         self.children.push(vec![]);
         self.children[parent].push(child);
         child
@@ -120,14 +120,14 @@ impl<'a> Tree<'a> {
         &mut self.children[parent]
     }
 
-    /// Get the `Slice` of a `Node`
-    pub fn get_slice(&self, node: Node) -> Slice<'a> {
-        self.slices[node]
+    /// Get the `Span` of a `Node`
+    pub fn get_span(&self, node: Node) -> Span<'a> {
+        self.spans[node]
     }
 
-    /// Set the `Slice` of a `Node`
-    pub fn set_slice(&mut self, node: Node, slice: Slice<'a>) {
-        self.slices[node] = slice;
+    /// Set the `Span` of a `Node`
+    pub fn set_span(&mut self, node: Node, span: Span<'a>) {
+        self.spans[node] = span;
     }
 
     /// Run a `Pass` over all the children of a `Node`
