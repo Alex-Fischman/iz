@@ -37,24 +37,41 @@ struct vector {
 	size_t len;
 	buffer<T> buf;
 
-	vector() : len(0), buf(16) {}
+	vector()            : len(0), buf(16)   {}
+	vector(size_t init) : len(0), buf(init) {}
 
-	T  operator[](int i) const { return buf.data[i]; }
-	T& operator[](int i)       { return buf.data[i]; }
+	T  operator[](size_t i) const { return buf.data[i]; }
+	T& operator[](size_t i)       { return buf.data[i]; }
 
 	void push(T x) {
 		if (len == buf.len) buf.resize(buf.len * 2);
 		buf.data[len] = x;
 		len++;
 	}
+
+	template <typename S>
+	vector<S> map(S func(const T&)) {
+		vector<S> out(buf.len);
+		out.len = len;
+		for (size_t i = 0; i < buf.len; i++) out.buf.data[i] = func(buf.data[i]);
+		return out;
+	}
 };
 
 // compiler data structures
-struct Token {
-	char* start;
+struct token {
+	char const *start;
 	size_t len;
+
+	static token from_char(const char &c) {
+		token out;
+		out.start = &c;
+		out.len = 1;
+		return out;
+	}
 };
 
+// main function
 int main(int argc, char const *argv[]) {
 	// check arguments
 	if (argc != 2) {
@@ -77,8 +94,11 @@ int main(int argc, char const *argv[]) {
 	// close file
 	fclose(file);
 
-	// print text
-	for (size_t i = 0; i < text.len; i++) printf("%c", text[i]);
+	// parse text into tokens
+	vector<token> tokens = text.map(token::from_char);
+
+	// print tokens
+	for (size_t i = 0; i < tokens.len; i++) printf("%c", *tokens[i].start);
 	printf("\n");
 
 	return 0;
