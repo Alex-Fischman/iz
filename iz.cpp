@@ -48,27 +48,19 @@ struct vector {
 		buf.data[len] = x;
 		len++;
 	}
-
-	template <typename S>
-	vector<S> map(S func(const T&)) {
-		vector<S> out(buf.len);
-		out.len = len;
-		for (size_t i = 0; i < buf.len; i++) out.buf.data[i] = func(buf.data[i]);
-		return out;
-	}
 };
 
 // compiler data structures
-struct token {
-	char const *start;
+struct Source {
+	const char *name;
+	const char *text;
+};
+
+struct Token {
+	const char *start;
 	size_t len;
 
-	static token from_char(const char &c) {
-		token out;
-		out.start = &c;
-		out.len = 1;
-		return out;
-	}
+	const Source *src;
 };
 
 // main function
@@ -95,7 +87,19 @@ int main(int argc, char const *argv[]) {
 	fclose(file);
 
 	// parse text into tokens
-	vector<token> tokens = text.map(token::from_char);
+	Source src;
+	src.name = argv[1];
+	src.text = text.buf.data;
+
+	vector<Token> tokens;
+	for (size_t i = 0; i < text.len; i++) {
+		Token token;
+		token.start = &text[i];
+		token.len = 1;
+		token.src = &src;
+
+		tokens.push(token);
+	}
 
 	// print tokens
 	for (size_t i = 0; i < tokens.len; i++) printf("%c", *tokens[i].start);
