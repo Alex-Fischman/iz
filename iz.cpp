@@ -37,8 +37,7 @@ struct vector {
 	size_t len;
 	buffer<T> buf;
 
-	vector()            : len(0), buf(16)   {}
-	vector(size_t init) : len(0), buf(init) {}
+	vector() : len(0), buf(16) {}
 
 	T  operator[](size_t i) const { return buf.data[i]; }
 	T& operator[](size_t i)       { return buf.data[i]; }
