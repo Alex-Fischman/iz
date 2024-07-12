@@ -5,7 +5,7 @@
 // sane library functions
 #define assert(pred, msg) (void)((pred) || (__assert(msg, __FILE__, __LINE__), 0))
 void __assert (const char *msg, const char *file, int line) {
-	printf("%s at %s:%s\n", msg, file, line);
+	printf("%s at %s:%d\n", msg, file, line);
 	exit(1);
 }
 
