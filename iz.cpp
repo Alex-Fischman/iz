@@ -2,67 +2,66 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// sane library functions
+/// basic
 #define assert(pred, msg) (void)((pred) || (__assert(msg, __FILE__, __LINE__), 0))
 void __assert (const char *msg, const char *file, int line) {
 	printf("%s at %s:%d\n", msg, file, line);
 	exit(1);
 }
 
-// library data structures
 template <typename T>
-struct buffer {
-	size_t len;
+struct Buffer {
+	size_t allocated, len;
 	T* data;
 
-	buffer(size_t init) {
-		len = init;
-		data = (T*) malloc(init * sizeof(T));
+	Buffer() {
+		allocated = 16;
+		len = 0;
+		data = (T*) malloc(allocated * sizeof(T));
 		assert(data != NULL, "malloc failed");
 	}
 
-	~buffer() {
+	~Buffer() {
 		free(data);
 	}
 
-	void resize(size_t init) {
-		len = init;
-		data = (T*) realloc(data, init * sizeof(T));
+	void resize(size_t size) {
+		allocated = size;
+		data = (T*) realloc(data, allocated * sizeof(T));
 		assert(data != NULL, "realloc failed");
 	}
-};
-
-template <typename T>
-struct vector {
-	size_t len;
-	buffer<T> buf;
-
-	vector() : len(0), buf(16) {}
-
-	T  operator[](size_t i) const { return buf.data[i]; }
-	T& operator[](size_t i)       { return buf.data[i]; }
 
 	void push(T x) {
-		if (len == buf.len) buf.resize(buf.len * 2);
-		buf.data[len] = x;
+		if (len == allocated) resize(allocated * 2);
+		data[len] = x;
 		len++;
 	}
 };
 
-// compiler data structures
+struct String : Buffer<char> {
+	void print() const {
+		for (size_t i = 0; i < len; i++) printf("%c", data[i]);
+	}
+};
+
+/// compiler
 struct Source {
 	const char *name;
 	const char *text;
 };
 
 struct Token {
-	const char *start;
-	size_t len;
-
 	const Source *src;
+	size_t idx, len;
+
+	String to_string() {
+		String out;
+		for (size_t i = idx; i < idx + len; i++) out.push(src->text[i]);
+		return out;
+	}
 };
 
-// main function
+/// main
 int main(int argc, char const *argv[]) {
 	// check arguments
 	if (argc != 2) {
@@ -78,7 +77,7 @@ int main(int argc, char const *argv[]) {
 	}
 
 	// read file into memory
-	vector<char> text;
+	String text;
 	char c;
 	while (fread(&c, 1, 1, file)) text.push(c);
 
@@ -88,20 +87,19 @@ int main(int argc, char const *argv[]) {
 	// parse text into tokens
 	Source src;
 	src.name = argv[1];
-	src.text = text.buf.data;
+	src.text = text.data;
 
-	vector<Token> tokens;
+	Buffer<Token> tokens;
 	for (size_t i = 0; i < text.len; i++) {
 		Token token;
-		token.start = &text[i];
+		token.idx = i;
 		token.len = 1;
 		token.src = &src;
-
 		tokens.push(token);
 	}
 
 	// print tokens
-	for (size_t i = 0; i < tokens.len; i++) printf("%c", *tokens[i].start);
+	for (size_t i = 0; i < tokens.len; i++) tokens.data[i].to_string().print();
 	printf("\n");
 
 	return 0;
