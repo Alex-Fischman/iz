@@ -1,68 +1,83 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /// basic
 #define assert(pred, msg) (void)((pred) || (__assert(msg, __FILE__, __LINE__), 0))
-void __assert (const char *msg, const char *file, int line) {
+void __assert (char const *msg, char const *file, int line) {
 	printf("%s at %s:%d\n", msg, file, line);
 	exit(1);
 }
 
 template <typename T>
-struct Buffer {
-	size_t allocated, len;
-	T* data;
+struct Slice {
+	size_t len;
+	T *ptr;
 
-	Buffer() {
-		allocated = 16;
-		len = 0;
-		data = (T*) malloc(allocated * sizeof(T));
-		assert(data != NULL, "malloc failed");
+	Slice(size_t len, T *ptr) : len(len), ptr(ptr) {}
+
+	T& operator[](size_t i) {
+		assert(i < len, "index out of bounds");
+		return ptr[i];
 	}
+};
 
-	~Buffer() {
-		free(data);
+template <typename T>
+struct Buffer {
+	size_t len;
+	Slice<T> slice;
+
+	static const size_t init = 16;
+
+	Buffer() : len(0), slice(0, NULL) {
+		slice.len = init;
+		slice.ptr = (T*) malloc(init * sizeof(T));
+		assert(slice.ptr != NULL, "malloc failed");
 	}
 
 	void resize(size_t size) {
-		allocated = size;
-		data = (T*) realloc(data, allocated * sizeof(T));
-		assert(data != NULL, "realloc failed");
+		slice.len = size;
+		slice.ptr = (T*) realloc(slice.ptr, size * sizeof(T));
+		assert(slice.ptr != NULL, "realloc failed");
+	}
+
+	~Buffer() {
+		free(slice.ptr);
 	}
 
 	void push(T x) {
-		if (len == allocated) resize(allocated * 2);
-		data[len] = x;
-		len++;
+		if (len == slice.len) resize(len * 2);
+		slice[len++] = x;
+	}
+
+	T& operator[](size_t i) {
+		assert(i < len, "index out of bounds");
+		return slice[i];
 	}
 };
 
-struct String : Buffer<char> {
-	void print() const {
-		for (size_t i = 0; i < len; i++) printf("%c", data[i]);
-	}
-};
+void print(Slice<char> slice) {
+	for (size_t i = 0; i < slice.len; i++) printf("%c", slice[i]);
+}
 
 /// compiler
 struct Source {
-	const char *name;
-	const char *text;
+	Slice<char> name;
+	Slice<char> text;
+
+	Source(Slice<char> name, Slice<char> text) : name(name), text(text) {}
 };
 
 struct Token {
-	const Source *src;
-	size_t idx, len;
+	Source *source;
+	Slice<char> slice;
 
-	String to_string() {
-		String out;
-		for (size_t i = idx; i < idx + len; i++) out.push(src->text[i]);
-		return out;
-	}
+	Token(Source *source, Slice<char> slice) : source(source), slice(slice) {}
 };
 
 /// main
-int main(int argc, char const *argv[]) {
+int main(int argc, char *argv[]) {
 	// check arguments
 	if (argc != 2) {
 		printf("usage: ./iz [file.iz]\n");
@@ -77,7 +92,7 @@ int main(int argc, char const *argv[]) {
 	}
 
 	// read file into memory
-	String text;
+	Buffer<char> text;
 	char c;
 	while (fread(&c, 1, 1, file)) text.push(c);
 
@@ -85,21 +100,18 @@ int main(int argc, char const *argv[]) {
 	fclose(file);
 
 	// parse text into tokens
-	Source src;
-	src.name = argv[1];
-	src.text = text.data;
+	Slice<char> name(strlen(argv[1]), argv[1]);
+	Source source(name, text.slice);
 
 	Buffer<Token> tokens;
 	for (size_t i = 0; i < text.len; i++) {
-		Token token;
-		token.idx = i;
-		token.len = 1;
-		token.src = &src;
+		Slice<char> slice(1, &text[i]);
+		Token token(&source, slice);
 		tokens.push(token);
 	}
 
 	// print tokens
-	for (size_t i = 0; i < tokens.len; i++) tokens.data[i].to_string().print();
+	for (size_t i = 0; i < tokens.len; i++) print(tokens[i].slice);
 	printf("\n");
 
 	return 0;
