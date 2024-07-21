@@ -63,6 +63,16 @@ void print(Slice<char> slice) {
 	for (size_t i = 0; i < slice.len; i++) printf("%c", slice[i]);
 }
 
+Buffer<char> escape(Slice<char> slice) {
+	Buffer<char> out;
+	for (size_t i = 0; i < slice.len; i++) {
+		if      (slice[i] == '\n') out.push('\\').push('n');
+		else if (slice[i] == '\t') out.push('\\').push('t');
+		else                       out.push(slice[i]);
+	}
+	return out;
+}
+
 /// compiler
 struct Source {
 	Slice<char> name;
@@ -71,11 +81,31 @@ struct Source {
 	Source(Slice<char> name, Slice<char> text) : name(name), text(text) {}
 };
 
-struct Token {
+struct Span {
 	Source *source;
 	Slice<char> slice;
 
-	Token(Source *source, Slice<char> slice) : source(source), slice(slice) {}
+	Span(Source *source, Slice<char> slice) : source(source), slice(slice) {}
+
+	Buffer<char> error() {
+		Buffer<char> out;
+		out.push('"').extend(escape(slice)).push('"');
+		out.push(' ').push('a').push('t').push(' ').extend(source->name).push(':');
+
+		size_t row = 1, col = 1;
+		for (char* ptr = source->text.ptr; ptr != slice.ptr; ptr++) {
+			if (*ptr == '\n') {
+				col = 1;
+				row += 1;
+			} else {
+				col += 1;
+			}
+		}
+		// TODO: extend message with row and col
+		out.push(':');
+
+		return out;
+	}
 };
 
 /// main
@@ -102,18 +132,21 @@ int main(int argc, char *argv[]) {
 	fclose(file);
 
 	// parse text into tokens
-	Slice<char> name(strlen(argv[1]), argv[1]);
-	Source source(name, text.slice);
+	Slice<char> name = {strlen(argv[1]), argv[1]};
+	Source source = {name, text};
 
-	Buffer<Token> tokens;
+	Buffer<Span> tokens;
 	for (size_t i = 0; i < text.len; i++) {
-		Slice<char> slice(1, &text[i]);
-		Token token(&source, slice);
+		Slice<char> slice = {1, &text[i]};
+		Span token = {&source, slice};
 		tokens.push(token);
 	}
 
 	// print tokens
-	for (size_t i = 0; i < tokens.len; i++) print(tokens[i].slice);
+	for (size_t i = 0; i < tokens.len; i++) {
+		print(tokens[i].error());
+		printf("\n");
+	}
 	printf("\n");
 
 	return 0;
