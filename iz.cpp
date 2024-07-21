@@ -21,6 +21,15 @@ struct Slice {
 		assert(i < len, "index out of bounds");
 		return ptr[i];
 	}
+
+	void reverse() {
+		T tmp;
+		for (size_t i = 0; i < len / 2; i++) {
+			tmp = ptr[i];
+			ptr[i] = ptr[len - 1 - i];
+			ptr[len - 1 - i] = tmp;
+		}
+	}
 };
 
 template <typename T>
@@ -47,15 +56,13 @@ struct Buffer : public Slice<T> {
 		free(ptr);
 	}
 
-	Buffer<T>& push(T x) {
+	void push(T x) {
 		if (len == mem) resize(mem * 2);
 		ptr[len++] = x;
-		return *this;
 	}
 
-	Buffer<T>& extend(Slice<T> slice) {
+	void extend(Slice<T> slice) {
 		for (size_t i = 0; i < slice.len; i++) push(slice[i]);
-		return *this;
 	}
 };
 
@@ -66,10 +73,32 @@ void print(Slice<char> slice) {
 Buffer<char> escape(Slice<char> slice) {
 	Buffer<char> out;
 	for (size_t i = 0; i < slice.len; i++) {
-		if      (slice[i] == '\n') out.push('\\').push('n');
-		else if (slice[i] == '\t') out.push('\\').push('t');
-		else                       out.push(slice[i]);
+		if (slice[i] == '\n') {
+			out.push('\\');
+			out.push('n');
+		} else if (slice[i] == '\t') {
+			out.push('\\');
+			out.push('t');
+		} else if (slice[i] == '"') {
+			out.push('\\');
+			out.push('"');
+		} else {
+			out.push(slice[i]);
+		}
 	}
+	return out;
+}
+
+Buffer<char> to_string(size_t x) {
+	Buffer<char> out;
+
+	if (x == 0) {
+		out.push('0');
+	} else {
+		for (size_t i = x; i > 0; i /= 10) out.push('0' + (i % 10));
+		out.reverse();
+	}
+
 	return out;
 }
 
@@ -88,10 +117,6 @@ struct Span {
 	Span(Source *source, Slice<char> slice) : source(source), slice(slice) {}
 
 	Buffer<char> error() {
-		Buffer<char> out;
-		out.push('"').extend(escape(slice)).push('"');
-		out.push(' ').push('a').push('t').push(' ').extend(source->name).push(':');
-
 		size_t row = 1, col = 1;
 		for (char* ptr = source->text.ptr; ptr != slice.ptr; ptr++) {
 			if (*ptr == '\n') {
@@ -101,8 +126,23 @@ struct Span {
 				col += 1;
 			}
 		}
-		// TODO: extend message with row and col
+
+		Buffer<char> out;
+
+		out.push('"');
+		out.extend(escape(slice));
+		out.push('"');
+
+		out.push(' ');
+		out.push('a');
+		out.push('t');
+		out.push(' ');
+
+		out.extend(source->name);
 		out.push(':');
+		out.extend(to_string(row));
+		out.push(':');
+		out.extend(to_string(col));
 
 		return out;
 	}
