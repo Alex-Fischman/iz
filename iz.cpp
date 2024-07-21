@@ -24,36 +24,38 @@ struct Slice {
 };
 
 template <typename T>
-struct Buffer {
-	size_t len;
-	Slice<T> slice;
+struct Buffer : public Slice<T> {
+	using Slice<T>::len;
+	size_t mem;
+	using Slice<T>::ptr;
 
 	static const size_t init = 16;
 
-	Buffer() : len(0), slice(0, NULL) {
-		slice.len = init;
-		slice.ptr = (T*) malloc(init * sizeof(T));
-		assert(slice.ptr != NULL, "malloc failed");
+	Buffer() : Slice<T>(0, nullptr) {
+		mem = init;
+		ptr = (T*) malloc(mem * sizeof(T));
+		assert(ptr != NULL, "malloc failed");
 	}
 
 	void resize(size_t size) {
-		slice.len = size;
-		slice.ptr = (T*) realloc(slice.ptr, size * sizeof(T));
-		assert(slice.ptr != NULL, "realloc failed");
+		mem = size;
+		ptr = (T*) realloc(ptr, mem * sizeof(T));
+		assert(ptr != NULL, "realloc failed");
 	}
 
 	~Buffer() {
-		free(slice.ptr);
+		free(ptr);
 	}
 
-	void push(T x) {
-		if (len == slice.len) resize(len * 2);
-		slice[len++] = x;
+	Buffer<T>& push(T x) {
+		if (len == mem) resize(mem * 2);
+		ptr[len++] = x;
+		return *this;
 	}
 
-	T& operator[](size_t i) {
-		assert(i < len, "index out of bounds");
-		return slice[i];
+	Buffer<T>& extend(Slice<T> slice) {
+		for (size_t i = 0; i < slice.len; i++) push(slice[i]);
+		return *this;
 	}
 };
 
