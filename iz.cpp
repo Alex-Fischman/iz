@@ -118,7 +118,7 @@ struct Span {
 
 	Buffer<char> error() {
 		size_t row = 1, col = 1;
-		for (char* ptr = source->text.ptr; ptr != slice.ptr; ptr++) {
+		for (char *ptr = source->text.ptr; ptr != slice.ptr; ptr++) {
 			if (*ptr == '\n') {
 				col = 1;
 				row += 1;
