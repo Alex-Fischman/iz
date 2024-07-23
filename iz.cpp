@@ -43,13 +43,13 @@ struct Buffer : public Slice<T> {
 	Buffer() : Slice<T>(0, nullptr) {
 		mem = init;
 		ptr = (T*) malloc(mem * sizeof(T));
-		assert(ptr != NULL, "malloc failed");
+		assert(ptr != nullptr, "malloc failed");
 	}
 
 	void resize(size_t size) {
 		mem = size;
 		ptr = (T*) realloc(ptr, mem * sizeof(T));
-		assert(ptr != NULL, "realloc failed");
+		assert(ptr != nullptr, "realloc failed");
 	}
 
 	~Buffer() {
@@ -158,7 +158,7 @@ int main(int argc, char *argv[]) {
 
 	// open file
 	FILE* file = fopen(argv[1], "r");
-	if (file == NULL) {
+	if (file == nullptr) {
 		printf("could not open file");
 		return 1;
 	}
