@@ -40,11 +40,8 @@ struct Buffer : public Slice<T> {
 
 	static const size_t init = 16;
 
-	Buffer() : Slice<T>(0, nullptr) {
-		mem = init;
-		ptr = (T*) malloc(mem * sizeof(T));
-		assert(ptr != nullptr, "malloc failed");
-	}
+	// can't be defined inline because C++
+	template <typename S> friend Buffer<S> alloc();
 
 	void resize(size_t size) {
 		mem = size;
@@ -52,8 +49,13 @@ struct Buffer : public Slice<T> {
 		assert(ptr != nullptr, "realloc failed");
 	}
 
+	friend void free(Buffer<T>& buf) {
+		::free(buf.ptr);
+		buf.ptr = nullptr;
+	}
+
 	~Buffer() {
-		free(ptr);
+		assert(ptr == nullptr, "memory leak");
 	}
 
 	void push(T x) {
@@ -64,14 +66,30 @@ struct Buffer : public Slice<T> {
 	void extend(Slice<T> slice) {
 		for (size_t i = 0; i < slice.len; i++) push(slice[i]);
 	}
+
+private:
+	Buffer(size_t len, T *ptr) : Slice<T>(len, ptr) {}
 };
 
+template <typename T>
+Buffer<T> alloc() {
+	Buffer<T> out = {0, nullptr};
+	out.mem = Buffer<T>::init;
+	out.ptr = (T*) malloc(out.mem * sizeof(T));
+	assert(out.ptr != nullptr, "malloc failed");
+	return out;
+}
+
+void print(char c) {
+	printf("%c", c);
+}
+
 void print(Slice<char> slice) {
-	for (size_t i = 0; i < slice.len; i++) printf("%c", slice[i]);
+	for (size_t i = 0; i < slice.len; i++) print(slice[i]);
 }
 
 Buffer<char> escape(Slice<char> slice) {
-	Buffer<char> out;
+	auto out = alloc<char>();
 	for (size_t i = 0; i < slice.len; i++) {
 		if (slice[i] == '\n') {
 			out.push('\\');
@@ -90,7 +108,7 @@ Buffer<char> escape(Slice<char> slice) {
 }
 
 Buffer<char> to_string(size_t x) {
-	Buffer<char> out;
+	auto out = alloc<char>();
 
 	if (x == 0) {
 		out.push('0');
@@ -127,10 +145,14 @@ struct Span {
 			}
 		}
 
-		Buffer<char> out;
+		auto out = alloc<char>();
+
+		auto escaped = escape(slice);
+		auto row_string = to_string(row);
+		auto col_string = to_string(col);
 
 		out.push('"');
-		out.extend(escape(slice));
+		out.extend(escaped);
 		out.push('"');
 
 		out.push(' ');
@@ -140,9 +162,13 @@ struct Span {
 
 		out.extend(source->name);
 		out.push(':');
-		out.extend(to_string(row));
+		out.extend(row_string);
 		out.push(':');
-		out.extend(to_string(col));
+		out.extend(col_string);
+
+		free(escaped);
+		free(row_string);
+		free(col_string);
 
 		return out;
 	}
@@ -164,30 +190,35 @@ int main(int argc, char *argv[]) {
 	}
 
 	// read file into memory
-	Buffer<char> text;
+	auto text = alloc<char>();
 	char c;
 	while (fread(&c, 1, 1, file)) text.push(c);
 
 	// close file
 	fclose(file);
 
-	// parse text into tokens
+	// parse text into spans
 	Slice<char> name = {strlen(argv[1]), argv[1]};
 	Source source = {name, text};
 
-	Buffer<Span> tokens;
+	auto spans = alloc<Span>();
 	for (size_t i = 0; i < text.len; i++) {
 		Slice<char> slice = {1, &text[i]};
-		Span token = {&source, slice};
-		tokens.push(token);
+		Span span = {&source, slice};
+		spans.push(span);
 	}
 
-	// print tokens
-	for (size_t i = 0; i < tokens.len; i++) {
-		print(tokens[i].error());
-		printf("\n");
+	// print spans
+	for (size_t i = 0; i < spans.len; i++) {
+		auto message = spans[i].error();
+		print(message);
+		print('\n');
+		free(message);
 	}
 	printf("\n");
+
+	free(spans);
+	free(text);
 
 	return 0;
 }
