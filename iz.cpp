@@ -4,9 +4,9 @@
 #include <string.h>
 
 /// basic
-#define assert(pred, msg) (void)((pred) || (__assert(msg, __FILE__, __LINE__), 0))
-void __assert (char const *msg, char const *file, int line) {
-	printf("%s at %s:%d\n", msg, file, line);
+#define panic(message) __panic(message, __FILE__, __LINE__)
+void __panic(char const *message, char const *file, int line) {
+	printf("%s at %s:%d\n", message, file, line);
 	exit(1);
 }
 
@@ -18,7 +18,7 @@ struct Slice {
 	Slice(size_t len, T *ptr) : len(len), ptr(ptr) {}
 
 	T& operator[](size_t i) {
-		assert(i < len, "index out of bounds");
+		if (i >= len) panic("index out of bounds");
 		return ptr[i];
 	}
 
@@ -46,7 +46,7 @@ struct Buffer : public Slice<T> {
 	void resize(size_t size) {
 		mem = size;
 		ptr = (T*) realloc(ptr, mem * sizeof(T));
-		assert(ptr != nullptr, "realloc failed");
+		if (ptr == nullptr) panic("realloc failed");
 	}
 
 	friend void free(Buffer<T>& buf) {
@@ -55,7 +55,7 @@ struct Buffer : public Slice<T> {
 	}
 
 	~Buffer() {
-		assert(ptr == nullptr, "memory leak");
+		if (ptr != nullptr) panic("memory leak");
 	}
 
 	void push(T x) {
@@ -76,7 +76,7 @@ Buffer<T> alloc() {
 	Buffer<T> out = {0, nullptr};
 	out.mem = Buffer<T>::init;
 	out.ptr = (T*) malloc(out.mem * sizeof(T));
-	assert(out.ptr != nullptr, "malloc failed");
+	if (out.ptr == nullptr) panic("malloc failed");
 	return out;
 }
 
