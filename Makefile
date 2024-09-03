@@ -1,7 +1,8 @@
 all: build test
 
 build:
-	@ $(CXX) -nostdinc++ -Wall -Wextra iz.cpp -o iz
+	@ zig fmt iz.zig
+	@ zig build-exe iz.zig
 
 test:
 	@ valgrind -q ./iz scratch.iz
