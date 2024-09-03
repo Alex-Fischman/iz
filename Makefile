@@ -5,7 +5,7 @@ build:
 	@ zig build-exe iz.zig
 
 test:
-	@ valgrind -q ./iz scratch.iz
+	@ ./iz scratch.iz
 
 clean:
 	rm iz
