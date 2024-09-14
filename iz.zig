@@ -86,7 +86,7 @@ const Span = struct {
     slice: []const u8,
 };
 
-fn format_error(buffer: *Buffer(u8), span: Span) !void {
+fn format_span(buffer: *Buffer(u8), span: Span) !void {
     var row: usize = 1;
     var col: usize = 1;
     var ptr = span.source.text.ptr;
@@ -110,6 +110,64 @@ fn format_error(buffer: *Buffer(u8), span: Span) !void {
     try format_usize(buffer, col);
 }
 
+const Tree = struct {
+    // each node maintains a doubly linked list of its children
+    // invariant: each node except the root is always pointed at twice
+    const Node = struct {
+        span: Span,
+        // siblings
+        next: ?usize = null,
+        prev: ?usize = null,
+        // children
+        head: ?usize = null,
+        last: ?usize = null,
+    };
+
+    nodes: Buffer(Node),
+
+    const root = 0;
+
+    fn init(source: *const Source) !Tree {
+        var nodes = try Buffer(Node).init();
+        try nodes.push(Node{
+            .span = Span{
+                .source = source,
+                .slice = source.text.ptr[0..0],
+            },
+        });
+        return Tree{
+            .nodes = nodes,
+        };
+    }
+
+    fn push_child(self: *Tree, parent: usize, span: Span) !void {
+        const i = self.nodes.len;
+        try self.nodes.push(Node{
+            .span = span,
+            .prev = self.nodes.data()[parent].last,
+        });
+
+        if (self.nodes.data()[parent].last) |last| {
+            self.nodes.data()[last].next = i;
+        } else {
+            self.nodes.data()[parent].head = i;
+        }
+
+        self.nodes.data()[parent].last = i;
+    }
+};
+
+fn format_node(buffer: *Buffer(u8), tree: Tree, node: usize, depth: usize) !void {
+    const n = tree.nodes.data()[node];
+
+    for (0..depth) |_| try buffer.push('\t');
+    try format_span(buffer, n.span);
+    try buffer.push('\n');
+
+    if (n.head) |head| try format_node(buffer, tree, head, depth + 1);
+    if (n.next) |next| try format_node(buffer, tree, next, depth);
+}
+
 pub fn main() !void {
     const args = std.os.argv;
     if (args.len != 2) {
@@ -131,18 +189,15 @@ pub fn main() !void {
         .text = text.data(),
     };
 
-    var spans = try Buffer(Span).init();
+    var tree = try Tree.init(&source);
     for (0..text.len) |i| {
-        try spans.push(Span{
+        try tree.push_child(Tree.root, Span{
             .source = &source,
             .slice = text.ptr[i .. i + 1],
         });
     }
 
     var out = try Buffer(u8).init();
-    for (spans.data()) |span| {
-        try format_error(&out, span);
-        try out.push('\n');
-    }
+    try format_node(&out, tree, Tree.root, 0);
     print(out.data());
 }
