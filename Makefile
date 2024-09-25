@@ -1,11 +1,3 @@
-all: build test
-
-build:
+all:
 	@ zig fmt iz.zig
-	@ zig build-exe iz.zig
-
-test:
-	@ ./iz scratch.iz
-
-clean:
-	rm iz
+	@ zig test iz.zig

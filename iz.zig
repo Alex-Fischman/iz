@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 
 /// standard
@@ -13,31 +14,31 @@ fn Buffer(comptime T: type) type {
         mem: usize,
         len: usize,
 
-        const allocator = std.heap.page_allocator;
-        const init_mem = 16;
-
-        fn init() !Self {
-            const slice = try allocator.alloc(T, init_mem * @sizeOf(T));
-            return Self{
-                .ptr = slice.ptr,
-                .mem = slice.len / @sizeOf(T),
-                .len = 0,
-            };
-        }
-
-        fn resize(self: *Self, size: usize) !void {
-            if (size <= self.mem) return;
-            const slice = try allocator.realloc(self.allocation(), size * @sizeOf(T));
-            self.ptr = slice.ptr;
-            self.mem = slice.len / @sizeOf(T);
-        }
-
         fn data(self: *const Self) []T {
             return self.ptr[0..self.len];
         }
 
         fn allocation(self: *const Self) []T {
             return self.ptr[0..self.mem];
+        }
+
+        const allocator = if (builtin.is_test) std.testing.allocator else std.heap.page_allocator;
+        const init_mem = 16;
+
+        fn init() !Self {
+            const slice = try allocator.alloc(T, init_mem);
+            return Self{
+                .ptr = slice.ptr,
+                .mem = init_mem,
+                .len = 0,
+            };
+        }
+
+        fn resize(self: *Self, size: usize) !void {
+            if (size <= self.mem) return;
+            const slice = try allocator.realloc(self.allocation(), size);
+            self.ptr = slice.ptr;
+            self.mem = size;
         }
 
         fn deinit(self: *Self) void {
@@ -77,8 +78,8 @@ fn format_string_escaped(buffer: *Buffer(u8), xs: []const u8) !void {
 
 /// compiler
 const Source = struct {
-    name: []u8,
-    text: []u8,
+    name: []const u8,
+    text: []const u8,
 };
 
 const Span = struct {
@@ -140,6 +141,10 @@ const Tree = struct {
         };
     }
 
+    fn deinit(self: *Tree) void {
+        self.nodes.deinit();
+    }
+
     fn push_child(self: *Tree, parent: usize, span: Span) !void {
         const i = self.nodes.len;
         try self.nodes.push(Node{
@@ -168,19 +173,13 @@ fn format_node(buffer: *Buffer(u8), tree: Tree, node: usize, depth: usize) !void
     if (n.next) |next| try format_node(buffer, tree, next, depth);
 }
 
-pub fn main() !void {
-    const args = std.os.argv;
-    if (args.len != 2) {
-        print("usage: ./iz [file.iz]\n");
-        std.process.exit(1);
-    }
-    const name = std.mem.span(args[1]);
-
+fn compile(name: []const u8) !void {
     const file = try std.fs.cwd().openFile(name, .{});
     defer file.close();
     const stat = try file.stat();
 
     var text = try Buffer(u8).init();
+    defer text.deinit();
     try text.reserve(stat.size);
     _ = try file.readAll(text.data());
 
@@ -190,6 +189,7 @@ pub fn main() !void {
     };
 
     var tree = try Tree.init(&source);
+    defer tree.deinit();
     for (0..text.len) |i| {
         try tree.push_child(Tree.root, Span{
             .source = &source,
@@ -198,6 +198,21 @@ pub fn main() !void {
     }
 
     var out = try Buffer(u8).init();
+    defer out.deinit();
     try format_node(&out, tree, Tree.root, 0);
     print(out.data());
+}
+
+pub fn main() !void {
+    const args = std.os.argv;
+    if (args.len != 2) {
+        print("usage: ./iz [file.iz]\n");
+        std.process.exit(1);
+    }
+    const name = std.mem.span(args[1]);
+    try compile(name);
+}
+
+test "scratch" {
+    try compile("scratch.iz");
 }
