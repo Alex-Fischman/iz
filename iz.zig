@@ -173,27 +173,13 @@ fn format_node(buffer: *Buffer(u8), tree: Tree, node: usize, depth: usize) !void
     if (n.next) |next| try format_node(buffer, tree, next, depth);
 }
 
-fn compile(name: []const u8) !void {
-    const file = try std.fs.cwd().openFile(name, .{});
-    defer file.close();
-    const stat = try file.stat();
-
-    var text = try Buffer(u8).init();
-    defer text.deinit();
-    try text.reserve(stat.size);
-    _ = try file.readAll(text.data());
-
-    var source = Source{
-        .name = name,
-        .text = text.data(),
-    };
-
+fn compile(source: Source) !void {
     var tree = try Tree.init(&source);
     defer tree.deinit();
-    for (0..text.len) |i| {
+    for (0..source.text.len) |i| {
         try tree.push_child(Tree.root, Span{
             .source = &source,
-            .slice = text.ptr[i .. i + 1],
+            .slice = source.text.ptr[i .. i + 1],
         });
     }
 
@@ -203,16 +189,33 @@ fn compile(name: []const u8) !void {
     print(out.data());
 }
 
+/// interface
+fn compile_file(name: []const u8) !void {
+    const file = try std.fs.cwd().openFile(name, .{});
+    const stat = try file.stat();
+
+    var text = try Buffer(u8).init();
+    defer text.deinit();
+    try text.reserve(stat.size);
+    _ = try file.readAll(text.data());
+
+    file.close();
+
+    try compile(Source{
+        .name = name,
+        .text = text.data(),
+    });
+}
+
 pub fn main() !void {
     const args = std.os.argv;
     if (args.len != 2) {
         print("usage: ./iz [file.iz]\n");
         std.process.exit(1);
     }
-    const name = std.mem.span(args[1]);
-    try compile(name);
+    try compile_file(std.mem.span(args[1]));
 }
 
 test "scratch" {
-    try compile("scratch.iz");
+    try compile_file("scratch.iz");
 }
