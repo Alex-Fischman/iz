@@ -173,14 +173,53 @@ fn format_node(buffer: *Buffer(u8), tree: Tree, node: usize, depth: usize) !void
     if (n.next) |next| try format_node(buffer, tree, next, depth);
 }
 
+const Token = enum {
+    Whitespace,
+    Bracket,
+    Comment,
+    Identifier,
+};
+
+fn token(char: u8) Token {
+    return switch (char) {
+        ' ', '\n', '\t' => Token.Whitespace,
+        '(', ')', '{', '}', '[', ']' => Token.Bracket,
+        '#' => Token.Comment,
+        else => Token.Identifier,
+    };
+}
+
 fn compile(source: Source) !void {
     var tree = try Tree.init(&source);
     defer tree.deinit();
-    for (0..source.text.len) |i| {
-        try tree.push_child(Tree.root, Span{
-            .source = &source,
-            .slice = source.text.ptr[i .. i + 1],
-        });
+
+    var i: usize = 0;
+    while (i < source.text.len) {
+        var j = i + 1;
+        switch (token(source.text.ptr[i])) {
+            Token.Whitespace => {},
+            Token.Bracket => {
+                try tree.push_child(Tree.root, Span{
+                    .source = &source,
+                    .slice = source.text.ptr[i..j],
+                });
+            },
+            Token.Comment => {
+                while (source.text.ptr[j] != '\n') {
+                    j += 1;
+                }
+            },
+            Token.Identifier => {
+                while (token(source.text.ptr[j]) == Token.Identifier) {
+                    j += 1;
+                }
+                try tree.push_child(Tree.root, Span{
+                    .source = &source,
+                    .slice = source.text.ptr[i..j],
+                });
+            },
+        }
+        i = j;
     }
 
     var out = try Buffer(u8).init();
