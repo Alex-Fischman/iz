@@ -67,15 +67,6 @@ fn format_usize(buffer: *Buffer(u8), x: usize) !void {
     try buffer.push(@truncate('0' + (x % 10)));
 }
 
-fn format_string_escaped(buffer: *Buffer(u8), xs: []const u8) !void {
-    for (xs) |x| switch (x) {
-        '\n' => try buffer.extend("\\n"),
-        '\t' => try buffer.extend("\\t"),
-        '\"' => try buffer.extend("\\\""),
-        else => try buffer.push(x),
-    };
-}
-
 /// compiler
 const Source = struct {
     name: []const u8,
@@ -100,15 +91,13 @@ fn format_span(buffer: *Buffer(u8), span: Span) !void {
         }
     }
 
-    try buffer.push('"');
-    try format_string_escaped(buffer, span.slice);
-    try buffer.push('"');
-    try buffer.extend(" at ");
     try buffer.extend(span.source.name);
     try buffer.push(':');
     try format_usize(buffer, row);
     try buffer.push(':');
     try format_usize(buffer, col);
+    try buffer.extend(": ");
+    try buffer.extend(span.slice);
 }
 
 const Tree = struct {
