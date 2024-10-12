@@ -194,14 +194,10 @@ fn compile(source: Source) !void {
                 });
             },
             Token.Comment => {
-                while (source.text.ptr[j] != '\n') {
-                    j += 1;
-                }
+                while (source.text.ptr[j] != '\n') j += 1;
             },
             Token.Identifier => {
-                while (token(source.text.ptr[j]) == Token.Identifier) {
-                    j += 1;
-                }
+                while (token(source.text.ptr[j]) == Token.Identifier) j += 1;
                 try tree.push_child(Tree.root, Span{
                     .source = &source,
                     .slice = source.text.ptr[i..j],
