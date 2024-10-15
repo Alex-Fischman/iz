@@ -106,16 +106,14 @@ const Tree = struct {
     const Node = struct {
         span: Span,
         // siblings
-        next: ?usize = null,
-        prev: ?usize = null,
+        next: ?*Node = null,
+        prev: ?*Node = null,
         // children
-        head: ?usize = null,
-        last: ?usize = null,
+        head: ?*Node = null,
+        last: ?*Node = null,
     };
 
     nodes: Buffer(Node),
-
-    const root = 0;
 
     fn init(source: *const Source) !Tree {
         var nodes = try Buffer(Node).init();
@@ -134,32 +132,34 @@ const Tree = struct {
         self.nodes.deinit();
     }
 
-    fn push_child(self: *Tree, parent: usize, span: Span) !void {
-        const i = self.nodes.len;
+    fn root(self: Tree) *Node {
+        return &self.nodes.data()[0];
+    }
+
+    fn push_child(self: *Tree, parent: *Node, span: Span) !void {
         try self.nodes.push(Node{
             .span = span,
-            .prev = self.nodes.data()[parent].last,
+            .prev = parent.last,
         });
+        const new = &self.nodes.data()[self.nodes.len - 1];
 
-        if (self.nodes.data()[parent].last) |last| {
-            self.nodes.data()[last].next = i;
+        if (parent.last) |last| {
+            last.next = new;
         } else {
-            self.nodes.data()[parent].head = i;
+            parent.head = new;
         }
 
-        self.nodes.data()[parent].last = i;
+        parent.last = new;
     }
 };
 
-fn format_node(buffer: *Buffer(u8), tree: Tree, node: usize, depth: usize) !void {
-    const n = tree.nodes.data()[node];
-
+fn format_node(buffer: *Buffer(u8), node: Tree.Node, depth: usize) !void {
     for (0..depth) |_| try buffer.push('\t');
-    try format_span(buffer, n.span);
+    try format_span(buffer, node.span);
     try buffer.push('\n');
 
-    if (n.head) |head| try format_node(buffer, tree, head, depth + 1);
-    if (n.next) |next| try format_node(buffer, tree, next, depth);
+    if (node.head) |head| try format_node(buffer, head.*, depth + 1);
+    if (node.next) |next| try format_node(buffer, next.*, depth);
 }
 
 const Token = enum {
@@ -178,7 +178,90 @@ fn token(char: u8) Token {
     };
 }
 
-fn compile(source: Source) !void {
+const ErrorMessage = struct {
+    span: Span,
+    message: []const u8,
+};
+
+fn format_err(buffer: *Buffer(u8), error_message: ErrorMessage) !void {
+    try buffer.extend("error: ");
+    try buffer.extend(error_message.message);
+    try buffer.extend(" at ");
+    try format_span(buffer, error_message.span);
+    try buffer.push('\n');
+}
+
+const Tag = enum { Ok, Err };
+
+fn Result(comptime T: type) type {
+    return union(Tag) {
+        Ok: T,
+        Err: ErrorMessage,
+    };
+}
+
+fn Ok(payload: anytype) Result(@TypeOf(payload)) {
+    return Result(@TypeOf(payload)){ .Ok = payload };
+}
+
+fn Err(comptime T: type, span: Span, message: []const u8) Result(T) {
+    return Result(T){ .Err = ErrorMessage{
+        .span = span,
+        .message = message,
+    } };
+}
+
+fn parse_brackets_internal(n: ?*Tree.Node, parent: *Tree.Node) !Result(?*Tree.Node) {
+    var node = n;
+    while (node) |start| {
+        if (std.mem.eql(u8, start.span.slice, ")")) return Ok(node);
+
+        if (std.mem.eql(u8, start.span.slice, "(")) {
+            const result = try parse_brackets_internal(start.next, parent);
+            const end = switch (result) {
+                Tag.Err => return result,
+                Tag.Ok => |payload| payload orelse
+                    return Err(?*Tree.Node, start.span, "missing end bracket"),
+            };
+
+            if (!std.mem.eql(u8, end.span.slice, ")")) return Err(?*Tree.Node, end.span, "bracket mismatch");
+
+            start.span.slice = start.span.slice.ptr[0 .. 1 + @intFromPtr(end.span.slice.ptr) - @intFromPtr(start.span.slice.ptr)];
+
+            start.next = end.next;
+            if (start.next) |next| next.prev = start;
+
+            if (start.next != end) {
+                const head = start.next.?;
+                const last = end.prev.?;
+
+                start.head = head;
+                start.last = last;
+
+                last.next = null;
+                head.prev = null;
+            }
+
+            if (parent.last == end) parent.last = end.prev;
+        }
+
+        node = start.next;
+    }
+    return Ok(node);
+}
+
+fn parse_brackets(tree: *Tree) !Result(void) {
+    const result = try parse_brackets_internal(tree.root().head, tree.root());
+    switch (result) {
+        Tag.Err => |payload| return Err(void, payload.span, payload.message),
+        Tag.Ok => |payload| {
+            if (payload) |node| return Err(void, node.span, "extra end bracket");
+            return Ok({});
+        },
+    }
+}
+
+fn compile(source: Source) !Result(void) {
     var tree = try Tree.init(&source);
     defer tree.deinit();
 
@@ -188,7 +271,7 @@ fn compile(source: Source) !void {
         switch (token(source.text.ptr[i])) {
             Token.Whitespace => {},
             Token.Bracket => {
-                try tree.push_child(Tree.root, Span{
+                try tree.push_child(tree.root(), Span{
                     .source = &source,
                     .slice = source.text.ptr[i..j],
                 });
@@ -198,7 +281,7 @@ fn compile(source: Source) !void {
             },
             Token.Identifier => {
                 while (token(source.text.ptr[j]) == Token.Identifier) j += 1;
-                try tree.push_child(Tree.root, Span{
+                try tree.push_child(tree.root(), Span{
                     .source = &source,
                     .slice = source.text.ptr[i..j],
                 });
@@ -207,10 +290,18 @@ fn compile(source: Source) !void {
         i = j;
     }
 
+    const parse_result = try parse_brackets(&tree);
+    switch (parse_result) {
+        Tag.Ok => {},
+        Tag.Err => return parse_result,
+    }
+
     var out = try Buffer(u8).init();
     defer out.deinit();
-    try format_node(&out, tree, Tree.root, 0);
+    try format_node(&out, tree.root().*, 0);
     print(out.data());
+
+    return Ok({});
 }
 
 /// interface
@@ -225,10 +316,20 @@ fn compile_file(name: []const u8) !void {
 
     file.close();
 
-    try compile(Source{
+    const result = try compile(Source{
         .name = name,
         .text = text.data(),
     });
+    switch (result) {
+        Tag.Ok => {},
+        Tag.Err => |payload| {
+            var out = try Buffer(u8).init();
+            defer out.deinit();
+            try format_err(&out, payload);
+            try format_span(&out, payload.span);
+            print(out.data());
+        },
+    }
 }
 
 pub fn main() !void {
