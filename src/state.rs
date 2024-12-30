@@ -53,13 +53,13 @@ pub struct Node {
     /// Where this node originated
     pub span: Span,
     /// The next sibling of this node.
-    pub next: Option<Index<Node>>,
+    pub next: OptionIndex<Node>,
     /// The previous sibling of this node.
-    pub prev: Option<Index<Node>>,
+    pub prev: OptionIndex<Node>,
     /// The first child of this node.
-    pub head: Option<Index<Node>>,
+    pub head: OptionIndex<Node>,
     /// The last child of this node.
-    pub last: Option<Index<Node>>,
+    pub last: OptionIndex<Node>,
 }
 
 /// The index of the root node.
@@ -75,10 +75,10 @@ impl Node {
         Node {
             tag: TAG_ROOT,
             span: ROOT_SPAN,
-            next: None,
-            prev: None,
-            head: None,
-            last: None,
+            next: OptionIndex::NONE,
+            prev: OptionIndex::NONE,
+            head: OptionIndex::NONE,
+            last: OptionIndex::NONE,
         }
     }
 }
@@ -89,17 +89,17 @@ impl Store<Node> {
         let child = self.push(Node {
             tag,
             span,
-            next: None,
+            next: OptionIndex::NONE,
             prev: self[parent].last,
-            head: None,
-            last: None,
+            head: OptionIndex::NONE,
+            last: OptionIndex::NONE,
         });
-        if let Some(prev) = self[parent].last {
-            self[prev].next = Some(child);
-            self[parent].last = Some(child);
+        if let Some(prev) = self[parent].last.unpack() {
+            self[prev].next = OptionIndex::some(child);
+            self[parent].last = OptionIndex::some(child);
         } else {
-            self[parent].head = Some(child);
-            self[parent].last = Some(child);
+            self[parent].head = OptionIndex::some(child);
+            self[parent].last = OptionIndex::some(child);
         }
         child
     }

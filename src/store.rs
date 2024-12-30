@@ -27,12 +27,72 @@ impl<T> Clone for Index<T> {
 impl<T> Copy for Index<T> {}
 impl<T> Debug for Index<T> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{:?}", self.0)
     }
 }
 impl<T> PartialEq for Index<T> {
     fn eq(&self, other: &Index<T>) -> bool {
         self.0 == other.0
+    }
+}
+
+/// A packed `Option<Index<T>>` that uses `usize::MAX` to represent `None`.
+pub struct OptionIndex<T>(Index<T>);
+
+const _: () = {
+    use std::mem::size_of;
+    assert!(size_of::<OptionIndex<()>>() == size_of::<usize>());
+};
+
+// have to manually implement traits to avoid type restriction on `T`
+impl<T> Clone for OptionIndex<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T> Copy for OptionIndex<T> {}
+impl<T> Debug for OptionIndex<T> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+impl<T> PartialEq for OptionIndex<T> {
+    fn eq(&self, other: &OptionIndex<T>) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> OptionIndex<T> {
+    /// Analog of `Option::None`.
+    pub const NONE: Self = OptionIndex(Index::new(usize::MAX));
+
+    /// Analog of `Option::Some`.
+    /// # Panics
+    /// Will panic if the provided `Index` is `usize::MAX`.
+    #[must_use]
+    pub fn some(x: Index<T>) -> Self {
+        assert_ne!(x.0, usize::MAX);
+        OptionIndex(x)
+    }
+
+    /// Convert from an unpacked `Option` to a packed `OptionIndex`.
+    #[must_use]
+    pub fn pack(x: Option<Index<T>>) -> Self {
+        if let Some(x) = x {
+            Self::some(x)
+        } else {
+            Self::NONE
+        }
+    }
+
+    /// Convert from a packed `OptionIndex` to an unpacked `Option`.
+    #[must_use]
+    pub fn unpack(&self) -> Option<Index<T>> {
+        if self.0 == Self::NONE.0 {
+            None
+        } else {
+            Some(self.0)
+        }
     }
 }
 

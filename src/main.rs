@@ -104,7 +104,7 @@ fn run(source: Source) -> Result<()> {
     }
 
     let mut child = state.nodes[ROOT].head;
-    while let Some(i) = child {
+    while let Some(i) = child.unpack() {
         let span = state.nodes[i].span;
         println!("{}\t{:?}", span.location(&state), span.string(&state));
         child = state.nodes[i].next;
