@@ -16,12 +16,12 @@ pub type Result<T> = std::result::Result<T, String>;
 /// and format arguments.
 #[macro_export]
 macro_rules! err {
-    ($state:expr, $node:expr, $($fmt:tt)*) => {
+    ($state:expr, $span:expr, $($fmt:tt)*) => {
         Err(format!(
             "error at {}: {}\n{}",
-            node.span.location(state),
+            $span.location($state),
             format!($($fmt)*),
-            node.span.string(state),
+            $span.string($state),
         ))
     };
 }
@@ -69,6 +69,15 @@ impl Span {
         &state.sources[self.source].text[self.lo..self.hi]
     }
 
+    /// Assert that the snippet is a single `char` and return it.
+    /// # Panics
+    /// Will panic if this `Span` contains more or less than 1 `char`.
+    #[must_use]
+    pub fn single_char(self, state: &State) -> char {
+        assert_eq!(self.string(state).chars().count(), 1);
+        self.string(state).chars().next().unwrap()
+    }
+
     /// Get the location of the snippet.
     #[must_use]
     pub fn location(&self, state: &State) -> String {
@@ -97,16 +106,76 @@ fn run(source: Source) -> Result<()> {
 
     let los = text.char_indices().map(|(i, _)| i);
     let his = los.clone().skip(1).chain([text.len()]);
+    let spans = los.zip(his).map(|(lo, hi)| Span { source, lo, hi });
+    let mut spans = spans.peekable();
 
-    for (lo, hi) in los.zip(his) {
-        let span = Span { source, lo, hi };
-        state.nodes.push_child(ROOT, TAG_UNKNOWN, span);
+    while let Some(mut span) = spans.next() {
+        assert_eq!(span.string(&state).chars().count(), 1);
+        let tag = match span.single_char(&state) {
+            c if c.is_whitespace() => continue,
+            '#' => {
+                while let Some(s) = spans.peek() {
+                    if s.single_char(&state) == '\n' {
+                        break;
+                    }
+                    spans.next();
+                }
+                continue;
+            }
+            '(' => Tag::Opener(")"),
+            '{' => Tag::Opener("}"),
+            '[' => Tag::Opener("]"),
+            ')' | '}' | ']' => Tag::Closer,
+            '"' => {
+                let mut in_escape = false;
+                let mut string = String::new();
+                loop {
+                    let Some(s) = spans.next() else {
+                        return err!(&state, span, "no matching end quote");
+                    };
+                    if in_escape {
+                        let c = match s.single_char(&state) {
+                            '"' => '"',
+                            '\\' => '\\',
+                            'n' => '\n',
+                            't' => '\t',
+                            _ => return err!(&state, s, "unknown escape character"),
+                        };
+                        string.push(c);
+                        in_escape = false;
+                    } else {
+                        match s.single_char(&state) {
+                            '"' => {
+                                span.hi = s.hi;
+                                break;
+                            }
+                            '\\' => in_escape = true,
+                            c => string.push(c),
+                        }
+                    }
+                }
+                Tag::String(string)
+            }
+            _ => {
+                while let Some(s) = spans.peek() {
+                    let c = s.single_char(&state);
+                    let is_special = matches!(c, '#' | '(' | ')' | '{' | '}' | '[' | ']' | '"');
+                    if c.is_whitespace() || is_special {
+                        break;
+                    }
+                    span.hi = s.hi;
+                    spans.next();
+                }
+                Tag::Identifier
+            }
+        };
+        state.nodes.push_child(ROOT, tag, span);
     }
 
     let mut child = state.nodes[ROOT].head;
     while let Some(i) = child.unpack() {
         let span = state.nodes[i].span;
-        println!("{}\t{:?}", span.location(&state), span.string(&state));
+        println!("{}\t{}", span.location(&state), span.string(&state));
         child = state.nodes[i].next;
     }
 
