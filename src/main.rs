@@ -55,7 +55,7 @@ pub struct Source {
 #[derive(Clone, Copy)]
 pub struct Span {
     /// Which source file this span refers to.
-    pub source: Index<Source>,
+    pub source: usize,
     /// The byte index of the first character in the snippet.
     pub lo: usize,
     /// The byte index after the last character in the snippet.

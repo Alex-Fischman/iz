@@ -28,20 +28,20 @@ pub struct Node {
     /// Where this node originated
     pub span: Span,
     /// The next sibling of this node.
-    pub next: OptionIndex<Node>,
+    pub next: OptionIndex,
     /// The previous sibling of this node.
-    pub prev: OptionIndex<Node>,
+    pub prev: OptionIndex,
     /// The first child of this node.
-    pub head: OptionIndex<Node>,
+    pub head: OptionIndex,
     /// The last child of this node.
-    pub last: OptionIndex<Node>,
+    pub last: OptionIndex,
 }
 
 /// The index of the root node.
-pub const ROOT: Index<Node> = Index::new(0);
+pub const ROOT: usize = 0;
 
 const ROOT_SPAN: Span = Span {
-    source: Index::new(0),
+    source: 0,
     lo: 0,
     hi: 0,
 };
@@ -60,7 +60,7 @@ impl Node {
 
 impl Store<Node> {
     /// Create a new node with the given data as a child of some parent node.
-    pub fn push_child(&mut self, parent: Index<Node>, tag: Tag, span: Span) -> Index<Node> {
+    pub fn push_child(&mut self, parent: usize, tag: Tag, span: Span) -> usize {
         let child = self.push(Node {
             tag,
             span,
