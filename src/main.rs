@@ -98,7 +98,6 @@ impl Span {
     }
 }
 
-#[allow(clippy::unnecessary_wraps)]
 fn run(source: Source) -> Result<()> {
     let mut state = State::default();
     tokenize(&mut state, source, ROOT)?;
