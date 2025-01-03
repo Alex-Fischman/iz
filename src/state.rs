@@ -6,6 +6,8 @@ pub struct State {
     pub sources: Vec<Source>,
     /// The tree that represents the program.
     pub nodes: Vec<Node>,
+    /// The span for each node in the program.
+    pub spans: Vec<Span>,
 }
 
 /// The index of the root node.
@@ -17,15 +19,15 @@ impl Default for State {
             sources: Vec::new(),
             nodes: vec![Node {
                 tag: Tag::Root,
-                span: Span {
-                    source: usize::MAX,
-                    lo: usize::MAX,
-                    hi: usize::MAX,
-                },
                 next: NodeRef::NONE,
                 prev: NodeRef::NONE,
                 head: NodeRef::NONE,
                 last: NodeRef::NONE,
+            }],
+            spans: vec![Span {
+                source: usize::MAX,
+                lo: usize::MAX,
+                hi: usize::MAX,
             }],
         }
     }
@@ -37,8 +39,6 @@ impl Default for State {
 pub struct Node {
     /// The type of this node.
     pub tag: Tag,
-    /// Where this node originated
-    pub span: Span,
     /// The next sibling of this node.
     pub next: NodeRef,
     /// The previous sibling of this node.
@@ -94,12 +94,12 @@ impl State {
         let child = self.nodes.len();
         self.nodes.push(Node {
             tag,
-            span,
             next: NodeRef::NONE,
             prev: self.nodes[parent].last,
             head: NodeRef::NONE,
             last: NodeRef::NONE,
         });
+        self.spans.push(span);
 
         if let Some(prev) = self.nodes[parent].last.unpack() {
             self.nodes[prev].next = NodeRef::some(child);
