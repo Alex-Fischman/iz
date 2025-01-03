@@ -40,16 +40,15 @@ pub struct Node {
 /// The index of the root node.
 pub const ROOT: usize = 0;
 
-const ROOT_SPAN: Span = Span {
-    source: 0,
-    lo: 0,
-    hi: 0,
-};
 impl Node {
     fn root() -> Self {
         Node {
             tag: Tag::Root,
-            span: ROOT_SPAN,
+            span: Span {
+                source: 0,
+                lo: 0,
+                hi: 0,
+            },
             next: OptionIndex::NONE,
             prev: OptionIndex::NONE,
             head: OptionIndex::NONE,
@@ -58,23 +57,23 @@ impl Node {
     }
 }
 
-impl Store<Node> {
+impl State {
     /// Create a new node with the given data as a child of some parent node.
     pub fn push_child(&mut self, parent: usize, tag: Tag, span: Span) -> usize {
-        let child = self.push(Node {
+        let child = self.nodes.push(Node {
             tag,
             span,
             next: OptionIndex::NONE,
-            prev: self[parent].last,
+            prev: self.nodes[parent].last,
             head: OptionIndex::NONE,
             last: OptionIndex::NONE,
         });
-        if let Some(prev) = self[parent].last.unpack() {
-            self[prev].next = OptionIndex::some(child);
-            self[parent].last = OptionIndex::some(child);
+        if let Some(prev) = self.nodes[parent].last.unpack() {
+            self.nodes[prev].next = OptionIndex::some(child);
+            self.nodes[parent].last = OptionIndex::some(child);
         } else {
-            self[parent].head = OptionIndex::some(child);
-            self[parent].last = OptionIndex::some(child);
+            self.nodes[parent].head = OptionIndex::some(child);
+            self.nodes[parent].last = OptionIndex::some(child);
         }
         child
     }
