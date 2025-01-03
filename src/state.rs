@@ -3,19 +3,31 @@ use crate::*;
 /// The state of the compiler.
 pub struct State {
     /// The source files that are being processed.
-    pub sources: Store<Source>,
+    pub sources: Vec<Source>,
     /// The tree that represents the program.
-    pub nodes: Store<Node>,
+    pub nodes: Vec<Node>,
 }
+
+/// The index of the root node.
+pub const ROOT: usize = 0;
 
 impl Default for State {
     fn default() -> Self {
-        let sources = Store::default();
-
-        let mut nodes = Store::default();
-        assert_eq!(ROOT, nodes.push(Node::root()));
-
-        State { sources, nodes }
+        State {
+            sources: Vec::new(),
+            nodes: vec![Node {
+                tag: Tag::Root,
+                span: Span {
+                    source: usize::MAX,
+                    lo: usize::MAX,
+                    hi: usize::MAX,
+                },
+                next: NodeRef::NONE,
+                prev: NodeRef::NONE,
+                head: NodeRef::NONE,
+                last: NodeRef::NONE,
+            }],
+        }
     }
 }
 
@@ -28,31 +40,50 @@ pub struct Node {
     /// Where this node originated
     pub span: Span,
     /// The next sibling of this node.
-    pub next: OptionIndex,
+    pub next: NodeRef,
     /// The previous sibling of this node.
-    pub prev: OptionIndex,
+    pub prev: NodeRef,
     /// The first child of this node.
-    pub head: OptionIndex,
+    pub head: NodeRef,
     /// The last child of this node.
-    pub last: OptionIndex,
+    pub last: NodeRef,
 }
 
-/// The index of the root node.
-pub const ROOT: usize = 0;
+/// A representation of an `Option<NonZeroUsize>`.
+/// This takes advantage of the fact that nodes never point to the root.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeRef(usize);
 
-impl Node {
-    fn root() -> Self {
-        Node {
-            tag: Tag::Root,
-            span: Span {
-                source: 0,
-                lo: 0,
-                hi: 0,
-            },
-            next: OptionIndex::NONE,
-            prev: OptionIndex::NONE,
-            head: OptionIndex::NONE,
-            last: OptionIndex::NONE,
+impl NodeRef {
+    /// Analog of `Option::None`.
+    pub const NONE: Self = NodeRef(ROOT);
+
+    /// Analog of `Option::Some`.
+    /// # Panics
+    /// Will panic if the provided `Index` is `ROOT`.
+    #[must_use]
+    pub fn some(x: usize) -> Self {
+        assert_ne!(x, ROOT);
+        NodeRef(x)
+    }
+
+    /// Convert from an unpacked `Option` to a packed `OptionIndex`.
+    #[must_use]
+    pub fn pack(x: Option<usize>) -> Self {
+        if let Some(x) = x {
+            Self::some(x)
+        } else {
+            Self::NONE
+        }
+    }
+
+    /// Convert from a packed `OptionIndex` to an unpacked `Option`.
+    #[must_use]
+    pub fn unpack(self) -> Option<usize> {
+        if self == Self::NONE {
+            None
+        } else {
+            Some(self.0)
         }
     }
 }
@@ -60,21 +91,24 @@ impl Node {
 impl State {
     /// Create a new node with the given data as a child of some parent node.
     pub fn push_child(&mut self, parent: usize, tag: Tag, span: Span) -> usize {
-        let child = self.nodes.push(Node {
+        let child = self.nodes.len();
+        self.nodes.push(Node {
             tag,
             span,
-            next: OptionIndex::NONE,
+            next: NodeRef::NONE,
             prev: self.nodes[parent].last,
-            head: OptionIndex::NONE,
-            last: OptionIndex::NONE,
+            head: NodeRef::NONE,
+            last: NodeRef::NONE,
         });
+
         if let Some(prev) = self.nodes[parent].last.unpack() {
-            self.nodes[prev].next = OptionIndex::some(child);
-            self.nodes[parent].last = OptionIndex::some(child);
+            self.nodes[prev].next = NodeRef::some(child);
+            self.nodes[parent].last = NodeRef::some(child);
         } else {
-            self.nodes[parent].head = OptionIndex::some(child);
-            self.nodes[parent].last = OptionIndex::some(child);
+            self.nodes[parent].head = NodeRef::some(child);
+            self.nodes[parent].last = NodeRef::some(child);
         }
+
         child
     }
 }

@@ -5,9 +5,9 @@
 pub use std::fmt::{Debug, Display, Formatter};
 
 mod state;
-mod store;
+mod tokenize;
 pub use state::*;
-pub use store::*;
+pub use tokenize::*;
 
 /// Global `Result` alias for ease of use. See the `err!` macro.
 pub type Result<T> = std::result::Result<T, String>;
@@ -101,76 +101,7 @@ impl Span {
 #[allow(clippy::unnecessary_wraps)]
 fn run(source: Source) -> Result<()> {
     let mut state = State::default();
-    let source = state.sources.push(source);
-    let text = &state.sources[source].text;
-
-    let los = text.char_indices().map(|(i, _)| i);
-    let his = los.clone().skip(1).chain([text.len()]);
-    let spans = los.zip(his).map(|(lo, hi)| Span { source, lo, hi });
-    let mut spans = spans.peekable();
-
-    while let Some(mut span) = spans.next() {
-        assert_eq!(span.string(&state).chars().count(), 1);
-        let tag = match span.single_char(&state) {
-            c if c.is_whitespace() => continue,
-            '#' => {
-                while let Some(s) = spans.peek() {
-                    if s.single_char(&state) == '\n' {
-                        break;
-                    }
-                    spans.next();
-                }
-                continue;
-            }
-            '(' => Tag::Opener(")"),
-            '{' => Tag::Opener("}"),
-            '[' => Tag::Opener("]"),
-            ')' | '}' | ']' => Tag::Closer,
-            '"' => {
-                let mut in_escape = false;
-                let mut string = String::new();
-                loop {
-                    let Some(s) = spans.next() else {
-                        return err!(&state, span, "no matching end quote");
-                    };
-                    if in_escape {
-                        let c = match s.single_char(&state) {
-                            '"' => '"',
-                            '\\' => '\\',
-                            'n' => '\n',
-                            't' => '\t',
-                            _ => return err!(&state, s, "unknown escape character"),
-                        };
-                        string.push(c);
-                        in_escape = false;
-                    } else {
-                        match s.single_char(&state) {
-                            '"' => {
-                                span.hi = s.hi;
-                                break;
-                            }
-                            '\\' => in_escape = true,
-                            c => string.push(c),
-                        }
-                    }
-                }
-                Tag::String(string)
-            }
-            _ => {
-                while let Some(s) = spans.peek() {
-                    let c = s.single_char(&state);
-                    let is_special = matches!(c, '#' | '(' | ')' | '{' | '}' | '[' | ']' | '"');
-                    if c.is_whitespace() || is_special {
-                        break;
-                    }
-                    span.hi = s.hi;
-                    spans.next();
-                }
-                Tag::Identifier
-            }
-        };
-        state.nodes.push_child(ROOT, tag, span);
-    }
+    tokenize(&mut state, source, ROOT)?;
 
     let mut child = state.nodes[ROOT].head;
     while let Some(i) = child.unpack() {
