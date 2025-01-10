@@ -31,6 +31,11 @@ impl Spans {
 /// the given parent node.
 #[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
+    let tag_opener = state.push_tag::<&str>("Opener");
+    let tag_closer = state.push_tag::<()>("Closer");
+    let tag_string = state.push_tag::<String>("String");
+    let tag_identifier = state.push_tag::<()>("Identifier");
+
     let source = state.sources.len();
     state.sources.push(src);
 
@@ -38,7 +43,7 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
 
     while let Some(mut span) = spans.next(state) {
         assert_eq!(span.string(state).chars().count(), 1);
-        let tag = match span.single_char(state) {
+        _ = match span.single_char(state) {
             c if c.is_whitespace() => continue,
             '#' => {
                 while let Some(s) = spans.next(state) {
@@ -48,10 +53,10 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                 }
                 continue;
             }
-            '(' => Tag::Opener(")"),
-            '{' => Tag::Opener("}"),
-            '[' => Tag::Opener("]"),
-            ')' | '}' | ']' => Tag::Closer,
+            '(' => state.push_child(parent, tag_opener, span, Box::new(")")),
+            '{' => state.push_child(parent, tag_opener, span, Box::new("}")),
+            '[' => state.push_child(parent, tag_opener, span, Box::new("]")),
+            ')' | '}' | ']' => state.push_child(parent, tag_closer, span, Box::new(())),
             '"' => {
                 let mut in_escape = false;
                 let mut string = String::new();
@@ -80,7 +85,7 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                         }
                     }
                 }
-                Tag::String(string)
+                state.push_child(parent, tag_string, span, Box::new(string))
             }
             _ => {
                 while let Some(s) = spans.peek(state) {
@@ -92,10 +97,9 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                     span.hi = s.hi;
                     spans.next(state);
                 }
-                Tag::Identifier
+                state.push_child(parent, tag_identifier, span, Box::new(()))
             }
-        };
-        state.push_child(parent, tag, span);
+        }
     }
 
     Ok(())

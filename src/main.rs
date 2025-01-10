@@ -2,6 +2,7 @@
 
 #![deny(clippy::all, clippy::pedantic, missing_docs)]
 
+pub use std::collections::HashMap;
 pub use std::fmt::{Debug, Display, Formatter};
 
 mod state;
@@ -104,7 +105,7 @@ fn run(source: Source) -> Result<()> {
 
     let mut child = state.nodes[ROOT].head;
     while let Some(i) = child.unpack() {
-        let span = state.spans[i];
+        let span = state.nodes[i].span;
         println!("{}\t{}", span.location(&state), span.string(&state));
         child = state.nodes[i].next;
     }

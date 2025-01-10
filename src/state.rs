@@ -1,4 +1,5 @@
 use crate::*;
+use std::any::{Any, TypeId};
 
 /// The state of the compiler.
 pub struct State {
@@ -6,8 +7,11 @@ pub struct State {
     pub sources: Vec<Source>,
     /// The tree that represents the program.
     pub nodes: Vec<Node>,
-    /// The span for each node in the program.
-    pub spans: Vec<Span>,
+    /// The map from tag names to tags.
+    pub tags: HashMap<String, usize>,
+    /// The map from tags to the type of the data
+    /// stored by nodes with that tag.
+    pub types: Vec<TypeId>,
 }
 
 /// The index of the root node.
@@ -15,21 +19,42 @@ pub const ROOT: usize = 0;
 
 impl Default for State {
     fn default() -> Self {
-        State {
-            sources: Vec::new(),
-            nodes: vec![Node {
-                tag: Tag::Root,
-                next: NodeRef::NONE,
-                prev: NodeRef::NONE,
-                head: NodeRef::NONE,
-                last: NodeRef::NONE,
-            }],
-            spans: vec![Span {
+        let mut out = State {
+            sources: Vec::default(),
+            nodes: Vec::default(),
+            tags: HashMap::default(),
+            types: Vec::default(),
+        };
+
+        let root = out.push_tag::<()>("Root");
+        out.nodes.push(Node {
+            tag: root,
+            span: Span {
                 source: usize::MAX,
                 lo: usize::MAX,
                 hi: usize::MAX,
-            }],
-        }
+            },
+            data: Box::new(()),
+            next: NodeRef::NONE,
+            prev: NodeRef::NONE,
+            head: NodeRef::NONE,
+            last: NodeRef::NONE,
+        });
+
+        out
+    }
+}
+
+impl State {
+    /// Create a new tag.
+    /// # Panics
+    /// Will panic if the name is already in use.
+    pub fn push_tag<T: 'static>(&mut self, name: &str) -> usize {
+        let tag = self.tags.len();
+        let old = self.tags.insert(name.to_owned(), tag);
+        assert_eq!(old, None);
+        self.types.push(TypeId::of::<T>());
+        tag
     }
 }
 
@@ -38,7 +63,11 @@ impl Default for State {
 /// INVARIANT: each node except the root is always referred to twice.
 pub struct Node {
     /// The type of this node.
-    pub tag: Tag,
+    pub tag: usize,
+    /// The span for this node.
+    pub span: Span,
+    /// The data for this node.
+    pub data: Box<dyn Any>,
     /// The next sibling of this node.
     pub next: NodeRef,
     /// The previous sibling of this node.
@@ -89,17 +118,24 @@ impl NodeRef {
 }
 
 impl State {
-    /// Create a new node with the given data as a child of some parent node.
-    pub fn push_child(&mut self, parent: usize, tag: Tag, span: Span) -> usize {
+    /// Create a new node as a child of some parent node.
+    pub fn push_child(
+        &mut self,
+        parent: usize,
+        tag: usize,
+        span: Span,
+        data: Box<dyn Any>,
+    ) -> usize {
         let child = self.nodes.len();
         self.nodes.push(Node {
             tag,
+            span,
+            data,
             next: NodeRef::NONE,
             prev: self.nodes[parent].last,
             head: NodeRef::NONE,
             last: NodeRef::NONE,
         });
-        self.spans.push(span);
 
         if let Some(prev) = self.nodes[parent].last.unpack() {
             self.nodes[prev].next = NodeRef::some(child);
@@ -111,20 +147,4 @@ impl State {
 
         child
     }
-}
-
-/// The type of a node.
-pub enum Tag {
-    /// The root node.
-    Root,
-    /// An open bracket, annotated with the closing string.
-    /// For example, `"{" : Opener("}")`.
-    Opener(&'static str),
-    /// A close bracket.
-    Closer,
-    /// A string, with its escaped contents.
-    /// For example, `"\\" : String("\")`
-    String(String),
-    /// An identifer.
-    Identifier,
 }
