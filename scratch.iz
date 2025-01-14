@@ -2,11 +2,3 @@
 ys = (map f xs)
 
 ((()(())))()
-
-# this is a comment
-
-asdf
-
-"string \\ \n \" () {}"
-
-'a' ' ' '\n' 'p'

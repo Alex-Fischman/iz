@@ -103,10 +103,10 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
             }
             _ => {
                 while let Some(s) = spans.peek(state) {
-                    let c = s.single_char(state);
-                    let is_special = matches!(c, '#' | '(' | ')' | '{' | '}' | '[' | ']' | '"');
-                    if c.is_whitespace() || is_special {
-                        break;
+                    match s.single_char(state) {
+                        c if c.is_whitespace() => break,
+                        '#' | '(' | ')' | '{' | '}' | '[' | ']' | '"' | '\'' => break,
+                        _ => {}
                     }
                     span.hi = s.hi;
                     spans.next(state);
@@ -127,4 +127,59 @@ fn escape_char(s: Span, state: &State) -> Result<char> {
         't' => '\t',
         _ => return err!(state, s, "unknown escape character"),
     })
+}
+
+#[test]
+fn test() -> Result<()> {
+    fn run(text: &str) -> Result<Vec<String>> {
+        let name = String::new();
+        let text = text.to_owned();
+        let source = Source { name, text };
+        let mut state = State::default();
+
+        tokenize(&mut state, source, ROOT)?;
+
+        let mut actual = Vec::new();
+        let mut child = state.nodes[ROOT].head;
+        while let Some(i) = child.unpack() {
+            actual.push(state.nodes[i].span.string(&state).to_owned());
+            child = state.nodes[i].next;
+        }
+
+        Ok(actual)
+    }
+
+    assert_eq!(run("1 + (2 + 3)")?, ["1", "+", "(", "2", "+", "3", ")"]);
+    assert_eq!(
+        run("ys = (map f xs)")?,
+        ["ys", "=", "(", "map", "f", "xs", ")"]
+    );
+    assert_eq!(run("1+2")?, ["1+2"]);
+    assert_eq!(run("a(s)df")?, ["a", "(", "s", ")", "df"]);
+    assert_eq!(run("1\n23\t456")?, ["1", "23", "456"]);
+    assert_eq!(run("#a\nb#")?, ["b"]);
+    assert_eq!(run("'#'")?, ["'#'"]);
+    assert_eq!(run("\'a\'b\"c d\"e")?, ["\'a\'", "b", "\"c d\"", "e"]);
+    assert_eq!(
+        run(" \" # this is a comment \n \" ")?,
+        ["\" # this is a comment \n \""]
+    );
+    assert_eq!(
+        run("'").unwrap_err(),
+        "error at :1:1: no matching end quote\n'"
+    );
+    assert_eq!(
+        run("''").unwrap_err(),
+        "error at :1:1: empty char literal\n''"
+    );
+    assert_eq!(
+        run("'a").unwrap_err(),
+        "error at :1:1: no matching end quote\n'"
+    );
+    assert_eq!(
+        run("'a ").unwrap_err(),
+        "error at :1:1: no matching end quote\n'"
+    );
+
+    Ok(())
 }
