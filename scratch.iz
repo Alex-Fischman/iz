@@ -8,3 +8,5 @@ ys = (map f xs)
 asdf
 
 "string \\ \n \" () {}"
+
+'a' ' ' '\n' 'p'

@@ -31,10 +31,11 @@ impl Spans {
 /// the given parent node.
 #[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
-    let tag_opener = state.push_tag::<&str>("Opener");
-    let tag_closer = state.push_tag::<()>("Closer");
-    let tag_string = state.push_tag::<String>("String");
-    let tag_identifier = state.push_tag::<()>("Identifier");
+    let tag_opener = state.push_tag::<&str>("opener");
+    let tag_closer = state.push_tag::<()>("closer");
+    let tag_string = state.push_tag::<String>("string");
+    let tag_char = state.push_tag::<char>("char");
+    let tag_identifier = state.push_tag::<()>("identifier");
 
     let source = state.sources.len();
     state.sources.push(src);
@@ -65,14 +66,7 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                         return err!(state, span, "no matching end quote");
                     };
                     if in_escape {
-                        let c = match s.single_char(state) {
-                            '"' => '"',
-                            '\\' => '\\',
-                            'n' => '\n',
-                            't' => '\t',
-                            _ => return err!(&state, s, "unknown escape character"),
-                        };
-                        string.push(c);
+                        string.push(escape_char(s, state)?);
                         in_escape = false;
                     } else {
                         match s.single_char(state) {
@@ -86,6 +80,26 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                     }
                 }
                 state.push_child(parent, tag_string, span, Box::new(string))
+            }
+            '\'' => {
+                let e = err!(state, span, "no matching end quote");
+                let Some(s) = spans.next(state) else { return e };
+                span.hi = s.hi;
+
+                let c = match s.single_char(state) {
+                    '\'' => return err!(state, span, "empty char literal"),
+                    '\\' => {
+                        let Some(s) = spans.next(state) else { return e };
+                        escape_char(s, state)?
+                    }
+                    c => c,
+                };
+
+                let Some(s) = spans.next(state) else { return e };
+                let '\'' = s.single_char(state) else { return e };
+                span.hi = s.hi;
+
+                state.push_child(parent, tag_char, span, Box::new(c))
             }
             _ => {
                 while let Some(s) = spans.peek(state) {
@@ -103,4 +117,14 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn escape_char(s: Span, state: &State) -> Result<char> {
+    Ok(match s.single_char(state) {
+        '"' => '"',
+        '\\' => '\\',
+        'n' => '\n',
+        't' => '\t',
+        _ => return err!(state, s, "unknown escape character"),
+    })
 }
