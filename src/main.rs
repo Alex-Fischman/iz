@@ -104,9 +104,7 @@ impl Span {
 fn run(source: Source) -> Result<()> {
     let mut state = State::default();
     tokenize(&mut state, source, ROOT)?;
-
-    let head = state.nodes[ROOT].head;
-    bracket(&mut state, head)?;
+    bracket(&mut state, ROOT)?;
 
     let mut child = state.nodes[ROOT].head;
     while let Some(i) = child.unpack() {
