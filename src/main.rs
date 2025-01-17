@@ -105,13 +105,6 @@ fn run(source: Source) -> Result<()> {
     let mut state = State::default();
     tokenize(&mut state, source, ROOT)?;
     bracket(&mut state, ROOT)?;
-
-    let mut child = state.nodes[ROOT].head;
-    while let Some(i) = child.unpack() {
-        let span = state.nodes[i].span;
-        println!("{}\t{}", span.location(&state), span.string(&state));
-        child = state.nodes[i].next;
-    }
-
+    println!("{state:?}");
     Ok(())
 }

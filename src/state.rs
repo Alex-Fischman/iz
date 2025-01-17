@@ -156,3 +156,27 @@ impl State {
         child
     }
 }
+
+impl Debug for State {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        self.fmt(f, ROOT, 0)
+    }
+}
+
+impl State {
+    fn fmt(&self, f: &mut Formatter, parent: usize, depth: usize) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{}{}\t{}",
+            "\t".repeat(depth),
+            self.nodes[parent].span.location(self),
+            self.nodes[parent].span.string(self)
+        )?;
+        let mut child = self.nodes[parent].head;
+        while let Some(i) = child.unpack() {
+            self.fmt(f, i, depth + 1)?;
+            child = self.nodes[i].next;
+        }
+        Ok(())
+    }
+}
