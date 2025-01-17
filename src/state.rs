@@ -26,13 +26,13 @@ impl Default for State {
             types: Vec::default(),
         };
 
-        let root = out.push_tag::<()>("Root");
+        let root = out.push_tag::<()>("root").unwrap();
         out.nodes.push(Node {
             tag: root,
             span: Span {
-                source: usize::MAX,
-                lo: usize::MAX,
-                hi: usize::MAX,
+                source: 0,
+                lo: 0,
+                hi: 0,
             },
             data: Box::new(()),
             next: NodeRef::NONE,
@@ -47,14 +47,22 @@ impl Default for State {
 
 impl State {
     /// Create a new tag.
-    /// # Panics
-    /// Will panic if the name is already in use.
-    pub fn push_tag<T: 'static>(&mut self, name: &str) -> usize {
+    /// # Errors
+    /// Will error if the name is already in use.
+    pub fn push_tag<T: 'static>(&mut self, name: &str) -> Result<usize> {
         let tag = self.tags.len();
-        let old = self.tags.insert(name.to_owned(), tag);
-        assert_eq!(old, None);
+        let None = self.tags.insert(name.to_owned(), tag) else {
+            return Err(format!("tag {name} already exists"));
+        };
         self.types.push(TypeId::of::<T>());
-        tag
+        Ok(tag)
+    }
+
+    /// Look up an existing tag.
+    /// # Errors
+    /// Will error if the name does not exist.
+    pub fn get_tag(&self, name: &str) -> Result<usize> {
+        self.tags.get(name).ok_or(format!("no tag {name}")).copied()
     }
 }
 
@@ -78,21 +86,21 @@ pub struct Node {
     pub last: NodeRef,
 }
 
-/// A representation of an `Option<NonZeroUsize>`.
-/// This takes advantage of the fact that nodes never point to the root.
+/// A smaller representation of an `Option<usize>`.
+/// This uses `usize::MAX` as a niche for `Option::None`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeRef(usize);
 
 impl NodeRef {
     /// Analog of `Option::None`.
-    pub const NONE: Self = NodeRef(ROOT);
+    pub const NONE: Self = NodeRef(usize::MAX);
 
     /// Analog of `Option::Some`.
     /// # Panics
-    /// Will panic if the provided `Index` is `ROOT`.
+    /// Will panic if the provided `Index` is `usize::MAX`.
     #[must_use]
     pub fn some(x: usize) -> Self {
-        assert_ne!(x, ROOT);
+        assert_ne!(x, usize::MAX);
         NodeRef(x)
     }
 

@@ -31,11 +31,11 @@ impl Spans {
 /// the given parent node.
 #[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
-    let tag_opener = state.push_tag::<&str>("opener");
-    let tag_closer = state.push_tag::<()>("closer");
-    let tag_string = state.push_tag::<String>("string");
-    let tag_char = state.push_tag::<char>("char");
-    let tag_identifier = state.push_tag::<()>("identifier");
+    let tag_opener = state.push_tag::<&str>("opener")?;
+    let tag_closer = state.push_tag::<()>("closer")?;
+    let tag_string = state.push_tag::<String>("string")?;
+    let tag_char = state.push_tag::<char>("char")?;
+    let tag_identifier = state.push_tag::<()>("identifier")?;
 
     let source = state.sources.len();
     state.sources.push(src);
