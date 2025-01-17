@@ -4,6 +4,7 @@
 
 pub use std::collections::HashMap;
 pub use std::fmt::{Debug, Display, Formatter};
+use std::process::ExitCode;
 
 mod bracket;
 mod state;
@@ -29,21 +30,20 @@ macro_rules! err {
     };
 }
 
-fn main() {
-    std::process::exit(match cmd() {
-        Ok(()) => 0,
+fn main() -> ExitCode {
+    fn main() -> Result<()> {
+        let args: Vec<_> = std::env::args().collect();
+        let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
+        let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
+        run(Source { name, text })
+    }
+    match main() {
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");
-            1
+            ExitCode::FAILURE
         }
-    })
-}
-
-fn cmd() -> Result<()> {
-    let args = std::env::args().collect::<Vec<String>>();
-    let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
-    let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
-    run(Source { name, text })
+    }
 }
 
 /// Represents a file containing source code.
@@ -105,6 +105,6 @@ fn run(source: Source) -> Result<()> {
     let mut state = State::default();
     tokenize(&mut state, source, ROOT)?;
     bracket(&mut state, ROOT)?;
-    println!("{state:?}");
+    print!("{state:?}");
     Ok(())
 }
