@@ -26,9 +26,9 @@ impl Default for State {
             types: Vec::default(),
         };
 
-        let root = out.push_tag::<()>("root").unwrap();
+        let root_tag = out.push_tag::<()>("root").unwrap();
         out.nodes.push(Node {
-            tag: root,
+            tag: root_tag,
             span: Span {
                 source: 0,
                 lo: 0,

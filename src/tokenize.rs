@@ -31,11 +31,11 @@ impl Spans {
 /// the given parent node.
 #[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
-    let tag_opener = state.push_tag::<&str>("opener")?;
-    let tag_closer = state.push_tag::<()>("closer")?;
-    let tag_string = state.push_tag::<String>("string")?;
-    let tag_char = state.push_tag::<char>("char")?;
-    let tag_identifier = state.push_tag::<()>("identifier")?;
+    let opener_tag = state.push_tag::<&str>("opener")?;
+    let closer_tag = state.push_tag::<()>("closer")?;
+    let string_tag = state.push_tag::<String>("string")?;
+    let char_tag = state.push_tag::<char>("char")?;
+    let identifier_tag = state.push_tag::<()>("identifier")?;
 
     let source = state.sources.len();
     state.sources.push(src);
@@ -54,10 +54,10 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                 }
                 continue;
             }
-            '(' => state.push_child(parent, tag_opener, span, Box::new(")")),
-            '{' => state.push_child(parent, tag_opener, span, Box::new("}")),
-            '[' => state.push_child(parent, tag_opener, span, Box::new("]")),
-            ')' | '}' | ']' => state.push_child(parent, tag_closer, span, Box::new(())),
+            '(' => state.push_child(parent, opener_tag, span, Box::new(")")),
+            '{' => state.push_child(parent, opener_tag, span, Box::new("}")),
+            '[' => state.push_child(parent, opener_tag, span, Box::new("]")),
+            ')' | '}' | ']' => state.push_child(parent, closer_tag, span, Box::new(())),
             '"' => {
                 let mut in_escape = false;
                 let mut string = String::new();
@@ -79,7 +79,7 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                         }
                     }
                 }
-                state.push_child(parent, tag_string, span, Box::new(string))
+                state.push_child(parent, string_tag, span, Box::new(string))
             }
             '\'' => {
                 let e = err!(state, span, "no matching end quote");
@@ -99,7 +99,7 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                 let '\'' = s.single_char(state) else { return e };
                 span.hi = s.hi;
 
-                state.push_child(parent, tag_char, span, Box::new(c))
+                state.push_child(parent, char_tag, span, Box::new(c))
             }
             _ => {
                 while let Some(s) = spans.peek(state) {
@@ -111,7 +111,7 @@ pub fn tokenize(state: &mut State, src: Source, parent: usize) -> Result<()> {
                     span.hi = s.hi;
                     spans.next(state);
                 }
-                state.push_child(parent, tag_identifier, span, Box::new(()))
+                state.push_child(parent, identifier_tag, span, Box::new(()))
             }
         }
     }
