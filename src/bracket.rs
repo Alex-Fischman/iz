@@ -129,6 +129,7 @@ fn test() -> Result<()> {
     assert_eq!(run("a (b c) d")?, tree!(a (b c) d));
     assert_eq!(run("(y eq (map f xs))")?, tree!((y eq (map f xs))));
     assert_eq!(run("({[]}[()])")?, tree!(({ [] }[()])));
+    assert_eq!(run("([()(())])()")?, tree!(([()(())])()));
     assert_eq!(
         run("{{}").unwrap_err(),
         "error at :1:1: unmatched open bracket\n{"
