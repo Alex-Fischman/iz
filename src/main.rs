@@ -5,42 +5,58 @@
 
 pub use std::collections::HashMap;
 pub use std::fmt::{Debug, Display, Formatter};
-use std::process::ExitCode;
 
-/// Global `Result` alias for ease of use. See the `err!` macro.
+/// Global `Result` alias for ease of use.
 pub type Result<T> = std::result::Result<T, String>;
 
-/// Run the compiler, given the source code and an optional source name.
-#[allow(clippy::needless_pass_by_value)]
-pub fn run(text: String, name: Option<String>) -> Result<()> {
-    if let Some(name) = name {
-        println!("{name}\n");
+/// A `Source` represents a unit of source code (for example, a `.iz` file).
+pub struct Source {
+    /// The location to use in error messages.
+    pub name: String,
+    /// The actual code, as an in-memory UTF-8 string.
+    pub text: String,
+}
+
+/// Create a `Source` from a Rust `String`.
+#[macro_export]
+macro_rules! text {
+    ($text:expr) => {
+        Source {
+            name: format!("({}:{}:{})", file!(), line!(), column!()),
+            text: $text,
+        }
+    };
+}
+
+impl Source {
+    /// Create a `Source` by reading a file.
+    pub fn from_file(name: String) -> Result<Source> {
+        match std::fs::read_to_string(&name) {
+            Ok(text) => Ok(Source { name, text }),
+            Err(_) => Err(format!("could not read {name}")),
+        }
     }
-    println!("{text}");
+}
+
+/// Run the compiler on a given `Source`.
+pub fn run(source: Source) -> Result<()> {
+    let sources = [source];
+
+    eprintln!("{}\n{}", sources[0].name, sources[0].text);
+
     Ok(())
 }
 
-/// Run the compiler, given a source file name.
-pub fn run_file(name: String) -> Result<()> {
-    match std::fs::read_to_string(&name) {
-        Ok(text) => run(text, Some(name)),
-        Err(_) => Err(format!("could not read {name}")),
-    }
-}
-
-/// Run the compiler, given the command line arguments.
-pub fn run_args() -> Result<()> {
-    let args: Vec<_> = std::env::args().collect();
-    let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
-    run_file(name)
-}
-
-fn main() -> ExitCode {
-    match run_args() {
-        Ok(()) => ExitCode::SUCCESS,
+fn main() -> std::process::ExitCode {
+    match (|| {
+        let args: Vec<_> = std::env::args().collect();
+        let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
+        run(Source::from_file(name)?)
+    })() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("{e}");
-            ExitCode::FAILURE
+            std::process::ExitCode::FAILURE
         }
     }
 }
@@ -51,6 +67,6 @@ mod tests {
 
     #[test]
     fn empty_program_ok() -> Result<()> {
-        run(String::new(), None)
+        run(text!(String::new()))
     }
 }
