@@ -1,4 +1,4 @@
 all:
 	cargo fmt
 	cargo clippy --tests
-	cargo test
+	cargo test --no-fail-fast
