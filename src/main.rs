@@ -79,7 +79,8 @@ mod tests {
 
     #[test]
     fn empty_program_ok() -> Result<()> {
-        compile(text!(""))?;
+        let assembly = compile(text!(""))?;
+        assert!(assembly.0.is_empty());
         Ok(())
     }
 }
