@@ -73,6 +73,29 @@ impl Span {
     }
 }
 
+#[allow(missing_docs)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+#[allow(missing_docs)]
+pub enum Bracket {
+    Paren,
+    Curly,
+    Square,
+}
+
+/// The different types of tokens in an `iz` program.
+pub enum Token {
+    /// One of `(`, `)`, `{`, `}`, `[`, or `]`.
+    Bracket(Bracket, Side),
+    /// A string, which has been parsed with escape codes.
+    String(String),
+    /// Everything else, which is whitespace-separated.
+    Other,
+}
+
 /// A wrapper type around some bytes that should be interpreted as assembly code.
 pub struct Assembly(pub Vec<u8>);
 
