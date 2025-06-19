@@ -23,7 +23,7 @@ macro_rules! text {
     ($text:expr) => {
         Source {
             name: format!("({}:{}:{})", file!(), line!(), column!()),
-            text: $text,
+            text: String::from($text),
         }
     };
 }
@@ -38,20 +38,32 @@ impl Source {
     }
 }
 
-/// Run the compiler on a given `Source`.
-pub fn run(source: Source) -> Result<()> {
+/// A wrapper type around some bytes that should be interpreted as assembly code.
+pub struct Assembly(pub Vec<u8>);
+
+impl Assembly {
+    /// Run an `Assembly` program.
+    pub fn run(&self) -> Result<()> {
+        todo!()
+    }
+}
+
+/// Compile a `Source` down to `Assembly`.
+pub fn compile(source: Source) -> Result<Assembly> {
     let sources = [source];
 
     eprintln!("{}\n{}", sources[0].name, sources[0].text);
 
-    Ok(())
+    Ok(Assembly(Vec::new()))
 }
 
 fn main() -> std::process::ExitCode {
     match (|| {
         let args: Vec<_> = std::env::args().collect();
         let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
-        run(Source::from_file(name)?)
+        let source = Source::from_file(name)?;
+        let _assembly = compile(source)?;
+        Ok::<(), String>(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
@@ -67,6 +79,7 @@ mod tests {
 
     #[test]
     fn empty_program_ok() -> Result<()> {
-        run(text!(String::new()))
+        compile(text!(""))?;
+        Ok(())
     }
 }
