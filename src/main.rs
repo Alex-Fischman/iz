@@ -38,6 +38,41 @@ impl Source {
     }
 }
 
+/// A substring of `iz` code.
+#[derive(Clone, Copy)]
+pub struct Span {
+    src: usize,
+    idx: u32,
+    len: u32,
+}
+
+impl Span {
+    /// Get the substring that this `Span` corresponds to.
+    #[must_use]
+    pub fn string<'a>(&self, srcs: &'a [Source]) -> &'a str {
+        &srcs[self.src].text[self.idx as usize..][..self.len as usize]
+    }
+
+    /// Get the location of the substring that this `Span` corresponds to.
+    #[must_use]
+    pub fn location(&self, srcs: &[Source]) -> String {
+        let Source { name, text } = &srcs[self.src];
+        let mut row = 1;
+        let mut col = 1;
+        for (i, c) in text.char_indices() {
+            match (i, c) {
+                (i, _) if i == self.idx as usize => break,
+                (_, '\n') => {
+                    row += 1;
+                    col = 1;
+                }
+                _ => col += 1,
+            }
+        }
+        format!("{name}:{row}:{col}")
+    }
+}
+
 /// A wrapper type around some bytes that should be interpreted as assembly code.
 pub struct Assembly(pub Vec<u8>);
 
