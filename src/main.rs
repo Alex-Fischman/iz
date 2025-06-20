@@ -42,15 +42,15 @@ impl Source {
 #[derive(Clone, Copy)]
 pub struct Span {
     src: usize,
-    idx: u32,
-    len: u32,
+    idx: usize,
+    len: usize,
 }
 
 impl Span {
     /// Get the substring that this `Span` corresponds to.
     #[must_use]
     pub fn string<'a>(&self, srcs: &'a [Source]) -> &'a str {
-        &srcs[self.src].text[self.idx as usize..][..self.len as usize]
+        &srcs[self.src].text[self.idx..][..self.len]
     }
 
     /// Get the location of the substring that this `Span` corresponds to.
@@ -61,7 +61,7 @@ impl Span {
         let mut col = 1;
         for (i, c) in text.char_indices() {
             match (i, c) {
-                (i, _) if i == self.idx as usize => break,
+                (i, _) if i == self.idx => break,
                 (_, '\n') => {
                     row += 1;
                     col = 1;
@@ -94,6 +94,33 @@ pub enum Token {
     String(String),
     /// Everything else, which is whitespace-separated.
     Other,
+}
+
+/// A non-owning version of `str::char_indices`.
+pub struct Chars {
+    src: usize,
+    idx: usize,
+}
+
+impl Chars {
+    /// Get the `Span` and `char` of the next character.
+    #[must_use]
+    pub fn peek(&self, srcs: &[Source]) -> Option<(Span, char)> {
+        let c = srcs[self.src].text[self.idx..].chars().next()?;
+        let s = Span {
+            src: self.src,
+            idx: self.idx,
+            len: c.len_utf8(),
+        };
+        Some((s, c))
+    }
+
+    /// Advances the `Chars` iterator past the character returned by `peek`.
+    pub fn next(&mut self, srcs: &[Source]) {
+        if let Some((span, _)) = self.peek(srcs) {
+            self.idx += span.len;
+        }
+    }
 }
 
 /// A wrapper type around some bytes that should be interpreted as assembly code.
