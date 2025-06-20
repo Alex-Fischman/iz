@@ -96,30 +96,16 @@ pub enum Token {
     Other,
 }
 
-/// A non-owning version of `str::char_indices`.
-pub struct Chars {
-    src: usize,
-    idx: usize,
-}
-
-impl Chars {
-    /// Get the `Span` and `char` of the next character.
+impl Source {
+    /// Get the character at byte position `idx` in the text.
     #[must_use]
-    pub fn peek(&self, srcs: &[Source]) -> Option<(Span, char)> {
-        let c = srcs[self.src].text[self.idx..].chars().next()?;
-        let s = Span {
-            src: self.src,
-            idx: self.idx,
-            len: c.len_utf8(),
-        };
-        Some((s, c))
+    pub fn next_char(&self, idx: usize) -> Option<char> {
+        self.text[idx..].chars().next()
     }
 
-    /// Advances the `Chars` iterator past the character returned by `peek`.
-    pub fn next(&mut self, srcs: &[Source]) {
-        if let Some((span, _)) = self.peek(srcs) {
-            self.idx += span.len;
-        }
+    /// Get the token at byte position `idx` in the text.
+    pub fn next_token(&self, _idx: usize) -> Result<Option<(Span, Token)>> {
+        todo!()
     }
 }
 
