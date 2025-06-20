@@ -38,10 +38,9 @@ impl Source {
     }
 }
 
-/// A substring of `iz` code.
+/// A substring of a `Source`.
 #[derive(Clone, Copy)]
 pub struct Span {
-    src: usize,
     idx: usize,
     len: usize,
 }
@@ -49,14 +48,13 @@ pub struct Span {
 impl Span {
     /// Get the substring that this `Span` corresponds to.
     #[must_use]
-    pub fn string<'a>(&self, srcs: &'a [Source]) -> &'a str {
-        &srcs[self.src].text[self.idx..][..self.len]
+    pub fn string<'a>(&self, src: &'a Source) -> &'a str {
+        &src.text[self.idx..][..self.len]
     }
 
     /// Get the location of the substring that this `Span` corresponds to.
     #[must_use]
-    pub fn location(&self, srcs: &[Source]) -> String {
-        let Source { name, text } = &srcs[self.src];
+    pub fn location(&self, Source { name, text }: &Source) -> String {
         let mut row = 1;
         let mut col = 1;
         for (i, c) in text.char_indices() {
@@ -97,14 +95,30 @@ pub enum Token {
 }
 
 impl Source {
-    /// Get the character at byte position `idx` in the text.
-    #[must_use]
-    pub fn next_char(&self, idx: usize) -> Option<char> {
+    fn next_char(&self, idx: usize) -> Option<char> {
         self.text[idx..].chars().next()
     }
 
+    fn skip_whitespace(&self, mut idx: usize) -> usize {
+        loop {
+            match self.next_char(idx) {
+                Some(c) if c.is_whitespace() => idx += c.len_utf8(),
+                _ => return idx,
+            }
+        }
+    }
+
     /// Get the token at byte position `idx` in the text.
-    pub fn next_token(&self, _idx: usize) -> Result<Option<(Span, Token)>> {
+    pub fn next_token(&self, idx: usize) -> Result<Option<(Span, Token)>> {
+        let idx = self.skip_whitespace(idx);
+        let Some(c) = self.next_char(idx) else {
+            return Ok(None);
+        };
+        let _span = Span {
+            idx,
+            len: c.len_utf8(),
+        };
+
         todo!()
     }
 }
