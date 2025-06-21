@@ -23,7 +23,7 @@ macro_rules! text {
     ($text:expr) => {
         Source {
             name: format!("({}:{}:{})", file!(), line!(), column!()),
-            text: String::from($text),
+            text: ::std::string::String::from($text),
         }
     };
 }
@@ -41,15 +41,15 @@ impl Source {
 /// A substring of a `Source`.
 #[derive(Clone, Copy)]
 pub struct Span {
-    idx: usize,
-    len: usize,
+    lo: usize,
+    hi: usize,
 }
 
 impl Span {
     /// Get the substring that this `Span` corresponds to.
     #[must_use]
     pub fn string<'a>(&self, src: &'a Source) -> &'a str {
-        &src.text[self.idx..][..self.len]
+        &src.text[self.lo..self.hi]
     }
 
     /// Get the location of the substring that this `Span` corresponds to.
@@ -59,7 +59,7 @@ impl Span {
         let mut col = 1;
         for (i, c) in text.char_indices() {
             match (i, c) {
-                (i, _) if i == self.idx => break,
+                (i, _) if i == self.lo => break,
                 (_, '\n') => {
                     row += 1;
                     col = 1;
@@ -72,12 +72,14 @@ impl Span {
 }
 
 #[allow(missing_docs)]
+#[derive(Debug, PartialEq)]
 pub enum Side {
     Left,
     Right,
 }
 
 #[allow(missing_docs)]
+#[derive(Debug, PartialEq)]
 pub enum Bracket {
     Paren,
     Curly,
@@ -85,6 +87,7 @@ pub enum Bracket {
 }
 
 /// The different types of tokens in an `iz` program.
+#[derive(Debug, PartialEq)]
 pub enum Token {
     /// One of `(`, `)`, `{`, `}`, `[`, or `]`.
     Bracket(Bracket, Side),
@@ -102,6 +105,12 @@ impl Source {
     fn skip_whitespace(&self, mut idx: usize) -> usize {
         loop {
             match self.next_char(idx) {
+                Some('#') => loop {
+                    match self.next_char(idx) {
+                        None | Some('\n') => break,
+                        Some(c) => idx += c.len_utf8(),
+                    }
+                },
                 Some(c) if c.is_whitespace() => idx += c.len_utf8(),
                 _ => return idx,
             }
@@ -115,8 +124,8 @@ impl Source {
             return Ok(None);
         };
         let _span = Span {
-            idx,
-            len: c.len_utf8(),
+            lo: idx,
+            hi: idx + c.len_utf8(),
         };
 
         todo!()
