@@ -99,6 +99,31 @@ pub enum Bracket {
     Square(Side),
 }
 
+enum CharType {
+    Bracket(Bracket),
+    DoubleQuote,
+    SingleQuote,
+    Comment,
+    Whitespace,
+    Symbol,
+}
+
+fn char_type(c: char) -> CharType {
+    match c {
+        '(' => CharType::Bracket(Bracket::Paren(Side::Left)),
+        ')' => CharType::Bracket(Bracket::Paren(Side::Right)),
+        '{' => CharType::Bracket(Bracket::Curly(Side::Left)),
+        '}' => CharType::Bracket(Bracket::Curly(Side::Right)),
+        '[' => CharType::Bracket(Bracket::Square(Side::Left)),
+        ']' => CharType::Bracket(Bracket::Square(Side::Right)),
+        '"' => CharType::DoubleQuote,
+        '\'' => CharType::SingleQuote,
+        '#' => CharType::Comment,
+        c if c.is_whitespace() => CharType::Whitespace,
+        _ => CharType::Symbol,
+    }
+}
+
 /// The different types of tokens in an `iz` program.
 #[derive(Debug, PartialEq)]
 pub enum Token {
