@@ -9,6 +9,19 @@ pub use std::fmt::{Debug, Display, Formatter};
 /// Global `Result` alias for ease of use.
 pub type Result<T> = std::result::Result<T, String>;
 
+/// Constructs an error message from the given source, span, and format arguments.
+#[macro_export]
+macro_rules! err {
+    ($source:expr, $span:expr, $($fmt:tt)*) => {
+        Err(format!(
+            "error at {}: {}\n{}",
+            $span.location($source),
+            format!($($fmt)*),
+            $span.string($source),
+        ))
+    };
+}
+
 /// A `Source` represents a unit of source code (for example, a `.iz` file).
 pub struct Source {
     /// The location to use in error messages.
