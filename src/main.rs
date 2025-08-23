@@ -94,16 +94,16 @@ pub enum Side {
 #[allow(missing_docs)]
 #[derive(Debug, PartialEq)]
 pub enum Bracket {
-    Paren,
-    Curly,
-    Square,
+    Paren(Side),
+    Curly(Side),
+    Square(Side),
 }
 
 /// The different types of tokens in an `iz` program.
 #[derive(Debug, PartialEq)]
 pub enum Token {
     /// One of `(`, `)`, `{`, `}`, `[`, or `]`.
-    Bracket(Bracket, Side),
+    Bracket(Bracket),
     /// A string, which has been parsed with escape codes.
     String(String),
     /// Everything else, which is whitespace-separated.
