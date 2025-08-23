@@ -30,12 +30,12 @@ pub struct Source {
     pub text: String,
 }
 
-/// Create a `Source` from a Rust `String`.
+/// Create a `Source` from a Rust `String` for testing.
 #[macro_export]
 macro_rules! text {
     ($text:expr) => {
         Source {
-            name: format!("({}:{}:{})", file!(), line!(), column!()),
+            name: ::std::string::String::from("TEST"),
             text: ::std::string::String::from($text),
         }
     };
