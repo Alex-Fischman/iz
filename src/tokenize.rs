@@ -175,85 +175,124 @@ impl Source {
     }
 }
 
-#[test]
-fn test() -> Result<()> {
-    fn tokenize(s: &str) -> Result<Vec<Token>> {
-        let source = text!(s);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tokenize(source: &Source) -> Result<Vec<(&str, Token)>> {
+        let mut out = Vec::new();
         let mut idx = 0;
-        let mut tokens = Vec::new();
         while let Some((span, token)) = source.next_token(idx)? {
             idx = span.hi;
-            tokens.push(token);
+            out.push((span.string(source), token));
         }
-        Ok(tokens)
+        Ok(out)
     }
 
-    assert_eq!(
-        tokenize("(}[")?,
-        vec![
-            Token::Bracket(Bracket::Paren, Side::Left),
-            Token::Bracket(Bracket::Curly, Side::Right),
-            Token::Bracket(Bracket::Square, Side::Left),
-        ]
-    );
-
-    assert_eq!(
-        tokenize("\"1 2\t3\n\\\\\"")?,
-        vec![Token::String(String::from("1 2\t3\n\\"))],
-    );
-    // TODO: failing string tests
-
-    assert_eq!(tokenize("'c'")?, vec![Token::Char('c')]);
-    assert_eq!(tokenize(" 'c' ")?, vec![Token::Char('c')]);
-    assert_eq!(
-        tokenize("'").unwrap_err(),
-        "error at TEST:1:1: expected character, got end of file\n'"
-    );
-    assert_eq!(
-        tokenize("''").unwrap_err(),
-        "error at TEST:1:1: expected character, got closing '\n''"
-    );
-    assert_eq!(
-        tokenize("'a").unwrap_err(),
-        "error at TEST:1:1: expected ', got end of file\n'a"
-    );
-    assert_eq!(
-        tokenize("'aa'").unwrap_err(),
-        "error at TEST:1:1: expected ', got a\n'aa"
-    );
-
-    assert_eq!(
-        tokenize("\\").unwrap_err(),
-        "error at TEST:1:1: found a \\ outside of quotes\n\\"
-    );
-
-    assert_eq!(tokenize("#")?, vec![]);
-    assert_eq!(tokenize("# a a")?, vec![]);
-    assert_eq!(tokenize("# a a\n")?, vec![]);
-    assert_eq!(tokenize("# a a\na")?, vec![Token::Symbol]);
-    assert_eq!(tokenize("a # a a\na")?, vec![Token::Symbol, Token::Symbol]);
-    assert_eq!(tokenize("'#'")?, vec![Token::Char('#')]);
-
-    assert_eq!(tokenize("asdf")?, vec![Token::Symbol]);
-    assert_eq!(tokenize("asdf fdsa")?, vec![Token::Symbol, Token::Symbol]);
-    assert_eq!(
-        tokenize("'c' asdf 'c'")?,
-        vec![Token::Char('c'), Token::Symbol, Token::Char('c')]
-    );
-    assert_eq!(
-        tokenize("asdf'").unwrap_err(),
-        "error at TEST:1:1: expected symbol, got '\nasdf'"
-    );
-
-    assert_eq!(
-        tokenize("f(x)")?,
-        vec![
-            Token::Symbol,
-            Token::Bracket(Bracket::Paren, Side::Left),
-            Token::Symbol,
+    macro_rules! token {
+        (Left Paren) => {
+            Token::Bracket(Bracket::Paren, Side::Left)
+        };
+        (Right Paren) => {
             Token::Bracket(Bracket::Paren, Side::Right)
-        ]
-    );
+        };
+        (Left Curly) => {
+            Token::Bracket(Bracket::Curly, Side::Left)
+        };
+        (Right Curly) => {
+            Token::Bracket(Bracket::Curly, Side::Right)
+        };
+        (Left Square) => {
+            Token::Bracket(Bracket::Square, Side::Left)
+        };
+        (Right Square) => {
+            Token::Bracket(Bracket::Square, Side::Right)
+        };
+        (String $s:literal) => {
+            Token::String(String::from($s))
+        };
+        (Char $c:literal) => {
+            Token::Char($c)
+        };
+        (Comment) => {
+            Token::Comment
+        };
+        (Symbol) => {
+            Token::Symbol
+        };
+    }
 
-    Ok(())
+    macro_rules! test {
+        ($s:literal, $(($span:expr, $($token:tt)*)),* $(,)?) => {{
+            let source = text!($s);
+            let tokens = tokenize(&source)?;
+            assert_eq!(tokens, [$(($span, token!($($token)*)),)*])
+        }};
+        ($s:literal, $err:literal) => {{
+            let source = text!($s);
+            let error = tokenize(&source).unwrap_err();
+            assert_eq!(error, $err);
+        }};
+    }
+
+    #[test]
+    fn test() -> Result<()> {
+        test!(
+            "(}[",
+            ("(", Left Paren),
+            ("}", Right Curly),
+            ("[", Left Square),
+        );
+
+        test!(
+            "\"1 2\t3\n\\\\\"",
+            (
+                "\"1 2\t3\n\\\\\"",
+                String "1 2\t3\n\\"
+            )
+        );
+        // TODO: failing string tests
+
+        test!("'c'", ("'c'", Char 'c'));
+        test!(" 'c' ", ("'c'", Char 'c'));
+        test!(
+            "'",
+            "error at TEST:1:1: expected character, got end of file\n'"
+        );
+        test!(
+            "''",
+            "error at TEST:1:1: expected character, got closing '\n''"
+        );
+        test!("'a", "error at TEST:1:1: expected ', got end of file\n'a");
+        test!("'aa'", "error at TEST:1:1: expected ', got a\n'aa");
+
+        test!("\\", "error at TEST:1:1: found a \\ outside of quotes\n\\");
+
+        test!("#", ("#", Comment));
+        test!("# a a", ("# a a", Comment));
+        test!("# a a\n", ("# a a\n", Comment));
+        test!("# a a\na", ("# a a\n", Comment), ("a", Symbol));
+        test!("a #\na", ("a", Symbol), ("#\n", Comment), ("a", Symbol));
+        test!("'#'", ("'#'", Char '#'));
+
+        test!("asdf", ("asdf", Symbol));
+        test!("asdf fdsa", ("asdf", Symbol), ("fdsa", Symbol));
+        test!(
+            "'c' asdf 'c'",
+            ("'c'", Char 'c'),
+            ("asdf", Symbol),
+            ("'c'", Char 'c')
+        );
+        test!("asdf'", "error at TEST:1:1: expected symbol, got '\nasdf'");
+
+        test!(
+            "f(x)",
+            ("f", Symbol),
+            ("(", Left Paren),
+            ("x", Symbol),
+            (")", Right Paren)
+        );
+
+        Ok(())
+    }
 }
