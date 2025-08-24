@@ -15,7 +15,7 @@ pub enum Bracket {
     Square(Side),
 }
 
-enum CharType {
+enum Char {
     Bracket(Bracket),
     DoubleQuote,
     SingleQuote,
@@ -24,19 +24,19 @@ enum CharType {
     Symbol,
 }
 
-fn char_type(c: char) -> CharType {
+fn char_type(c: char) -> Char {
     match c {
-        '(' => CharType::Bracket(Bracket::Paren(Side::Left)),
-        ')' => CharType::Bracket(Bracket::Paren(Side::Right)),
-        '{' => CharType::Bracket(Bracket::Curly(Side::Left)),
-        '}' => CharType::Bracket(Bracket::Curly(Side::Right)),
-        '[' => CharType::Bracket(Bracket::Square(Side::Left)),
-        ']' => CharType::Bracket(Bracket::Square(Side::Right)),
-        '"' => CharType::DoubleQuote,
-        '\'' => CharType::SingleQuote,
-        '#' => CharType::Comment,
-        c if c.is_whitespace() => CharType::Whitespace,
-        _ => CharType::Symbol,
+        '(' => Char::Bracket(Bracket::Paren(Side::Left)),
+        ')' => Char::Bracket(Bracket::Paren(Side::Right)),
+        '{' => Char::Bracket(Bracket::Curly(Side::Left)),
+        '}' => Char::Bracket(Bracket::Curly(Side::Right)),
+        '[' => Char::Bracket(Bracket::Square(Side::Left)),
+        ']' => Char::Bracket(Bracket::Square(Side::Right)),
+        '"' => Char::DoubleQuote,
+        '\'' => Char::SingleQuote,
+        '#' => Char::Comment,
+        c if c.is_whitespace() => Char::Whitespace,
+        _ => Char::Symbol,
     }
 }
 
@@ -61,13 +61,13 @@ impl Source {
     fn skip_whitespace(&self, mut idx: usize) -> usize {
         while let Some(c) = self.next_char(idx) {
             match char_type(c) {
-                CharType::Comment => loop {
+                Char::Comment => loop {
                     match self.next_char(idx) {
                         None | Some('\n') => break,
                         Some(c) => idx += c.len_utf8(),
                     }
                 },
-                CharType::Whitespace => idx += c.len_utf8(),
+                Char::Whitespace => idx += c.len_utf8(),
                 _ => break,
             }
         }
@@ -86,9 +86,9 @@ impl Source {
         };
 
         let token = match char_type(c) {
-            CharType::Bracket(b) => Token::Bracket(b),
-            CharType::DoubleQuote => todo!("Token::String"),
-            CharType::SingleQuote => {
+            Char::Bracket(b) => Token::Bracket(b),
+            Char::DoubleQuote => todo!("Token::String"),
+            Char::SingleQuote => {
                 let Some(c) = self.next_char(span.hi) else {
                     return err!(self, span, "expected character, got end of file");
                 };
@@ -112,17 +112,17 @@ impl Source {
 
                 token
             }
-            CharType::Comment | CharType::Whitespace => unreachable!(),
-            CharType::Symbol => {
+            Char::Comment | Char::Whitespace => unreachable!(),
+            Char::Symbol => {
                 while let Some(c) = self.next_char(span.hi) {
                     span.hi += c.len_utf8();
 
                     match char_type(c) {
-                        CharType::Bracket(_) | CharType::Whitespace => break,
-                        CharType::DoubleQuote | CharType::SingleQuote | CharType::Comment => {
+                        Char::Bracket(_) | Char::Whitespace => break,
+                        Char::DoubleQuote | Char::SingleQuote | Char::Comment => {
                             return err!(self, span, "expected symbol, got {c}");
                         }
-                        CharType::Symbol => {}
+                        Char::Symbol => {}
                     }
                 }
 
