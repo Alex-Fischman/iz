@@ -54,7 +54,7 @@ impl Source {
 }
 
 /// A substring of a `Source`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
     lo: usize,
     hi: usize,
