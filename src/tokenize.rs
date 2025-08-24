@@ -19,6 +19,7 @@ enum Char {
     Bracket(Bracket),
     DoubleQuote,
     SingleQuote,
+    Backslash,
     Comment,
     Whitespace,
     Symbol,
@@ -34,6 +35,7 @@ fn char_type(c: char) -> Char {
         ']' => Char::Bracket(Bracket::Square(Side::Right)),
         '"' => Char::DoubleQuote,
         '\'' => Char::SingleQuote,
+        '\\' => Char::Backslash,
         '#' => Char::Comment,
         c if c.is_whitespace() => Char::Whitespace,
         _ => Char::Symbol,
@@ -76,6 +78,16 @@ impl Source {
 
     /// Get the token at byte position `idx` in the text.
     fn next_token(&self, idx: usize) -> Result<Option<(Span, Token)>> {
+        let escape = |c, span: Span| match c {
+            't' => Ok('\t'),
+            'n' => Ok('\n'),
+            'r' => Ok('\r'),
+            '"' => Ok('"'),
+            '\'' => Ok('\''),
+            '\\' => Ok('\\'),
+            _ => err!(self, span, "expected escape character, got {c}"),
+        };
+
         let idx = self.skip_whitespace(idx);
         let Some(c) = self.next_char(idx) else {
             return Ok(None);
@@ -87,20 +99,46 @@ impl Source {
 
         let token = match char_type(c) {
             Char::Bracket(b) => Token::Bracket(b),
-            Char::DoubleQuote => todo!("Token::String"),
+            Char::DoubleQuote => {
+                let mut string = String::new();
+                let mut in_escape = false;
+                loop {
+                    let Some(c) = self.next_char(span.hi) else {
+                        return err!(self, span, "expected \", got end of file");
+                    };
+                    span.hi += c.len_utf8();
+
+                    match char_type(c) {
+                        _ if in_escape => {
+                            string.push(escape(c, span)?);
+                            in_escape = false;
+                        }
+                        Char::DoubleQuote => break,
+                        Char::Backslash => in_escape = true,
+                        _ => string.push(c),
+                    }
+                }
+                Token::String(string)
+            }
             Char::SingleQuote => {
                 let Some(c) = self.next_char(span.hi) else {
                     return err!(self, span, "expected character, got end of file");
                 };
                 span.hi += c.len_utf8();
 
-                let token = Token::Char(match c {
-                    '\\' => todo!(),
+                let token = match c {
+                    '\\' => {
+                        let Some(c) = self.next_char(span.hi) else {
+                            return err!(self, span, "expected escape character, got end of file");
+                        };
+                        span.hi += c.len_utf8();
+                        escape(c, span)?
+                    }
                     '\'' => {
                         return err!(self, span, "expected character, got closing \'");
                     }
                     c => c,
-                });
+                };
 
                 let Some(c) = self.next_char(span.hi) else {
                     return err!(self, span, "expected \', got end of file");
@@ -110,8 +148,9 @@ impl Source {
                     return err!(self, span, "expected \', got {c}");
                 };
 
-                token
+                Token::Char(token)
             }
+            Char::Backslash => return err!(self, span, "found a \\ outside of quotes"),
             Char::Comment | Char::Whitespace => unreachable!(),
             Char::Symbol => {
                 while let Some(c) = self.next_char(span.hi) {
@@ -119,7 +158,7 @@ impl Source {
 
                     match char_type(c) {
                         Char::Bracket(_) | Char::Whitespace => break,
-                        Char::DoubleQuote | Char::SingleQuote | Char::Comment => {
+                        Char::DoubleQuote | Char::SingleQuote | Char::Backslash | Char::Comment => {
                             return err!(self, span, "expected symbol, got {c}");
                         }
                         Char::Symbol => {}
@@ -146,24 +185,51 @@ fn test() -> Result<()> {
         Ok(tokens)
     }
 
-    assert_eq!(text!("'c'").next_token(0)?.unwrap().1, Token::Char('c'));
-    assert_eq!(text!(" 'c' ").next_token(0)?.unwrap().1, Token::Char('c'));
     assert_eq!(
-        text!("'").next_token(0).unwrap_err(),
+        tokenize("(}[")?,
+        vec![
+            Token::Bracket(Bracket::Paren(Side::Left)),
+            Token::Bracket(Bracket::Curly(Side::Right)),
+            Token::Bracket(Bracket::Square(Side::Left)),
+        ]
+    );
+
+    assert_eq!(
+        tokenize("\"1 2\t3\n\\\\\"")?,
+        vec![Token::String(String::from("1 2\t3\n\\"))],
+    );
+    // TODO: failing string tests
+
+    assert_eq!(tokenize("'c'")?, vec![Token::Char('c')]);
+    assert_eq!(tokenize(" 'c' ")?, vec![Token::Char('c')]);
+    assert_eq!(
+        tokenize("'").unwrap_err(),
         "error at TEST:1:1: expected character, got end of file\n'"
     );
     assert_eq!(
-        text!("''").next_token(0).unwrap_err(),
+        tokenize("''").unwrap_err(),
         "error at TEST:1:1: expected character, got closing '\n''"
     );
     assert_eq!(
-        text!("'a").next_token(0).unwrap_err(),
+        tokenize("'a").unwrap_err(),
         "error at TEST:1:1: expected ', got end of file\n'a"
     );
     assert_eq!(
-        text!("'aa'").next_token(0).unwrap_err(),
+        tokenize("'aa'").unwrap_err(),
         "error at TEST:1:1: expected ', got a\n'aa"
     );
+
+    assert_eq!(
+        tokenize("\\").unwrap_err(),
+        "error at TEST:1:1: found a \\ outside of quotes\n\\"
+    );
+
+    assert_eq!(tokenize("#")?, vec![]);
+    assert_eq!(tokenize("# a a")?, vec![]);
+    assert_eq!(tokenize("# a a\n")?, vec![]);
+    assert_eq!(tokenize("# a a\na")?, vec![Token::Symbol]);
+    assert_eq!(tokenize("a # a a\na")?, vec![Token::Symbol, Token::Symbol]);
+    assert_eq!(tokenize("'#'")?, vec![Token::Char('#')]);
 
     assert_eq!(tokenize("asdf")?, vec![Token::Symbol]);
     assert_eq!(tokenize("asdf fdsa")?, vec![Token::Symbol, Token::Symbol]);
