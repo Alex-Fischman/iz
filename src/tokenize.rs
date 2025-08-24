@@ -10,13 +10,13 @@ pub enum Side {
 #[allow(missing_docs)]
 #[derive(Debug, PartialEq)]
 pub enum Bracket {
-    Paren(Side),
-    Curly(Side),
-    Square(Side),
+    Paren,
+    Curly,
+    Square,
 }
 
 enum Char {
-    Bracket(Bracket),
+    Bracket(Bracket, Side),
     DoubleQuote,
     SingleQuote,
     Backslash,
@@ -27,12 +27,12 @@ enum Char {
 
 fn char_type(c: char) -> Char {
     match c {
-        '(' => Char::Bracket(Bracket::Paren(Side::Left)),
-        ')' => Char::Bracket(Bracket::Paren(Side::Right)),
-        '{' => Char::Bracket(Bracket::Curly(Side::Left)),
-        '}' => Char::Bracket(Bracket::Curly(Side::Right)),
-        '[' => Char::Bracket(Bracket::Square(Side::Left)),
-        ']' => Char::Bracket(Bracket::Square(Side::Right)),
+        '(' => Char::Bracket(Bracket::Paren, Side::Left),
+        ')' => Char::Bracket(Bracket::Paren, Side::Right),
+        '{' => Char::Bracket(Bracket::Curly, Side::Left),
+        '}' => Char::Bracket(Bracket::Curly, Side::Right),
+        '[' => Char::Bracket(Bracket::Square, Side::Left),
+        ']' => Char::Bracket(Bracket::Square, Side::Right),
         '"' => Char::DoubleQuote,
         '\'' => Char::SingleQuote,
         '\\' => Char::Backslash,
@@ -46,7 +46,7 @@ fn char_type(c: char) -> Char {
 #[derive(Debug, PartialEq)]
 pub enum Token {
     /// One of `(`, `)`, `{`, `}`, `[`, or `]`.
-    Bracket(Bracket),
+    Bracket(Bracket, Side),
     /// A string, which has been parsed with escape codes.
     String(String),
     /// A character, which has been parsed with escape codes.
@@ -101,7 +101,7 @@ impl Source {
         };
 
         let token = match char_type(c) {
-            Char::Bracket(b) => Token::Bracket(b),
+            Char::Bracket(b, s) => Token::Bracket(b, s),
             Char::DoubleQuote => {
                 let mut string = String::new();
                 let mut in_escape = false;
@@ -154,7 +154,7 @@ impl Source {
             Char::Symbol => {
                 while let Some(c) = self.peek_char(span.hi) {
                     match char_type(c) {
-                        Char::Bracket(_) | Char::Whitespace => break,
+                        Char::Bracket(..) | Char::Whitespace => break,
                         Char::DoubleQuote | Char::SingleQuote | Char::Backslash | Char::Comment => {
                             span.hi += c.len_utf8();
                             return err!(self, span, "expected symbol, got {c}");
@@ -186,9 +186,9 @@ fn test() -> Result<()> {
     assert_eq!(
         tokenize("(}[")?,
         vec![
-            Token::Bracket(Bracket::Paren(Side::Left)),
-            Token::Bracket(Bracket::Curly(Side::Right)),
-            Token::Bracket(Bracket::Square(Side::Left)),
+            Token::Bracket(Bracket::Paren, Side::Left),
+            Token::Bracket(Bracket::Curly, Side::Right),
+            Token::Bracket(Bracket::Square, Side::Left),
         ]
     );
 
@@ -244,9 +244,9 @@ fn test() -> Result<()> {
         tokenize("f(x)")?,
         vec![
             Token::Symbol,
-            Token::Bracket(Bracket::Paren(Side::Left)),
+            Token::Bracket(Bracket::Paren, Side::Left),
             Token::Symbol,
-            Token::Bracket(Bracket::Paren(Side::Right))
+            Token::Bracket(Bracket::Paren, Side::Right)
         ]
     );
 
