@@ -234,76 +234,125 @@ mod tests {
     }
 
     macro_rules! test {
-        ($s:literal, $(($span:expr, $($token:tt)*)),* $(,)?) => {{
-            let source = text!($s);
-            let tokens = collect_tokens(&source)?;
-            assert_eq!(tokens, [$(($span, token!($($token)*)),)*])
-        }};
-        ($s:literal, $err:literal) => {{
-            let source = text!($s);
-            let error = collect_tokens(&source).unwrap_err();
-            assert_eq!(error, $err);
-        }};
+        ($name:ident, $s:literal, $(($span:expr, $($token:tt)*)),* $(,)?) => {
+            #[test]
+            fn $name() -> Result<()> {
+                let source = text!($s);
+                let tokens = collect_tokens(&source)?;
+                assert_eq!(tokens, [$(($span, token!($($token)*)),)*]);
+                Ok(())
+            }
+        };
+        ($name:ident, $s:literal, $err:literal) => {
+            #[test]
+            fn $name() -> Result<()> {
+                let source = text!($s);
+                let error = collect_tokens(&source).unwrap_err();
+                assert_eq!(error, $err);
+                Ok(())
+            }
+        };
     }
 
-    #[test]
-    fn test() -> Result<()> {
-        test!(
-            "(}[",
-            ("(", Left Paren),
-            ("}", Right Curly),
-            ("[", Left Square),
-        );
+    test! {
+        brackets,
+        "(}[",
+        ("(", Left Paren),
+        ("}", Right Curly),
+        ("[", Left Square),
+    }
 
-        test!(
+    test! {
+        string_escapes,
+        "\"1 2\t3\n\\\\\"",
+        (
             "\"1 2\t3\n\\\\\"",
-            (
-                "\"1 2\t3\n\\\\\"",
-                String "1 2\t3\n\\"
-            )
-        );
-        // TODO: failing string tests
+            String "1 2\t3\n\\"
+        )
+    }
+    // TODO: failing string tests
 
-        test!("'c'", ("'c'", Char 'c'));
-        test!(" 'c' ", ("'c'", Char 'c'));
-        test!(
-            "'",
-            "error at TEST:1:1: expected character, got end of file\n'"
-        );
-        test!(
-            "''",
-            "error at TEST:1:1: expected character, got closing '\n''"
-        );
-        test!("'a", "error at TEST:1:1: expected ', got end of file\n'a");
-        test!("'aa'", "error at TEST:1:1: expected ', got a\n'aa");
+    test! {char_basic, "'c'", ("'c'", Char 'c')}
+    test! {char_spaces, " 'c' ", ("'c'", Char 'c')}
+    test! {
+        char_no_char,
+        "'",
+        "error at TEST:1:1: expected character, got end of file\n'"
+    }
+    test! {
+        char_empty,
+        "''",
+        "error at TEST:1:1: expected character, got closing '\n''"
+    }
+    test! {
+        char_no_end,
+        "'a",
+        "error at TEST:1:1: expected ', got end of file\n'a"
+    }
+    test! {
+        char_two_chars,
+        "'aa'",
+        "error at TEST:1:1: expected ', got a\n'aa"
+    }
 
-        test!("\\", "error at TEST:1:1: found a \\ outside of quotes\n\\");
+    test! {
+        bare_backslash,
+        "\\",
+        "error at TEST:1:1: found a \\ outside of quotes\n\\"
+    }
 
-        test!("#", ("#", Comment));
-        test!("# a a", ("# a a", Comment));
-        test!("# a a\n", ("# a a\n", Comment));
-        test!("# a a\na", ("# a a\n", Comment), ("a", Symbol));
-        test!("a #\na", ("a", Symbol), ("#\n", Comment), ("a", Symbol));
-        test!("'#'", ("'#'", Char '#'));
+    test! {empty_comment, "#", ("#", Comment)}
+    test! {full_comment, "# a a", ("# a a", Comment)}
+    test! {full_comment_n, "# a a\n", ("# a a\n", Comment)}
+    test! {
+        comment_symbol,
+        "# a a\na",
+        ("# a a\n", Comment),
+        ("a", Symbol)
+    }
+    test! {
+        symbol_comment_symbol,
+        "a #\na",
+        ("a", Symbol),
+        ("#\n", Comment),
+        ("a", Symbol)
+    }
+    test! {hashtag_char, "'#'", ("'#'", Char '#')}
+    test! {hashtag_string, "\"#\"", ("\"#\"", String "#")}
 
-        test!("asdf", ("asdf", Symbol));
-        test!("asdf fdsa", ("asdf", Symbol), ("fdsa", Symbol));
-        test!(
-            "'c' asdf 'c'",
-            ("'c'", Char 'c'),
-            ("asdf", Symbol),
-            ("'c'", Char 'c')
-        );
-        test!("asdf'", "error at TEST:1:1: expected symbol, got '\nasdf'");
+    test! {symbol, "asdf", ("asdf", Symbol)}
+    test! {symbols, "asdf fdsa", ("asdf", Symbol), ("fdsa", Symbol)}
+    test! {
+        char_symbol_char,
+        "'c' asdf 'c'",
+        ("'c'", Char 'c'),
+        ("asdf", Symbol),
+        ("'c'", Char 'c')
+    }
+    test! {
+        symbol_into_char,
+        "asdf'",
+        "error at TEST:1:1: expected symbol, got '\nasdf'"
+    }
 
-        test!(
-            "f(x)",
-            ("f", Symbol),
-            ("(", Left Paren),
-            ("x", Symbol),
-            (")", Right Paren)
-        );
-
-        Ok(())
+    test! {
+        f_of_x,
+        "f(x)",
+        ("f", Symbol),
+        ("(", Left Paren),
+        ("x", Symbol),
+        (")", Right Paren)
+    }
+    test! {
+        one_plus_two,
+        "1 + 2",
+        ("1", Symbol),
+        ("+", Symbol),
+        ("2", Symbol),
+    }
+    test! {
+        one_plus_two_no_spaces,
+        "1+2",
+        ("1+2", Symbol)
     }
 }
