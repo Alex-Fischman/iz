@@ -56,28 +56,33 @@ pub enum Token {
 }
 
 impl Source {
-    fn next_char(&self, idx: usize) -> Option<char> {
+    fn peek_char(&self, idx: usize) -> Option<char> {
         self.text[idx..].chars().next()
     }
 
-    fn skip_whitespace(&self, mut idx: usize) -> usize {
-        while let Some(c) = self.next_char(idx) {
+    fn skip_whitespace(&self, idx: &mut usize) {
+        while let Some(c) = self.peek_char(*idx) {
             match char_type(c) {
                 Char::Comment => loop {
-                    match self.next_char(idx) {
+                    match self.peek_char(*idx) {
                         None | Some('\n') => break,
-                        Some(c) => idx += c.len_utf8(),
+                        Some(c) => *idx += c.len_utf8(),
                     }
                 },
-                Char::Whitespace => idx += c.len_utf8(),
+                Char::Whitespace => *idx += c.len_utf8(),
                 _ => break,
             }
         }
-        idx
+    }
+
+    fn next_char(&self, idx: &mut usize) -> Option<char> {
+        let c = self.peek_char(*idx)?;
+        *idx += c.len_utf8();
+        Some(c)
     }
 
     /// Get the token at byte position `idx` in the text.
-    pub fn next_token(&self, idx: usize) -> Result<Option<(Span, Token)>> {
+    pub fn next_token(&self, mut idx: usize) -> Result<Option<(Span, Token)>> {
         let escape = |c, span: Span| match c {
             't' => Ok('\t'),
             'n' => Ok('\n'),
@@ -88,13 +93,11 @@ impl Source {
             _ => err!(self, span, "expected escape character, got {c}"),
         };
 
-        let idx = self.skip_whitespace(idx);
-        let Some(c) = self.next_char(idx) else {
+        self.skip_whitespace(&mut idx);
+
+        let mut span = Span { lo: idx, hi: idx };
+        let Some(c) = self.next_char(&mut span.hi) else {
             return Ok(None);
-        };
-        let mut span = Span {
-            lo: idx,
-            hi: idx + c.len_utf8(),
         };
 
         let token = match char_type(c) {
@@ -103,10 +106,9 @@ impl Source {
                 let mut string = String::new();
                 let mut in_escape = false;
                 loop {
-                    let Some(c) = self.next_char(span.hi) else {
+                    let Some(c) = self.next_char(&mut span.hi) else {
                         return err!(self, span, "expected \", got end of file");
                     };
-                    span.hi += c.len_utf8();
 
                     match char_type(c) {
                         _ if in_escape => {
@@ -121,17 +123,15 @@ impl Source {
                 Token::String(string)
             }
             Char::SingleQuote => {
-                let Some(c) = self.next_char(span.hi) else {
+                let Some(c) = self.next_char(&mut span.hi) else {
                     return err!(self, span, "expected character, got end of file");
                 };
-                span.hi += c.len_utf8();
 
                 let token = match c {
                     '\\' => {
-                        let Some(c) = self.next_char(span.hi) else {
+                        let Some(c) = self.next_char(&mut span.hi) else {
                             return err!(self, span, "expected escape character, got end of file");
                         };
-                        span.hi += c.len_utf8();
                         escape(c, span)?
                     }
                     '\'' => {
@@ -140,10 +140,9 @@ impl Source {
                     c => c,
                 };
 
-                let Some(c) = self.next_char(span.hi) else {
+                let Some(c) = self.next_char(&mut span.hi) else {
                     return err!(self, span, "expected \', got end of file");
                 };
-                span.hi += c.len_utf8();
                 let '\'' = c else {
                     return err!(self, span, "expected \', got {c}");
                 };
@@ -153,15 +152,14 @@ impl Source {
             Char::Backslash => return err!(self, span, "found a \\ outside of quotes"),
             Char::Comment | Char::Whitespace => unreachable!(),
             Char::Symbol => {
-                while let Some(c) = self.next_char(span.hi) {
-                    span.hi += c.len_utf8();
-
+                while let Some(c) = self.peek_char(span.hi) {
                     match char_type(c) {
                         Char::Bracket(_) | Char::Whitespace => break,
                         Char::DoubleQuote | Char::SingleQuote | Char::Backslash | Char::Comment => {
+                            span.hi += c.len_utf8();
                             return err!(self, span, "expected symbol, got {c}");
                         }
-                        Char::Symbol => {}
+                        Char::Symbol => span.hi += c.len_utf8(),
                     }
                 }
 
@@ -240,6 +238,16 @@ fn test() -> Result<()> {
     assert_eq!(
         tokenize("asdf'").unwrap_err(),
         "error at TEST:1:1: expected symbol, got '\nasdf'"
+    );
+
+    assert_eq!(
+        tokenize("f(x)")?,
+        vec![
+            Token::Symbol,
+            Token::Bracket(Bracket::Paren(Side::Left)),
+            Token::Symbol,
+            Token::Bracket(Bracket::Paren(Side::Right))
+        ]
     );
 
     Ok(())
