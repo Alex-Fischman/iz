@@ -77,7 +77,7 @@ impl Source {
     }
 
     /// Get the token at byte position `idx` in the text.
-    fn next_token(&self, idx: usize) -> Result<Option<(Span, Token)>> {
+    pub fn next_token(&self, idx: usize) -> Result<Option<(Span, Token)>> {
         let escape = |c, span: Span| match c {
             't' => Ok('\t'),
             'n' => Ok('\n'),
