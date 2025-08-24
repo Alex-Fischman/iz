@@ -15,7 +15,7 @@ pub enum Bracket {
     Square,
 }
 
-enum Char {
+enum CharType {
     Bracket(Bracket, Side),
     DoubleQuote,
     SingleQuote,
@@ -25,26 +25,26 @@ enum Char {
     Symbol,
 }
 
-fn char_type(c: char) -> Char {
+fn char_type(c: char) -> CharType {
     match c {
-        '(' => Char::Bracket(Bracket::Paren, Side::Left),
-        ')' => Char::Bracket(Bracket::Paren, Side::Right),
-        '{' => Char::Bracket(Bracket::Curly, Side::Left),
-        '}' => Char::Bracket(Bracket::Curly, Side::Right),
-        '[' => Char::Bracket(Bracket::Square, Side::Left),
-        ']' => Char::Bracket(Bracket::Square, Side::Right),
-        '"' => Char::DoubleQuote,
-        '\'' => Char::SingleQuote,
-        '\\' => Char::Backslash,
-        '#' => Char::Comment,
-        c if c.is_whitespace() => Char::Whitespace,
-        _ => Char::Symbol,
+        '(' => CharType::Bracket(Bracket::Paren, Side::Left),
+        ')' => CharType::Bracket(Bracket::Paren, Side::Right),
+        '{' => CharType::Bracket(Bracket::Curly, Side::Left),
+        '}' => CharType::Bracket(Bracket::Curly, Side::Right),
+        '[' => CharType::Bracket(Bracket::Square, Side::Left),
+        ']' => CharType::Bracket(Bracket::Square, Side::Right),
+        '"' => CharType::DoubleQuote,
+        '\'' => CharType::SingleQuote,
+        '\\' => CharType::Backslash,
+        '#' => CharType::Comment,
+        c if c.is_whitespace() => CharType::Whitespace,
+        _ => CharType::Symbol,
     }
 }
 
 /// The different types of tokens in an `iz` program.
 #[derive(Debug, PartialEq)]
-pub enum Token {
+pub enum TokenType {
     /// One of `(`, `)`, `{`, `}`, `[`, or `]`.
     Bracket(Bracket, Side),
     /// A string, which has been parsed with escape codes.
@@ -55,6 +55,13 @@ pub enum Token {
     Comment,
     /// Everything else, which is whitespace-separated.
     Symbol,
+}
+
+/// One token of an `iz` program. See `Source::next_token`.
+#[derive(Debug, PartialEq)]
+pub struct Token {
+    pub span: Span,
+    pub tag: TokenType,
 }
 
 impl Source {
@@ -79,7 +86,7 @@ impl Source {
     }
 
     /// Get the token at byte position `idx` in the text.
-    pub fn next_token(&self, mut idx: usize) -> Result<Option<(Span, Token)>> {
+    pub fn next_token(&self, mut idx: usize) -> Result<Option<Token>> {
         let escape = |c, span: Span| match c {
             't' => Ok('\t'),
             'n' => Ok('\n'),
@@ -97,9 +104,9 @@ impl Source {
             return Ok(None);
         };
 
-        let token = match char_type(c) {
-            Char::Bracket(b, s) => Token::Bracket(b, s),
-            Char::DoubleQuote => {
+        let tag = match char_type(c) {
+            CharType::Bracket(b, s) => TokenType::Bracket(b, s),
+            CharType::DoubleQuote => {
                 let mut string = String::new();
                 let mut in_escape = false;
                 loop {
@@ -112,14 +119,14 @@ impl Source {
                             string.push(escape(c, span)?);
                             in_escape = false;
                         }
-                        Char::DoubleQuote => break,
-                        Char::Backslash => in_escape = true,
+                        CharType::DoubleQuote => break,
+                        CharType::Backslash => in_escape = true,
                         _ => string.push(c),
                     }
                 }
-                Token::String(string)
+                TokenType::String(string)
             }
-            Char::SingleQuote => {
+            CharType::SingleQuote => {
                 let Some(c) = self.next_char(&mut span.hi) else {
                     return err!(self, span, "expected character, got end of file");
                 };
@@ -144,34 +151,38 @@ impl Source {
                     return err!(self, span, "expected \', got {c}");
                 };
 
-                Token::Char(token)
+                TokenType::Char(token)
             }
-            Char::Backslash => return err!(self, span, "found a \\ outside of quotes"),
-            Char::Comment => {
+            CharType::Backslash => return err!(self, span, "found a \\ outside of quotes"),
+            CharType::Comment => {
                 while let Some(c) = self.next_char(&mut span.hi) {
                     if c == '\n' {
                         break;
                     }
                 }
-                Token::Comment
+                TokenType::Comment
             }
-            Char::Whitespace => unreachable!("whitespace should have been skipped"),
-            Char::Symbol => {
+            CharType::Whitespace => unreachable!("whitespace should have been skipped"),
+            CharType::Symbol => {
                 while let Some(c) = self.peek_char(span.hi) {
                     match char_type(c) {
-                        Char::Bracket(..) | Char::Whitespace => break,
-                        Char::DoubleQuote | Char::SingleQuote | Char::Backslash | Char::Comment => {
+                        CharType::Bracket(..) | CharType::Whitespace => break,
+                        CharType::DoubleQuote
+                        | CharType::SingleQuote
+                        | CharType::Backslash
+                        | CharType::Comment => {
                             span.hi += c.len_utf8();
                             return err!(self, span, "expected symbol, got {c}");
                         }
-                        Char::Symbol => span.hi += c.len_utf8(),
+                        CharType::Symbol => span.hi += c.len_utf8(),
                     }
                 }
 
-                Token::Symbol
+                TokenType::Symbol
             }
         };
-        Ok(Some((span, token)))
+
+        Ok(Some(Token { span, tag }))
     }
 }
 
@@ -179,58 +190,58 @@ impl Source {
 mod tests {
     use super::*;
 
-    fn tokenize(source: &Source) -> Result<Vec<(&str, Token)>> {
+    fn collect_tokens(source: &Source) -> Result<Vec<(&str, TokenType)>> {
         let mut out = Vec::new();
         let mut idx = 0;
-        while let Some((span, token)) = source.next_token(idx)? {
+        while let Some(Token { span, tag }) = source.next_token(idx)? {
             idx = span.hi;
-            out.push((span.string(source), token));
+            out.push((span.string(source), tag));
         }
         Ok(out)
     }
 
     macro_rules! token {
         (Left Paren) => {
-            Token::Bracket(Bracket::Paren, Side::Left)
+            TokenType::Bracket(Bracket::Paren, Side::Left)
         };
         (Right Paren) => {
-            Token::Bracket(Bracket::Paren, Side::Right)
+            TokenType::Bracket(Bracket::Paren, Side::Right)
         };
         (Left Curly) => {
-            Token::Bracket(Bracket::Curly, Side::Left)
+            TokenType::Bracket(Bracket::Curly, Side::Left)
         };
         (Right Curly) => {
-            Token::Bracket(Bracket::Curly, Side::Right)
+            TokenType::Bracket(Bracket::Curly, Side::Right)
         };
         (Left Square) => {
-            Token::Bracket(Bracket::Square, Side::Left)
+            TokenType::Bracket(Bracket::Square, Side::Left)
         };
         (Right Square) => {
-            Token::Bracket(Bracket::Square, Side::Right)
+            TokenType::Bracket(Bracket::Square, Side::Right)
         };
         (String $s:literal) => {
-            Token::String(String::from($s))
+            TokenType::String(String::from($s))
         };
         (Char $c:literal) => {
-            Token::Char($c)
+            TokenType::Char($c)
         };
         (Comment) => {
-            Token::Comment
+            TokenType::Comment
         };
         (Symbol) => {
-            Token::Symbol
+            TokenType::Symbol
         };
     }
 
     macro_rules! test {
         ($s:literal, $(($span:expr, $($token:tt)*)),* $(,)?) => {{
             let source = text!($s);
-            let tokens = tokenize(&source)?;
+            let tokens = collect_tokens(&source)?;
             assert_eq!(tokens, [$(($span, token!($($token)*)),)*])
         }};
         ($s:literal, $err:literal) => {{
             let source = text!($s);
-            let error = tokenize(&source).unwrap_err();
+            let error = collect_tokens(&source).unwrap_err();
             assert_eq!(error, $err);
         }};
     }
