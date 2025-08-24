@@ -51,6 +51,8 @@ pub enum Token {
     String(String),
     /// A character, which has been parsed with escape codes.
     Char(char),
+    /// A comment (used for pretty-printing and preprocessing).
+    Comment,
     /// Everything else, which is whitespace-separated.
     Symbol,
 }
@@ -62,15 +64,10 @@ impl Source {
 
     fn skip_whitespace(&self, idx: &mut usize) {
         while let Some(c) = self.peek_char(*idx) {
-            match char_type(c) {
-                Char::Comment => loop {
-                    match self.peek_char(*idx) {
-                        None | Some('\n') => break,
-                        Some(c) => *idx += c.len_utf8(),
-                    }
-                },
-                Char::Whitespace => *idx += c.len_utf8(),
-                _ => break,
+            if c.is_whitespace() {
+                *idx += c.len_utf8();
+            } else {
+                break;
             }
         }
     }
@@ -150,7 +147,15 @@ impl Source {
                 Token::Char(token)
             }
             Char::Backslash => return err!(self, span, "found a \\ outside of quotes"),
-            Char::Comment | Char::Whitespace => unreachable!(),
+            Char::Comment => {
+                while let Some(c) = self.next_char(&mut span.hi) {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+                Token::Comment
+            }
+            Char::Whitespace => unreachable!("whitespace should have been skipped"),
             Char::Symbol => {
                 while let Some(c) = self.peek_char(span.hi) {
                     match char_type(c) {
