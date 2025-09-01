@@ -47,11 +47,6 @@ fn char_type(c: char) -> CharType {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Number {
-    // TODO
-}
-
 /// The different types of tokens in an `iz` program.
 #[derive(Debug, PartialEq)]
 pub enum TokenType {
@@ -63,8 +58,8 @@ pub enum TokenType {
     Char(char),
     /// A comment (used for pretty-printing and preprocessing).
     Comment,
-    /// A numeric literal, like `1` or `-2.5`.
-    Number(Number),
+    /// A numeric literal, like `1` or `0x1F`.
+    Number(u64),
     /// A name, like `x` or `name_with_underscores`.
     Identifier,
     /// An operator, like `+` or `.`.
@@ -115,6 +110,8 @@ impl Source {
 
     /// Get the token at byte position `idx` in the text.
     pub fn next_token(&self, mut idx: usize) -> Result<Option<Token>> {
+        use CharType::*;
+
         self.skip_whitespace(&mut idx);
 
         let mut span = Span { lo: idx, hi: idx };
@@ -159,10 +156,49 @@ impl Source {
                 TokenType::Comment
             }
             CharType::Whitespace => unreachable!("whitespace should have been skipped"),
-            CharType::Digit => todo!("int and float literals"),
+            CharType::Digit => {
+                let radix = match (c, self.peek_char(span.hi)) {
+                    ('0', Some('b')) => 2,
+                    ('0', Some('x')) => 16,
+                    _ => 10,
+                };
+                if radix == 10 {
+                    // start the loop at the first digit
+                    span.hi -= c.len_utf8();
+                } else {
+                    // consume the `b` or the `x`
+                    span.hi += c.len_utf8();
+                }
+
+                let mut value = 0;
+                while let Some(c) = self.peek_char(span.hi) {
+                    match char_type(c) {
+                        Bracket(..) | Whitespace | Sigil => break,
+                        _ => span.hi += c.len_utf8(),
+                    }
+                    if c == '_' {
+                        continue;
+                    }
+
+                    let digit = match char_type(c) {
+                        Digit => u64::from(u32::from(c) - u32::from('0')),
+                        Letter => u64::from(u32::from(c) - u32::from('A') + 10),
+                        Bracket(..) | Whitespace | Sigil => unreachable!(),
+                        DoubleQuote | SingleQuote | Backslash | Comment => {
+                            return err!(self, span, "expected digit, got {c}");
+                        }
+                    };
+                    if digit >= radix {
+                        return err!(self, span, "base {radix} does not contain {digit}");
+                    }
+
+                    value = (value * radix) + digit;
+                }
+
+                TokenType::Number(value)
+            }
             CharType::Letter => {
                 while let Some(c) = self.peek_char(span.hi) {
-                    use CharType::*;
                     match char_type(c) {
                         Digit | Letter => span.hi += c.len_utf8(),
                         Bracket(..) | Whitespace | Sigil => break,
@@ -176,7 +212,6 @@ impl Source {
             }
             CharType::Sigil => {
                 while let Some(c) = self.peek_char(span.hi) {
-                    use CharType::*;
                     match char_type(c) {
                         Sigil => span.hi += c.len_utf8(),
                         Bracket(..) | Whitespace | Digit | Letter => break,
@@ -235,6 +270,9 @@ mod tests {
         };
         (Comment) => {
             TokenType::Comment
+        };
+        (Number $n:literal) => {
+            TokenType::Number($n)
         };
         (Identifier) => {
             TokenType::Identifier
@@ -331,17 +369,22 @@ mod tests {
     test! {hashtag_char, "'#'", ("'#'", Char '#')}
     test! {hashtag_string, "\"#\"", ("\"#\"", String "#")}
 
-    test! {symbol, "asdf", ("asdf", Identifier)}
-    test! {symbols, "asdf fdsa", ("asdf", Identifier), ("fdsa", Identifier)}
+    test! {thirty, "30", ("30", Number 30)}
+    test! {thirty_hex, "0x1E", ("0x1E", Number 30)}
+    test! {thirty_binary, "0b0001_1110", ("0b0001_1110", Number 30)}
+    test! {binary_two, "0b2", "error at TEST:1:1: base 2 does not contain 2\n0b2"}
+
+    test! {ident, "asdf", ("asdf", Identifier)}
+    test! {idents, "asdf fdsa", ("asdf", Identifier), ("fdsa", Identifier)}
     test! {
-        char_symbol_char,
+        char_ident_char,
         "'c' asdf 'c'",
         ("'c'", Char 'c'),
         ("asdf", Identifier),
         ("'c'", Char 'c')
     }
     test! {
-        symbol_into_char,
+        ident_into_char,
         "asdf'",
         "error at TEST:1:1: expected letter, got '\nasdf'"
     }
