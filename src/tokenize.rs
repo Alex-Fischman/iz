@@ -22,7 +22,9 @@ enum CharType {
     Backslash,
     Comment,
     Whitespace,
-    Symbol,
+    Digit,
+    Letter,
+    Sigil,
 }
 
 fn char_type(c: char) -> CharType {
@@ -38,8 +40,16 @@ fn char_type(c: char) -> CharType {
         '\\' => CharType::Backslash,
         '#' => CharType::Comment,
         c if c.is_whitespace() => CharType::Whitespace,
-        _ => CharType::Symbol,
+        c if c.is_ascii_digit() => CharType::Digit,
+        c if c.is_alphabetic() => CharType::Letter,
+        '_' => CharType::Letter,
+        _ => CharType::Sigil,
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Number {
+    // TODO
 }
 
 /// The different types of tokens in an `iz` program.
@@ -53,8 +63,12 @@ pub enum TokenType {
     Char(char),
     /// A comment (used for pretty-printing and preprocessing).
     Comment,
-    /// Everything else, which is whitespace-separated.
-    Symbol,
+    /// A numeric literal, like `1` or `-2.5`.
+    Number(Number),
+    /// A name, like `x` or `name_with_underscores`.
+    Identifier,
+    /// An operator, like `+` or `.`.
+    Operator,
 }
 
 /// One token of an `iz` program. See `Source::next_token`.
@@ -85,15 +99,17 @@ impl Source {
         Some(c)
     }
 
-    fn escape(&self, c: char, span: Span) -> Result<char> {
-        match c {
-            't' => Ok('\t'),
-            'n' => Ok('\n'),
-            'r' => Ok('\r'),
-            '"' => Ok('"'),
-            '\'' => Ok('\''),
-            '\\' => Ok('\\'),
-            _ => err!(self, span, "expected escape character, got {c}"),
+    fn next_escape(&self, span: &mut Span) -> Result<char> {
+        debug_assert!(span.string(self).ends_with('\\'));
+        match self.next_char(span) {
+            Some('t') => Ok('\t'),
+            Some('n') => Ok('\n'),
+            Some('r') => Ok('\r'),
+            Some('"') => Ok('"'),
+            Some('\'') => Ok('\''),
+            Some('\\') => Ok('\\'),
+            Some(c) => err!(self, span, "expected escape character, got {c}"),
+            None => err!(self, span, "expected escape character, got end of file"),
         }
     }
 
@@ -110,50 +126,28 @@ impl Source {
             CharType::Bracket(b, s) => TokenType::Bracket(b, s),
             CharType::DoubleQuote => {
                 let mut string = String::new();
-                let mut in_escape = false;
                 loop {
-                    let Some(c) = self.next_char(&mut span) else {
-                        return err!(self, span, "expected \", got end of file");
-                    };
-
-                    match char_type(c) {
-                        _ if in_escape => {
-                            string.push(self.escape(c, span)?);
-                            in_escape = false;
-                        }
-                        CharType::DoubleQuote => break,
-                        CharType::Backslash => in_escape = true,
-                        _ => string.push(c),
+                    match self.next_char(&mut span) {
+                        Some('"') => break,
+                        Some('\\') => string.push(self.next_escape(&mut span)?),
+                        Some(c) => string.push(c),
+                        None => return err!(self, span, "expected \", got end of file"),
                     }
                 }
                 TokenType::String(string)
             }
             CharType::SingleQuote => {
-                let Some(c) = self.next_char(&mut span) else {
-                    return err!(self, span, "expected character, got end of file");
+                let c = match self.next_char(&mut span) {
+                    Some('\'') => return err!(self, span, "expected character, got closing \'"),
+                    Some('\\') => self.next_escape(&mut span)?,
+                    Some(c) => c,
+                    None => return err!(self, span, "expected character, got end of file"),
                 };
-
-                let token = match c {
-                    '\\' => {
-                        let Some(c) = self.next_char(&mut span) else {
-                            return err!(self, span, "expected escape character, got end of file");
-                        };
-                        self.escape(c, span)?
-                    }
-                    '\'' => {
-                        return err!(self, span, "expected character, got closing \'");
-                    }
-                    c => c,
-                };
-
-                let Some(c) = self.next_char(&mut span) else {
-                    return err!(self, span, "expected \', got end of file");
-                };
-                let '\'' = c else {
-                    return err!(self, span, "expected \', got {c}");
-                };
-
-                TokenType::Char(token)
+                match self.next_char(&mut span) {
+                    Some('\'') => TokenType::Char(c),
+                    Some(_) => return err!(self, span, "expected \', got {c}"),
+                    None => return err!(self, span, "expected \', got end of file"),
+                }
             }
             CharType::Backslash => return err!(self, span, "found a \\ outside of quotes"),
             CharType::Comment => {
@@ -165,22 +159,34 @@ impl Source {
                 TokenType::Comment
             }
             CharType::Whitespace => unreachable!("whitespace should have been skipped"),
-            CharType::Symbol => {
+            CharType::Digit => todo!("int and float literals"),
+            CharType::Letter => {
                 while let Some(c) = self.peek_char(span.hi) {
+                    use CharType::*;
                     match char_type(c) {
-                        CharType::Bracket(..) | CharType::Whitespace => break,
-                        CharType::DoubleQuote
-                        | CharType::SingleQuote
-                        | CharType::Backslash
-                        | CharType::Comment => {
+                        Digit | Letter => span.hi += c.len_utf8(),
+                        Bracket(..) | Whitespace | Sigil => break,
+                        DoubleQuote | SingleQuote | Backslash | Comment => {
                             span.hi += c.len_utf8();
-                            return err!(self, span, "expected symbol, got {c}");
+                            return err!(self, span, "expected letter, got {c}");
                         }
-                        CharType::Symbol => span.hi += c.len_utf8(),
                     }
                 }
-
-                TokenType::Symbol
+                TokenType::Identifier
+            }
+            CharType::Sigil => {
+                while let Some(c) = self.peek_char(span.hi) {
+                    use CharType::*;
+                    match char_type(c) {
+                        Sigil => span.hi += c.len_utf8(),
+                        Bracket(..) | Whitespace | Digit | Letter => break,
+                        DoubleQuote | SingleQuote | Backslash | Comment => {
+                            span.hi += c.len_utf8();
+                            return err!(self, span, "expected letter, got {c}");
+                        }
+                    }
+                }
+                TokenType::Operator
             }
         };
 
@@ -230,8 +236,11 @@ mod tests {
         (Comment) => {
             TokenType::Comment
         };
-        (Symbol) => {
-            TokenType::Symbol
+        (Identifier) => {
+            TokenType::Identifier
+        };
+        (Operator) => {
+            TokenType::Operator
         };
     }
 
@@ -266,10 +275,10 @@ mod tests {
 
     test! {
         string_escapes,
-        "\"1 2\t3\n\\\\\"",
+        "\"A B\tC\n\\\\\"",
         (
-            "\"1 2\t3\n\\\\\"",
-            String "1 2\t3\n\\"
+            "\"A B\tC\n\\\\\"",
+            String "A B\tC\n\\"
         )
     }
     // TODO: failing string tests
@@ -310,51 +319,53 @@ mod tests {
         comment_symbol,
         "# a a\na",
         ("# a a\n", Comment),
-        ("a", Symbol)
+        ("a", Identifier)
     }
     test! {
         symbol_comment_symbol,
         "a #\na",
-        ("a", Symbol),
+        ("a", Identifier),
         ("#\n", Comment),
-        ("a", Symbol)
+        ("a", Identifier)
     }
     test! {hashtag_char, "'#'", ("'#'", Char '#')}
     test! {hashtag_string, "\"#\"", ("\"#\"", String "#")}
 
-    test! {symbol, "asdf", ("asdf", Symbol)}
-    test! {symbols, "asdf fdsa", ("asdf", Symbol), ("fdsa", Symbol)}
+    test! {symbol, "asdf", ("asdf", Identifier)}
+    test! {symbols, "asdf fdsa", ("asdf", Identifier), ("fdsa", Identifier)}
     test! {
         char_symbol_char,
         "'c' asdf 'c'",
         ("'c'", Char 'c'),
-        ("asdf", Symbol),
+        ("asdf", Identifier),
         ("'c'", Char 'c')
     }
     test! {
         symbol_into_char,
         "asdf'",
-        "error at TEST:1:1: expected symbol, got '\nasdf'"
+        "error at TEST:1:1: expected letter, got '\nasdf'"
     }
 
     test! {
         f_of_x,
         "f(x)",
-        ("f", Symbol),
+        ("f", Identifier),
         ("(", Left Paren),
-        ("x", Symbol),
+        ("x", Identifier),
         (")", Right Paren)
     }
     test! {
-        one_plus_two,
-        "1 + 2",
-        ("1", Symbol),
-        ("+", Symbol),
-        ("2", Symbol),
+        x_plus_y,
+        "x + y",
+        ("x", Identifier),
+        ("+", Operator),
+        ("y", Identifier),
     }
     test! {
-        one_plus_two_no_spaces,
-        "1+2",
-        ("1+2", Symbol)
+        a_dot_b,
+        "a.b",
+        ("a", Identifier),
+        (".", Operator),
+        ("b", Identifier),
     }
 }
