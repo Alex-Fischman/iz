@@ -1,7 +1,7 @@
 //! A compiler for the `iz` programming language.
 
 #![deny(clippy::all, clippy::pedantic, missing_docs)]
-#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
 mod tokenize;
 
