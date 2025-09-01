@@ -79,15 +79,14 @@ impl Source {
         }
     }
 
-    fn next_char(&self, idx: &mut usize) -> Option<char> {
-        let c = self.peek_char(*idx)?;
-        *idx += c.len_utf8();
+    fn next_char(&self, span: &mut Span) -> Option<char> {
+        let c = self.peek_char(span.hi)?;
+        span.hi += c.len_utf8();
         Some(c)
     }
 
-    /// Get the token at byte position `idx` in the text.
-    pub fn next_token(&self, mut idx: usize) -> Result<Option<Token>> {
-        let escape = |c, span: Span| match c {
+    fn escape(&self, c: char, span: Span) -> Result<char> {
+        match c {
             't' => Ok('\t'),
             'n' => Ok('\n'),
             'r' => Ok('\r'),
@@ -95,12 +94,15 @@ impl Source {
             '\'' => Ok('\''),
             '\\' => Ok('\\'),
             _ => err!(self, span, "expected escape character, got {c}"),
-        };
+        }
+    }
 
+    /// Get the token at byte position `idx` in the text.
+    pub fn next_token(&self, mut idx: usize) -> Result<Option<Token>> {
         self.skip_whitespace(&mut idx);
 
         let mut span = Span { lo: idx, hi: idx };
-        let Some(c) = self.next_char(&mut span.hi) else {
+        let Some(c) = self.next_char(&mut span) else {
             return Ok(None);
         };
 
@@ -110,13 +112,13 @@ impl Source {
                 let mut string = String::new();
                 let mut in_escape = false;
                 loop {
-                    let Some(c) = self.next_char(&mut span.hi) else {
+                    let Some(c) = self.next_char(&mut span) else {
                         return err!(self, span, "expected \", got end of file");
                     };
 
                     match char_type(c) {
                         _ if in_escape => {
-                            string.push(escape(c, span)?);
+                            string.push(self.escape(c, span)?);
                             in_escape = false;
                         }
                         CharType::DoubleQuote => break,
@@ -127,16 +129,16 @@ impl Source {
                 TokenType::String(string)
             }
             CharType::SingleQuote => {
-                let Some(c) = self.next_char(&mut span.hi) else {
+                let Some(c) = self.next_char(&mut span) else {
                     return err!(self, span, "expected character, got end of file");
                 };
 
                 let token = match c {
                     '\\' => {
-                        let Some(c) = self.next_char(&mut span.hi) else {
+                        let Some(c) = self.next_char(&mut span) else {
                             return err!(self, span, "expected escape character, got end of file");
                         };
-                        escape(c, span)?
+                        self.escape(c, span)?
                     }
                     '\'' => {
                         return err!(self, span, "expected character, got closing \'");
@@ -144,7 +146,7 @@ impl Source {
                     c => c,
                 };
 
-                let Some(c) = self.next_char(&mut span.hi) else {
+                let Some(c) = self.next_char(&mut span) else {
                     return err!(self, span, "expected \', got end of file");
                 };
                 let '\'' = c else {
@@ -155,7 +157,7 @@ impl Source {
             }
             CharType::Backslash => return err!(self, span, "found a \\ outside of quotes"),
             CharType::Comment => {
-                while let Some(c) = self.next_char(&mut span.hi) {
+                while let Some(c) = self.next_char(&mut span) {
                     if c == '\n' {
                         break;
                     }
