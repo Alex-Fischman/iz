@@ -66,14 +66,40 @@ pub enum TokenType {
     Operator,
 }
 
-/// One token of an `iz` program. See `Source::next_token`.
+/// One token of an `iz` program. See `Source::tokens`.
 #[derive(Debug, PartialEq)]
 pub struct Token {
+    /// The location of this token.
     pub span: Span,
+    /// The type of this token.
     pub tag: TokenType,
 }
 
+/// An iterator which returns all the `Token`s in a `Source`.
+pub struct Tokens<'a> {
+    src: &'a Source,
+    idx: usize,
+}
+
+impl Program for Tokens<'_> {
+    type Item = Token;
+
+    fn next(&mut self) -> Result<Option<Token>> {
+        let option = self.src.peek_token(self.idx)?;
+        if let Some(token) = option.as_ref() {
+            self.idx = token.span.hi;
+        }
+        Ok(option)
+    }
+}
+
 impl Source {
+    /// Get the tokens in this `Source`.
+    #[must_use]
+    pub fn tokens(&self) -> Tokens<'_> {
+        Tokens { src: self, idx: 0 }
+    }
+
     fn peek_char(&self, idx: usize) -> Option<char> {
         self.text[idx..].chars().next()
     }
@@ -108,8 +134,7 @@ impl Source {
         }
     }
 
-    /// Get the token at byte position `idx` in the text.
-    pub fn next_token(&self, mut idx: usize) -> Result<Option<Token>> {
+    fn peek_token(&self, mut idx: usize) -> Result<Option<Token>> {
         use CharType::*;
 
         self.skip_whitespace(&mut idx);
@@ -234,13 +259,10 @@ mod tests {
     use super::*;
 
     fn collect_tokens(source: &Source) -> Result<Vec<(&str, TokenType)>> {
-        let mut out = Vec::new();
-        let mut idx = 0;
-        while let Some(Token { span, tag }) = source.next_token(idx)? {
-            idx = span.hi;
-            out.push((span.string(source), tag));
-        }
-        Ok(out)
+        source
+            .tokens()
+            .map(|Token { span, tag }| (span.string(source), tag))
+            .collect()
     }
 
     macro_rules! token {

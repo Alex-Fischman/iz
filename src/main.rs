@@ -3,7 +3,11 @@
 #![deny(clippy::all, clippy::pedantic, missing_docs)]
 #![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
+mod program;
 mod tokenize;
+
+pub use program::*;
+pub use tokenize::*;
 
 pub use std::collections::HashMap;
 pub use std::fmt::{Debug, Display, Formatter};
