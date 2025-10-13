@@ -241,7 +241,7 @@ impl Iterator<Token> for Tokens {
                         Bracket(..) | Whitespace | Digit | Letter => break,
                         DoubleQuote | SingleQuote | Backslash | Comment => {
                             span.hi += c.len_utf8();
-                            return err!(state, span, "expected letter, got {c}");
+                            return err!(state, span, "expected sigil, got {c}");
                         }
                     }
                 }
