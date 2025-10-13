@@ -66,7 +66,7 @@ pub enum TokenType {
     Operator,
 }
 
-/// One token of an `iz` program. See `Source::tokens`.
+/// One token of an `iz` program. See `State::tokens`.
 #[derive(Debug, PartialEq)]
 pub struct Token {
     /// The location of this token.
@@ -76,71 +76,70 @@ pub struct Token {
 }
 
 /// An iterator which returns all the `Token`s in a `Source`.
-pub struct Tokens<'a> {
-    src: &'a Source,
+pub struct Tokens {
+    src: SourceId,
     idx: usize,
 }
 
-impl Iterator for Tokens<'_> {
-    type Item = Token;
-
-    fn next(&mut self) -> Result<Option<Token>> {
-        let option = self.src.peek_token(self.idx)?;
-        if let Some(token) = option.as_ref() {
-            self.idx = token.span.hi;
-        }
-        Ok(option)
+impl Tokens {
+    /// Get all the tokens in one `Source`.
+    #[must_use]
+    pub fn new(src: SourceId) -> Tokens {
+        Tokens { src, idx: 0 }
     }
 }
 
-impl Source {
-    /// Get the tokens in this `Source`.
-    #[must_use]
-    pub fn tokens(&self) -> impl Iterator<Item = Token> {
-        Tokens { src: self, idx: 0 }
+impl Span {
+    fn peek_char(&self, state: &State) -> Option<char> {
+        state[self.src].text[self.hi..].chars().next()
     }
 
-    fn peek_char(&self, idx: usize) -> Option<char> {
-        self.text[idx..].chars().next()
+    fn next_char(&mut self, state: &State) -> Option<char> {
+        let c = self.peek_char(state)?;
+        self.hi += c.len_utf8();
+        Some(c)
     }
 
-    fn skip_whitespace(&self, idx: &mut usize) {
-        while let Some(c) = self.peek_char(*idx) {
+    fn skip_whitespace(&mut self, state: &State) {
+        while let Some(c) = self.peek_char(state) {
             if c.is_whitespace() {
-                *idx += c.len_utf8();
+                self.lo += c.len_utf8();
+                self.hi += c.len_utf8();
             } else {
                 break;
             }
         }
     }
 
-    fn next_char(&self, span: &mut Span) -> Option<char> {
-        let c = self.peek_char(span.hi)?;
-        span.hi += c.len_utf8();
-        Some(c)
-    }
-
-    fn next_escape(&self, span: &mut Span) -> Result<char> {
-        debug_assert!(span.string(self).ends_with('\\'));
-        match self.next_char(span) {
+    fn next_escape(&mut self, state: &State) -> Result<char> {
+        debug_assert!(self.string(state).ends_with('\\'));
+        match self.next_char(state) {
             Some('t') => Ok('\t'),
             Some('n') => Ok('\n'),
             Some('r') => Ok('\r'),
             Some('"') => Ok('"'),
             Some('\'') => Ok('\''),
             Some('\\') => Ok('\\'),
-            Some(c) => err!(self, span, "expected escape character, got {c}"),
-            None => err!(self, span, "expected escape character, got end of file"),
+            Some(c) => err!(state, self, "expected escape character, got {c}"),
+            None => err!(state, self, "expected escape character, got end of file"),
         }
     }
+}
 
-    fn peek_token(&self, mut idx: usize) -> Result<Option<Token>> {
+impl Iterator<Token> for Tokens {
+    fn next(&mut self, state: &mut State) -> Result<Option<Token>> {
         use CharType::*;
+        let state: &State = state;
 
-        self.skip_whitespace(&mut idx);
+        let mut span = Span {
+            src: self.src,
+            lo: self.idx,
+            hi: self.idx,
+        };
 
-        let mut span = Span { lo: idx, hi: idx };
-        let Some(c) = self.next_char(&mut span) else {
+        span.skip_whitespace(state);
+
+        let Some(c) = span.next_char(state) else {
             return Ok(None);
         };
 
@@ -149,31 +148,31 @@ impl Source {
             CharType::DoubleQuote => {
                 let mut string = String::new();
                 loop {
-                    match self.next_char(&mut span) {
+                    match span.next_char(state) {
                         Some('"') => break,
-                        Some('\\') => string.push(self.next_escape(&mut span)?),
+                        Some('\\') => string.push(span.next_escape(state)?),
                         Some(c) => string.push(c),
-                        None => return err!(self, span, "expected \", got end of file"),
+                        None => return err!(state, span, "expected \", got end of file"),
                     }
                 }
                 TokenType::String(string)
             }
             CharType::SingleQuote => {
-                let c = match self.next_char(&mut span) {
-                    Some('\'') => return err!(self, span, "expected character, got closing \'"),
-                    Some('\\') => self.next_escape(&mut span)?,
+                let c = match span.next_char(state) {
+                    Some('\'') => return err!(state, span, "expected character, got closing \'"),
+                    Some('\\') => span.next_escape(state)?,
                     Some(c) => c,
-                    None => return err!(self, span, "expected character, got end of file"),
+                    None => return err!(state, span, "expected character, got end of file"),
                 };
-                match self.next_char(&mut span) {
+                match span.next_char(state) {
                     Some('\'') => TokenType::Char(c),
-                    Some(_) => return err!(self, span, "expected \', got {c}"),
-                    None => return err!(self, span, "expected \', got end of file"),
+                    Some(_) => return err!(state, span, "expected \', got {c}"),
+                    None => return err!(state, span, "expected \', got end of file"),
                 }
             }
-            CharType::Backslash => return err!(self, span, "found a \\ outside of quotes"),
+            CharType::Backslash => return err!(state, span, "found a \\ outside of quotes"),
             CharType::Comment => {
-                while let Some(c) = self.next_char(&mut span) {
+                while let Some(c) = span.next_char(state) {
                     if c == '\n' {
                         break;
                     }
@@ -182,7 +181,7 @@ impl Source {
             }
             CharType::Whitespace => unreachable!("whitespace should have been skipped"),
             CharType::Digit => {
-                let radix = match (c, self.peek_char(span.hi)) {
+                let radix = match (c, span.peek_char(state)) {
                     ('0', Some('b')) => 2,
                     ('0', Some('x')) => 16,
                     _ => 10,
@@ -196,7 +195,7 @@ impl Source {
                 }
 
                 let mut value = 0;
-                while let Some(c) = self.peek_char(span.hi) {
+                while let Some(c) = span.peek_char(state) {
                     match char_type(c) {
                         Bracket(..) | Whitespace | Sigil => break,
                         _ => span.hi += c.len_utf8(),
@@ -210,11 +209,11 @@ impl Source {
                         Letter => u64::from(u32::from(c) - u32::from('A') + 10),
                         Bracket(..) | Whitespace | Sigil => unreachable!(),
                         DoubleQuote | SingleQuote | Backslash | Comment => {
-                            return err!(self, span, "expected digit, got {c}");
+                            return err!(state, span, "expected digit, got {c}");
                         }
                     };
                     if digit >= radix {
-                        return err!(self, span, "base {radix} does not contain {digit}");
+                        return err!(state, span, "base {radix} does not contain {digit}");
                     }
 
                     value = (value * radix) + digit;
@@ -223,26 +222,26 @@ impl Source {
                 TokenType::Number(value)
             }
             CharType::Letter => {
-                while let Some(c) = self.peek_char(span.hi) {
+                while let Some(c) = span.peek_char(state) {
                     match char_type(c) {
                         Digit | Letter => span.hi += c.len_utf8(),
                         Bracket(..) | Whitespace | Sigil => break,
                         DoubleQuote | SingleQuote | Backslash | Comment => {
                             span.hi += c.len_utf8();
-                            return err!(self, span, "expected letter, got {c}");
+                            return err!(state, span, "expected letter, got {c}");
                         }
                     }
                 }
                 TokenType::Identifier
             }
             CharType::Sigil => {
-                while let Some(c) = self.peek_char(span.hi) {
+                while let Some(c) = span.peek_char(state) {
                     match char_type(c) {
                         Sigil => span.hi += c.len_utf8(),
                         Bracket(..) | Whitespace | Digit | Letter => break,
                         DoubleQuote | SingleQuote | Backslash | Comment => {
                             span.hi += c.len_utf8();
-                            return err!(self, span, "expected letter, got {c}");
+                            return err!(state, span, "expected letter, got {c}");
                         }
                     }
                 }
@@ -250,6 +249,7 @@ impl Source {
             }
         };
 
+        self.idx = span.hi;
         Ok(Some(Token { span, tag }))
     }
 }
@@ -258,11 +258,13 @@ impl Source {
 mod tests {
     use super::*;
 
-    fn collect_tokens(source: &Source) -> Result<Vec<(&str, TokenType)>> {
-        source
-            .tokens()
-            .map(|Token { span, tag }| (span.string(source), tag))
-            .collect()
+    fn collect_tokens(state: &mut State, src: SourceId) -> Result<Vec<(String, TokenType)>> {
+        let mut tokens = Tokens::new(src);
+        let mut out = Vec::new();
+        while let Some(Token { span, tag }) = tokens.next(state)? {
+            out.push((span.string(state).to_owned(), tag));
+        }
+        Ok(out)
     }
 
     macro_rules! token {
@@ -309,8 +311,9 @@ mod tests {
             #[test]
             fn $name() -> Result<()> {
                 let source = text!($s);
-                let tokens = collect_tokens(&source)?;
-                assert_eq!(tokens, [$(($span, token!($($token)*)),)*]);
+                let (mut state, src) = State::new(source);
+                let tokens = collect_tokens(&mut state, src)?;
+                assert_eq!(tokens, [$((String::from($span), token!($($token)*)),)*]);
                 Ok(())
             }
         };
@@ -318,7 +321,8 @@ mod tests {
             #[test]
             fn $name() -> Result<()> {
                 let source = text!($s);
-                let error = collect_tokens(&source).unwrap_err();
+                let (mut state, src) = State::new(source);
+                let error = collect_tokens(&mut state, src).unwrap_err();
                 assert_eq!(error, $err);
                 Ok(())
             }
@@ -348,28 +352,28 @@ mod tests {
     test! {
         char_no_char,
         "'",
-        "error at TEST:1:1: expected character, got end of file\n'"
+        "error at text!:1:1: expected character, got end of file\n'"
     }
     test! {
         char_empty,
         "''",
-        "error at TEST:1:1: expected character, got closing '\n''"
+        "error at text!:1:1: expected character, got closing '\n''"
     }
     test! {
         char_no_end,
         "'a",
-        "error at TEST:1:1: expected ', got end of file\n'a"
+        "error at text!:1:1: expected ', got end of file\n'a"
     }
     test! {
         char_two_chars,
         "'aa'",
-        "error at TEST:1:1: expected ', got a\n'aa"
+        "error at text!:1:1: expected ', got a\n'aa"
     }
 
     test! {
         bare_backslash,
         "\\",
-        "error at TEST:1:1: found a \\ outside of quotes\n\\"
+        "error at text!:1:1: found a \\ outside of quotes\n\\"
     }
 
     test! {empty_comment, "#", ("#", Comment)}
@@ -394,7 +398,7 @@ mod tests {
     test! {thirty, "30", ("30", Number 30)}
     test! {thirty_hex, "0x1E", ("0x1E", Number 30)}
     test! {thirty_binary, "0b0001_1110", ("0b0001_1110", Number 30)}
-    test! {binary_two, "0b2", "error at TEST:1:1: base 2 does not contain 2\n0b2"}
+    test! {binary_two, "0b2", "error at text!:1:1: base 2 does not contain 2\n0b2"}
 
     test! {ident, "asdf", ("asdf", Identifier)}
     test! {idents, "asdf fdsa", ("asdf", Identifier), ("fdsa", Identifier)}
@@ -408,7 +412,7 @@ mod tests {
     test! {
         ident_into_char,
         "asdf'",
-        "error at TEST:1:1: expected letter, got '\nasdf'"
+        "error at text!:1:1: expected letter, got '\nasdf'"
     }
 
     test! {

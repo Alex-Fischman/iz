@@ -3,30 +3,16 @@
 #![deny(clippy::all, clippy::pedantic, missing_docs)]
 #![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
-mod program;
 mod tokenize;
 
-pub use program::*;
 pub use tokenize::*;
 
 pub use std::collections::HashMap;
 pub use std::fmt::{Debug, Display, Formatter};
+pub use std::ops::Index;
 
 /// Global `Result` alias for ease of use.
 pub type Result<T> = std::result::Result<T, String>;
-
-/// Constructs an error message from the given source, span, and format arguments.
-#[macro_export]
-macro_rules! err {
-    ($source:expr, $span:expr, $($fmt:tt)*) => {
-        Err(format!(
-            "error at {}: {}\n{}",
-            $span.location($source),
-            format!($($fmt)*),
-            $span.string($source),
-        ))
-    };
-}
 
 /// A `Source` represents a unit of source code (for example, a `.iz` file).
 pub struct Source {
@@ -41,7 +27,7 @@ pub struct Source {
 macro_rules! text {
     ($text:expr) => {
         Source {
-            name: ::std::string::String::from("TEST"),
+            name: ::std::string::String::from("text!"),
             text: ::std::string::String::from($text),
         }
     };
@@ -57,9 +43,52 @@ impl Source {
     }
 }
 
-/// A substring of a `Source`.
+/// The state of the compiler.
+pub struct State {
+    sources: Vec<Source>,
+}
+
+/// A handle to one `Source` in the `State`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SourceId(usize);
+
+impl State {
+    /// Create a new state. The provided source will have the returned `SourceId`.
+    #[must_use]
+    pub fn new(source: Source) -> (State, SourceId) {
+        let mut state = State {
+            sources: Vec::new(),
+        };
+        let src = state.add_source(source);
+        (state, src)
+    }
+
+    /// Add a source to the state.
+    pub fn add_source(&mut self, source: Source) -> SourceId {
+        let src = SourceId(self.sources.len());
+        self.sources.push(source);
+        src
+    }
+}
+
+impl Index<SourceId> for State {
+    type Output = Source;
+    fn index(&self, SourceId(src): SourceId) -> &Source {
+        &self.sources[src]
+    }
+}
+
+/// A custom `Iterator` trait that can modify `State` and returns a `Result`.
+pub trait Iterator<T> {
+    /// Get the next element of the iterator.
+    /// If we're iterating over a tree, this should be a postorder traversal.
+    fn next(&mut self, state: &mut State) -> Result<Option<T>>;
+}
+
+/// A substring of a `Source` in the `State`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
+    src: SourceId,
     lo: usize,
     hi: usize,
 }
@@ -67,13 +96,14 @@ pub struct Span {
 impl Span {
     /// Get the substring that this `Span` corresponds to.
     #[must_use]
-    pub fn string<'a>(&self, src: &'a Source) -> &'a str {
-        &src.text[self.lo..self.hi]
+    pub fn string<'a>(&self, state: &'a State) -> &'a str {
+        &state[self.src].text[self.lo..self.hi]
     }
 
-    /// Get the location of the substring that this `Span` corresponds to.
+    /// Get the location of this `Span`.
     #[must_use]
-    pub fn location(&self, Source { name, text }: &Source) -> String {
+    pub fn location(&self, state: &State) -> String {
+        let Source { name, text } = &state[self.src];
         let mut row = 1;
         let mut col = 1;
         for (i, c) in text.char_indices() {
@@ -90,23 +120,29 @@ impl Span {
     }
 }
 
-/// A wrapper type around some bytes that should be interpreted as assembly code.
-pub struct Assembly(pub Vec<u8>);
-
-impl Assembly {
-    /// Run an `Assembly` program.
-    pub fn run(&self) -> Result<()> {
-        todo!()
-    }
+/// Constructs an error message from the given state, span, and format arguments.
+#[macro_export]
+macro_rules! err {
+    ($state:expr, $span:expr, $($fmt:tt)*) => {
+        Err(format!(
+            "error at {}: {}\n{}",
+            $span.location($state),
+            format!($($fmt)*),
+            $span.string($state),
+        ))
+    };
 }
 
-/// Compile a `Source` down to `Assembly`.
-pub fn compile(source: Source) -> Result<Assembly> {
-    let sources = [source];
+/// One instruction in the intermediate representation.
+pub enum Instruction {}
 
-    eprintln!("{}\n{}", sources[0].name, sources[0].text);
+/// Compile a `Source` down to `Instruction`s.
+pub fn compile(source: Source) -> Result<Vec<String>> {
+    let (state, src) = State::new(source);
 
-    Ok(Assembly(Vec::new()))
+    eprintln!("{}\n{}", state[src].name, state[src].text);
+
+    Ok(Vec::new())
 }
 
 fn main() -> std::process::ExitCode {
@@ -114,7 +150,7 @@ fn main() -> std::process::ExitCode {
         let args: Vec<_> = std::env::args().collect();
         let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
         let source = Source::from_file(name)?;
-        let _assembly = compile(source)?;
+        let _instructions = compile(source)?;
         Ok::<(), String>(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
@@ -131,8 +167,8 @@ mod tests {
 
     #[test]
     fn empty_program_ok() -> Result<()> {
-        let assembly = compile(text!(""))?;
-        assert!(assembly.0.is_empty());
+        let instructions = compile(text!(""))?;
+        assert!(instructions.is_empty());
         Ok(())
     }
 }
