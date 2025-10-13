@@ -81,7 +81,7 @@ pub struct Tokens<'a> {
     idx: usize,
 }
 
-impl Program for Tokens<'_> {
+impl Iterator for Tokens<'_> {
     type Item = Token;
 
     fn next(&mut self) -> Result<Option<Token>> {
@@ -96,7 +96,7 @@ impl Program for Tokens<'_> {
 impl Source {
     /// Get the tokens in this `Source`.
     #[must_use]
-    pub fn tokens(&self) -> Tokens<'_> {
+    pub fn tokens(&self) -> impl Iterator<Item = Token> {
         Tokens { src: self, idx: 0 }
     }
 

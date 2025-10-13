@@ -1,23 +1,23 @@
 use crate::*;
 
 /// A custom `Iterator` trait that supports returning `Result`s.
-pub trait Program {
-    /// The type of one element of the program.
+pub trait Iterator {
+    /// The type of one element.
     type Item;
 
-    /// Get the next element of the program.
-    /// If the program represents a tree, this is always a postorder traversal.
+    /// Get the next element of the iterator.
+    /// If we're iterating over a tree, this should be a postorder traversal.
     fn next(&mut self) -> Result<Option<Self::Item>>;
 
-    /// Transform this program into a different program.
-    fn map<Y>(self, f: impl FnMut(Self::Item) -> Y) -> impl Program<Item = Y>
+    /// Transform each element of this iterator using a function.
+    fn map<Y>(self, f: impl FnMut(Self::Item) -> Y) -> impl Iterator<Item = Y>
     where
         Self: Sized,
     {
         Map(self, f)
     }
 
-    /// Transform this program into a `Vec`.
+    /// Transform this iterator into a `Vec`.
     /// Useful for testing and at the end of compilation.
     fn collect(mut self) -> Result<Vec<Self::Item>>
     where
@@ -33,9 +33,9 @@ pub trait Program {
 
 struct Map<A, B>(A, B);
 
-impl<X, Y, P, F> Program for Map<P, F>
+impl<X, Y, P, F> Iterator for Map<P, F>
 where
-    P: Program<Item = X>,
+    P: Iterator<Item = X>,
     F: FnMut(X) -> Y,
 {
     type Item = Y;
