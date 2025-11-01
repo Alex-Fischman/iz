@@ -7,9 +7,10 @@ mod tokenize;
 
 pub use tokenize::*;
 
+pub use std::any::Any;
 pub use std::collections::HashMap;
 pub use std::fmt::{Debug, Display, Formatter};
-pub use std::ops::Index;
+pub use std::ops::{Index, IndexMut};
 
 /// Global `Result` alias for ease of use.
 pub type Result<T> = std::result::Result<T, String>;
@@ -43,14 +44,32 @@ impl Source {
     }
 }
 
-/// The state of the compiler.
-pub struct State {
-    sources: Vec<Source>,
-}
-
 /// A handle to one `Source` in the `State`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SourceId(usize);
+
+/// A handle to one `Node` in the `State`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NodeId(usize);
+
+/// A handle to one `Table<T>` in the `State`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TableId<T>(usize, std::marker::PhantomData<T>);
+
+/// A `Node` represents one element of the program that is being compiled.
+pub struct Node {
+    children: Vec<NodeId>,
+}
+
+/// A `Table` is used to store one type of information for `Node`s.
+pub struct Table<T>(HashMap<NodeId, T>);
+
+/// The state of the compiler.
+pub struct State {
+    sources: Vec<Source>,
+    nodes: Vec<Node>,
+    tables: Vec<Box<dyn Any>>,
+}
 
 impl State {
     /// Create a new state. The provided source will have the returned `SourceId`.
@@ -58,16 +77,37 @@ impl State {
     pub fn new(source: Source) -> (State, SourceId) {
         let mut state = State {
             sources: Vec::new(),
+            nodes: Vec::new(),
+            tables: Vec::new(),
         };
         let src = state.add_source(source);
         (state, src)
     }
 
-    /// Add a source to the state.
+    /// Add a `Source` to the `State`.
     pub fn add_source(&mut self, source: Source) -> SourceId {
         let src = SourceId(self.sources.len());
         self.sources.push(source);
         src
+    }
+
+    /// Add a new leaf `Node` to the `State`.
+    pub fn add_node(&mut self, parent: Option<NodeId>) -> NodeId {
+        let node = NodeId(self.nodes.len());
+        self.nodes.push(Node {
+            children: Vec::new(),
+        });
+        if let Some(parent) = parent {
+            self[parent].children.push(node);
+        }
+        node
+    }
+
+    /// Add a new empty `Table` to the `State`.
+    pub fn add_table<T: 'static>(&mut self) -> TableId<T> {
+        let tbl = TableId(self.tables.len(), std::marker::PhantomData);
+        self.tables.push(Box::new(Table::<T>(HashMap::new())));
+        tbl
     }
 }
 
@@ -75,6 +115,32 @@ impl Index<SourceId> for State {
     type Output = Source;
     fn index(&self, SourceId(src): SourceId) -> &Source {
         &self.sources[src]
+    }
+}
+
+impl Index<NodeId> for State {
+    type Output = Node;
+    fn index(&self, NodeId(node): NodeId) -> &Node {
+        &self.nodes[node]
+    }
+}
+
+impl IndexMut<NodeId> for State {
+    fn index_mut(&mut self, NodeId(node): NodeId) -> &mut Node {
+        &mut self.nodes[node]
+    }
+}
+
+impl<T: 'static> Index<TableId<T>> for State {
+    type Output = Table<T>;
+    fn index(&self, TableId(tbl, _): TableId<T>) -> &Table<T> {
+        self.tables[tbl].downcast_ref().unwrap()
+    }
+}
+
+impl<T: 'static> IndexMut<TableId<T>> for State {
+    fn index_mut(&mut self, TableId(tbl, _): TableId<T>) -> &mut Table<T> {
+        self.tables[tbl].downcast_mut().unwrap()
     }
 }
 
