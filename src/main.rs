@@ -17,36 +17,7 @@ pub use std::ops::{Index, IndexMut};
 /// Global `Result` alias for ease of use.
 pub type Result<T> = std::result::Result<T, String>;
 
-/// A `Source` represents a unit of source code (for example, a `.iz` file).
-pub struct Source {
-    /// The location to use in error messages.
-    pub name: String,
-    /// The actual code, as an in-memory UTF-8 string.
-    pub text: String,
-}
-
-/// Create a `Source` from a Rust `String` for testing.
-#[macro_export]
-macro_rules! text {
-    ($text:expr) => {
-        Source {
-            name: ::std::string::String::from("text!"),
-            text: ::std::string::String::from($text),
-        }
-    };
-}
-
-impl Source {
-    /// Create a `Source` by reading a file.
-    pub fn from_file(name: String) -> Result<Source> {
-        match std::fs::read_to_string(&name) {
-            Ok(text) => Ok(Source { name, text }),
-            Err(_) => Err(format!("could not read {name}")),
-        }
-    }
-}
-
-/// A substring of a `Source` in the `State`.
+/// A substring of a `Source` in a `State`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
     src: SourceId,

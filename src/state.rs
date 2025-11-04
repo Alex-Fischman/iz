@@ -49,30 +49,67 @@ impl State {
     }
 }
 
+/// A `Source` represents a unit of source code (for example, a `.iz` file).
+pub struct Source {
+    /// The location to use in error messages.
+    pub name: String,
+    /// The actual code, as an in-memory UTF-8 string.
+    pub text: String,
+}
+
+/// Create a `Source` from a Rust `String` for testing.
+#[macro_export]
+macro_rules! text {
+    ($text:expr) => {
+        Source {
+            name: ::std::string::String::from("text!"),
+            text: ::std::string::String::from($text),
+        }
+    };
+}
+
+impl Source {
+    /// Create a `Source` by reading a file.
+    pub fn from_file(name: String) -> Result<Source> {
+        match std::fs::read_to_string(&name) {
+            Ok(text) => Ok(Source { name, text }),
+            Err(_) => Err(format!("could not read {name}")),
+        }
+    }
+}
+
 /// A handle to one `Source` in the `State`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SourceId(usize);
 
-/// A handle to one `Node` in the `State`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct NodeId(usize);
-
-/// A handle to one `Table<T>` in the `State`.
-#[derive(Debug, PartialEq)]
-pub struct TableId<T>(usize, std::marker::PhantomData<T>);
-
-// have to `impl` these separately because the `derive` depends on `T`
-impl<T> Clone for TableId<T> {
-    fn clone(&self) -> TableId<T> {
-        *self
+impl Index<SourceId> for State {
+    type Output = Source;
+    fn index(&self, SourceId(src): SourceId) -> &Source {
+        &self.sources[src]
     }
 }
-impl<T> Copy for TableId<T> {}
 
 /// A `Node` represents one element of the program that is being compiled.
 #[derive(Default)]
 pub struct Node {
     children: Vec<NodeId>,
+}
+
+/// A handle to one `Node` in the `State`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NodeId(usize);
+
+impl Index<NodeId> for State {
+    type Output = Node;
+    fn index(&self, NodeId(node): NodeId) -> &Node {
+        &self.nodes[node]
+    }
+}
+
+impl IndexMut<NodeId> for State {
+    fn index_mut(&mut self, NodeId(node): NodeId) -> &mut Node {
+        &mut self.nodes[node]
+    }
 }
 
 /// A `Table` is used to store one type of information for `Node`s.
@@ -91,25 +128,17 @@ impl<T> Table<T> {
     }
 }
 
-impl Index<SourceId> for State {
-    type Output = Source;
-    fn index(&self, SourceId(src): SourceId) -> &Source {
-        &self.sources[src]
-    }
-}
+/// A handle to one `Table<T>` in the `State`.
+#[derive(Debug, PartialEq)]
+pub struct TableId<T>(usize, std::marker::PhantomData<T>);
 
-impl Index<NodeId> for State {
-    type Output = Node;
-    fn index(&self, NodeId(node): NodeId) -> &Node {
-        &self.nodes[node]
+// have to `impl` these separately because the `derive` depends on `T`
+impl<T> Clone for TableId<T> {
+    fn clone(&self) -> TableId<T> {
+        *self
     }
 }
-
-impl IndexMut<NodeId> for State {
-    fn index_mut(&mut self, NodeId(node): NodeId) -> &mut Node {
-        &mut self.nodes[node]
-    }
-}
+impl<T> Copy for TableId<T> {}
 
 impl<T: 'static> Index<TableId<T>> for State {
     type Output = Table<T>;
@@ -128,10 +157,16 @@ impl<T: 'static> IndexMut<TableId<T>> for State {
 pub trait Pass<T> {
     /// Process the next element.
     fn next(&mut self, state: &mut State) -> Result<Option<T>>;
+
+    /// Run `next` until it returns `None`, ignoring the returned values.
+    fn run(&mut self, state: &mut State) -> Result<()> {
+        while self.next(state)?.is_some() {}
+        Ok(())
+    }
 }
 
 impl State {
-    /// Get an iterator over all `NodeId`s whose ancestor is `root`.
+    /// Get an iterator over `NodeId`s in the tree starting at `root`.
     #[must_use]
     pub fn postorder(&self, root: NodeId) -> Postorder {
         let mut out = Postorder(Vec::new());

@@ -66,7 +66,7 @@ pub enum TokenType {
     Operator,
 }
 
-/// One token of an `iz` program. See `State::tokens`.
+/// One token of an `iz` program. See `State::tokenize`.
 #[derive(Debug, PartialEq)]
 pub struct Token {
     /// The location of this token.
@@ -83,16 +83,21 @@ pub struct Tokenize {
     parent: NodeId,
 }
 
-impl Tokenize {
-    /// Create a `Tokenize` pass for one `Source`.
-    #[must_use]
-    pub fn new(src: SourceId, tokens: TableId<Token>, parent: NodeId) -> Tokenize {
+impl State {
+    /// Add all of the `Token`s in one `Source` to the `State`.
+    pub fn tokenize(
+        &mut self,
+        src: SourceId,
+        tokens: TableId<Token>,
+        parent: NodeId,
+    ) -> Result<()> {
         Tokenize {
             src,
             idx: 0,
             tokens,
             parent,
         }
+        .run(self)
     }
 }
 
@@ -269,8 +274,7 @@ mod tests {
 
     fn collect_tokens(state: &mut State, src: SourceId) -> Result<Vec<(String, TokenType)>> {
         let tokens = state.add_table::<Token>();
-        let mut tokenize = Tokenize::new(src, tokens, State::ROOT);
-        while let Some(()) = tokenize.next(state)? {}
+        let () = state.tokenize(src, tokens, State::ROOT)?;
 
         let mut postorder = state.postorder(State::ROOT);
         let mut out = Vec::new();
