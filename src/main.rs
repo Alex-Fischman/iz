@@ -53,16 +53,38 @@ pub struct SourceId(usize);
 pub struct NodeId(usize);
 
 /// A handle to one `Table<T>` in the `State`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct TableId<T>(usize, std::marker::PhantomData<T>);
 
+// have to `impl` these separately because the `derive` depends on `T`
+impl<T> Clone for TableId<T> {
+    fn clone(&self) -> TableId<T> {
+        *self
+    }
+}
+impl<T> Copy for TableId<T> {}
+
 /// A `Node` represents one element of the program that is being compiled.
+#[derive(Default)]
 pub struct Node {
     children: Vec<NodeId>,
 }
 
 /// A `Table` is used to store one type of information for `Node`s.
 pub struct Table<T>(HashMap<NodeId, T>);
+
+impl<T> Table<T> {
+    /// Add information for a `NodeId`. Returns the old value if it exists.
+    pub fn insert(&mut self, key: NodeId, val: T) -> Option<T> {
+        self.0.insert(key, val)
+    }
+
+    /// Get information about a `NodeId`, if it exists.
+    #[must_use]
+    pub fn get(&self, key: NodeId) -> Option<&T> {
+        self.0.get(&key)
+    }
+}
 
 /// The state of the compiler.
 pub struct State {
@@ -72,7 +94,11 @@ pub struct State {
 }
 
 impl State {
-    /// Create a new state. The provided source will have the returned `SourceId`.
+    const ROOT: NodeId = NodeId(0);
+
+    /// Create a new `State`.
+    /// The provided source will have the returned `SourceId`.
+    /// The new state will contain one empty node, `ROOT`.
     #[must_use]
     pub fn new(source: Source) -> (State, SourceId) {
         let mut state = State {
@@ -81,6 +107,7 @@ impl State {
             tables: Vec::new(),
         };
         let src = state.add_source(source);
+        state.nodes.push(Node::default());
         (state, src)
     }
 
@@ -92,14 +119,10 @@ impl State {
     }
 
     /// Add a new leaf `Node` to the `State`.
-    pub fn add_node(&mut self, parent: Option<NodeId>) -> NodeId {
+    pub fn add_node(&mut self, parent: NodeId) -> NodeId {
         let node = NodeId(self.nodes.len());
-        self.nodes.push(Node {
-            children: Vec::new(),
-        });
-        if let Some(parent) = parent {
-            self[parent].children.push(node);
-        }
+        self.nodes.push(Node::default());
+        self[parent].children.push(node);
         node
     }
 
@@ -145,10 +168,51 @@ impl<T: 'static> IndexMut<TableId<T>> for State {
 }
 
 /// A custom `Iterator` trait that can modify `State` and returns a `Result`.
-pub trait Iterator<T> {
-    /// Get the next element of the iterator.
-    /// If we're iterating over a tree, this should be a postorder traversal.
+pub trait Pass<T> {
+    /// Process the next element.
     fn next(&mut self, state: &mut State) -> Result<Option<T>>;
+}
+
+impl State {
+    /// Get an iterator over all `NodeId`s whose ancestor is `root`.
+    #[must_use]
+    pub fn postorder(&self, root: NodeId) -> Postorder {
+        let mut out = Postorder(Vec::new());
+        out.0.push((root, 0));
+        out.dive(self);
+        out
+    }
+}
+
+/// An iterator over all `Node`s in a tree.
+pub struct Postorder(Vec<(NodeId, usize)>);
+
+impl Postorder {
+    fn dive(&mut self, state: &State) {
+        loop {
+            let Some(&(node, idx)) = self.0.last() else {
+                break;
+            };
+            let Some(&child) = state[node].children.get(idx) else {
+                break;
+            };
+            self.0.push((child, 0));
+        }
+    }
+}
+
+impl Pass<NodeId> for Postorder {
+    fn next(&mut self, state: &mut State) -> Result<Option<NodeId>> {
+        let Some(&(node, _idx)) = self.0.last() else {
+            return Ok(None);
+        };
+        self.0.pop();
+        if let Some((_parent, idx)) = self.0.last_mut() {
+            *idx += 1;
+        }
+        self.dive(state);
+        Ok(Some(node))
+    }
 }
 
 /// A substring of a `Source` in the `State`.

@@ -1,14 +1,14 @@
 use crate::*;
 
 #[allow(missing_docs)]
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Side {
     Left,
     Right,
 }
 
 #[allow(missing_docs)]
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Bracket {
     Paren,
     Curly,
@@ -48,7 +48,7 @@ fn char_type(c: char) -> CharType {
 }
 
 /// The different types of tokens in an `iz` program.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TokenType {
     /// One of `(`, `)`, `{`, `}`, `[`, or `]`.
     Bracket(Bracket, Side),
@@ -75,17 +75,24 @@ pub struct Token {
     pub tag: TokenType,
 }
 
-/// An iterator which returns all the `Token`s in a `Source`.
-pub struct Tokens {
+/// A pass which adds all the `Token`s in a `Source` to the `State`.
+pub struct Tokenize {
     src: SourceId,
     idx: usize,
+    tokens: TableId<Token>,
+    parent: NodeId,
 }
 
-impl Tokens {
-    /// Get all the tokens in one `Source`.
+impl Tokenize {
+    /// Create a `Tokenize` pass for one `Source`.
     #[must_use]
-    pub fn new(src: SourceId) -> Tokens {
-        Tokens { src, idx: 0 }
+    pub fn new(src: SourceId, tokens: TableId<Token>, parent: NodeId) -> Tokenize {
+        Tokenize {
+            src,
+            idx: 0,
+            tokens,
+            parent,
+        }
     }
 }
 
@@ -126,10 +133,9 @@ impl Span {
     }
 }
 
-impl Iterator<Token> for Tokens {
-    fn next(&mut self, state: &mut State) -> Result<Option<Token>> {
+impl Pass<()> for Tokenize {
+    fn next(&mut self, state: &mut State) -> Result<Option<()>> {
         use CharType::*;
-        let state: &State = state;
 
         let mut span = Span {
             src: self.src,
@@ -250,7 +256,10 @@ impl Iterator<Token> for Tokens {
         };
 
         self.idx = span.hi;
-        Ok(Some(Token { span, tag }))
+
+        let node = state.add_node(self.parent);
+        state[self.tokens].insert(node, Token { span, tag });
+        Ok(Some(()))
     }
 }
 
@@ -259,10 +268,17 @@ mod tests {
     use super::*;
 
     fn collect_tokens(state: &mut State, src: SourceId) -> Result<Vec<(String, TokenType)>> {
-        let mut tokens = Tokens::new(src);
+        let tokens = state.add_table::<Token>();
+        let mut tokenize = Tokenize::new(src, tokens, State::ROOT);
+        while let Some(()) = tokenize.next(state)? {}
+
+        let mut postorder = state.postorder(State::ROOT);
         let mut out = Vec::new();
-        while let Some(Token { span, tag }) = tokens.next(state)? {
-            out.push((span.string(state).to_owned(), tag));
+        while let Some(node) = postorder.next(state)? {
+            match state[tokens].get(node) {
+                None => assert!(node == State::ROOT),
+                Some(Token { span, tag }) => out.push((span.string(state).to_owned(), tag.clone())),
+            }
         }
         Ok(out)
     }
