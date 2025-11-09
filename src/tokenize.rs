@@ -91,13 +91,12 @@ impl State {
         tokens: TableId<Token>,
         parent: NodeId,
     ) -> Result<()> {
-        Tokenize {
+        self.run_pass(&mut Tokenize {
             src,
             idx: 0,
             tokens,
             parent,
-        }
-        .run(self)
+        })
     }
 }
 

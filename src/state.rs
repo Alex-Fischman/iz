@@ -157,10 +157,12 @@ impl<T: 'static> IndexMut<TableId<T>> for State {
 pub trait Pass<T> {
     /// Process the next element.
     fn next(&mut self, state: &mut State) -> Result<Option<T>>;
+}
 
-    /// Run `next` until it returns `None`, ignoring the returned values.
-    fn run(&mut self, state: &mut State) -> Result<()> {
-        while self.next(state)?.is_some() {}
+impl State {
+    /// Run `Pass::next` until it returns `None`, ignoring the returned values.
+    pub fn run_pass(&mut self, pass: &mut impl Pass<()>) -> Result<()> {
+        while pass.next(self)?.is_some() {}
         Ok(())
     }
 }
