@@ -22,7 +22,12 @@ impl State {
             tables: Vec::new(),
         };
         let src = state.add_source(source);
-        state.nodes.push(Node::default());
+        state.nodes.push(Node {
+            prev: OptionNodeId::NONE,
+            next: OptionNodeId::NONE,
+            head: OptionNodeId::NONE,
+            last: OptionNodeId::NONE,
+        });
         (state, src)
     }
 
@@ -36,8 +41,21 @@ impl State {
     /// Add a new leaf `Node` to the `State`.
     pub fn add_node(&mut self, parent: NodeId) -> NodeId {
         let node = NodeId(self.nodes.len());
-        self.nodes.push(Node::default());
-        self[parent].children.push(node);
+        self.nodes.push(Node {
+            prev: self[parent].last,
+            next: OptionNodeId::NONE,
+            head: OptionNodeId::NONE,
+            last: OptionNodeId::NONE,
+        });
+
+        if let Some(prev) = self[parent].last.into() {
+            self[prev].next = OptionNodeId::some(node);
+            self[parent].last = OptionNodeId::some(node);
+        } else {
+            self[parent].head = OptionNodeId::some(node);
+            self[parent].last = OptionNodeId::some(node);
+        }
+
         node
     }
 
@@ -90,14 +108,59 @@ impl Index<SourceId> for State {
 }
 
 /// A `Node` represents one element of the program that is being compiled.
-#[derive(Default)]
 pub struct Node {
-    children: Vec<NodeId>,
+    /// The previous sibling.
+    pub prev: OptionNodeId,
+    /// The next sibling.
+    pub next: OptionNodeId,
+    /// The first child.
+    pub head: OptionNodeId,
+    /// The last child.
+    pub last: OptionNodeId,
 }
 
 /// A handle to one `Node` in the `State`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId(usize);
+
+/// An optional `NodeId` that fits into a single word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct OptionNodeId(NodeId);
+
+const _: () = assert!(size_of::<OptionNodeId>() == size_of::<usize>());
+
+impl OptionNodeId {
+    /// The constant representing `None`.
+    pub const NONE: OptionNodeId = OptionNodeId(NodeId(usize::MAX));
+
+    /// The function representing `Some`.
+    #[must_use]
+    pub fn some(node: NodeId) -> OptionNodeId {
+        if node == OptionNodeId::NONE.0 {
+            unreachable!("NodeId(usize::MAX)");
+        } else {
+            OptionNodeId(node)
+        }
+    }
+
+    /// Convert an `Option<NodeId>` into an `OptionNodeId`.
+    #[must_use]
+    pub fn from(node: Option<NodeId>) -> OptionNodeId {
+        match node {
+            None => OptionNodeId::NONE,
+            Some(node) => OptionNodeId::some(node),
+        }
+    }
+
+    /// Convert an `OptionNodeId` into an `Option<NodeId>`.
+    #[must_use]
+    pub fn into(self) -> Option<NodeId> {
+        match self {
+            OptionNodeId::NONE => None,
+            OptionNodeId(node) => Some(node),
+        }
+    }
+}
 
 impl Index<NodeId> for State {
     type Output = Node;
@@ -160,14 +223,14 @@ pub trait Iterator<T> {
 }
 
 /// An iterator over all `Node`s in a tree.
-pub struct Postorder(Vec<(NodeId, usize)>);
+pub struct Postorder(Vec<NodeId>);
 
 impl State {
     /// Get an iterator over `NodeId`s in the tree starting at `root`.
     #[must_use]
     pub fn postorder(&self, root: NodeId) -> Postorder {
         let mut out = Postorder(Vec::new());
-        out.0.push((root, 0));
+        out.0.push(root);
         out.dive(self);
         out
     }
@@ -176,27 +239,28 @@ impl State {
 impl Postorder {
     fn dive(&mut self, state: &State) {
         loop {
-            let Some(&(node, idx)) = self.0.last() else {
+            let Some(&parent) = self.0.last() else {
                 break;
             };
-            let Some(&child) = state[node].children.get(idx) else {
+            let Some(child) = state[parent].head.into() else {
                 break;
             };
-            self.0.push((child, 0));
+            self.0.push(child);
         }
     }
 }
 
 impl Iterator<NodeId> for Postorder {
     fn next(&mut self, state: &mut State) -> Result<Option<NodeId>> {
-        let Some(&(node, _idx)) = self.0.last() else {
+        let Some(node) = self.0.pop() else {
             return Ok(None);
         };
-        self.0.pop();
-        if let Some((_parent, idx)) = self.0.last_mut() {
-            *idx += 1;
+
+        if let Some(next) = state[node].next.into() {
+            self.0.push(next);
+            self.dive(state);
         }
-        self.dive(state);
+
         Ok(Some(node))
     }
 }
