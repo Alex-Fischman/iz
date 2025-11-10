@@ -108,6 +108,7 @@ impl Index<SourceId> for State {
 }
 
 /// A `Node` represents one element of the program that is being compiled.
+#[derive(Debug)]
 pub struct Node {
     /// The previous sibling.
     pub prev: OptionNodeId,
@@ -137,7 +138,7 @@ impl IndexMut<NodeId> for State {
 }
 
 /// An optional `NodeId` that fits into a single word.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct OptionNodeId(NodeId);
 
 const _: () = assert!(size_of::<OptionNodeId>() == size_of::<usize>());
@@ -173,6 +174,20 @@ impl OptionNodeId {
             OptionNodeId(node) => Some(node),
         }
     }
+
+    /// Alias for `self.into().unwrap()`.
+    /// # Panics
+    /// Panics if `self.into()` is `None`.
+    #[must_use]
+    pub fn unwrap(self) -> NodeId {
+        self.into().unwrap()
+    }
+}
+
+impl Debug for OptionNodeId {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", OptionNodeId::into(*self))
+    }
 }
 
 /// A `Table` is used to store one type of information for `Node`s.
@@ -180,14 +195,33 @@ pub struct Table<T>(HashMap<NodeId, T>);
 
 impl<T> Table<T> {
     /// Add information for a `NodeId`. Returns the old value if it exists.
-    pub fn insert(&mut self, key: NodeId, val: T) -> Option<T> {
-        self.0.insert(key, val)
+    pub fn insert(&mut self, node: NodeId, val: T) -> Option<T> {
+        self.0.insert(node, val)
     }
 
     /// Get information about a `NodeId`, if it exists.
     #[must_use]
-    pub fn get(&self, key: NodeId) -> Option<&T> {
-        self.0.get(&key)
+    pub fn get(&self, node: NodeId) -> Option<&T> {
+        self.0.get(&node)
+    }
+
+    /// Get a mutable reference to information about a `NodeId`, if it exists.
+    #[must_use]
+    pub fn get_mut(&mut self, node: NodeId) -> Option<&mut T> {
+        self.0.get_mut(&node)
+    }
+}
+
+impl<T> Index<NodeId> for Table<T> {
+    type Output = T;
+    fn index(&self, node: NodeId) -> &T {
+        self.get(node).unwrap()
+    }
+}
+
+impl<T> IndexMut<NodeId> for Table<T> {
+    fn index_mut(&mut self, node: NodeId) -> &mut T {
+        self.get_mut(node).unwrap()
     }
 }
 

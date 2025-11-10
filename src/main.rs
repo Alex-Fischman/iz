@@ -3,6 +3,7 @@
 #![deny(clippy::all, clippy::pedantic, missing_docs)]
 #![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
+mod bracket;
 mod state;
 mod tokenize;
 
@@ -70,7 +71,10 @@ pub enum Instruction {}
 
 /// Compile a `Source` down to `Instruction`s.
 pub fn compile(source: Source) -> Result<Vec<String>> {
-    let (state, src) = State::new(source);
+    let (mut state, src) = State::new(source);
+    let tokens = state.add_table::<Token>();
+    state.tokenize(src, tokens, State::ROOT)?;
+    state.bracket(tokens, State::ROOT)?;
 
     eprintln!("{}\n{}", state[src].name, state[src].text);
 
