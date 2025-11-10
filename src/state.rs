@@ -123,6 +123,19 @@ pub struct Node {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId(usize);
 
+impl Index<NodeId> for State {
+    type Output = Node;
+    fn index(&self, NodeId(node): NodeId) -> &Node {
+        &self.nodes[node]
+    }
+}
+
+impl IndexMut<NodeId> for State {
+    fn index_mut(&mut self, NodeId(node): NodeId) -> &mut Node {
+        &mut self.nodes[node]
+    }
+}
+
 /// An optional `NodeId` that fits into a single word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OptionNodeId(NodeId);
@@ -159,19 +172,6 @@ impl OptionNodeId {
             OptionNodeId::NONE => None,
             OptionNodeId(node) => Some(node),
         }
-    }
-}
-
-impl Index<NodeId> for State {
-    type Output = Node;
-    fn index(&self, NodeId(node): NodeId) -> &Node {
-        &self.nodes[node]
-    }
-}
-
-impl IndexMut<NodeId> for State {
-    fn index_mut(&mut self, NodeId(node): NodeId) -> &mut Node {
-        &mut self.nodes[node]
     }
 }
 
