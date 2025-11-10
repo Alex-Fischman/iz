@@ -86,17 +86,6 @@ impl Span {
         Some(c)
     }
 
-    fn skip_whitespace(&mut self, state: &State) {
-        while let Some(c) = self.peek_char(state) {
-            if c.is_whitespace() {
-                self.lo += c.len_utf8();
-                self.hi += c.len_utf8();
-            } else {
-                break;
-            }
-        }
-    }
-
     fn next_escape(&mut self, state: &State) -> Result<char> {
         debug_assert!(self.string(state).ends_with('\\'));
         match self.next_char(state) {
@@ -130,7 +119,14 @@ impl State {
                 hi: idx,
             };
 
-            span.skip_whitespace(self);
+            while let Some(c) = span.peek_char(self) {
+                if c.is_whitespace() {
+                    span.lo += c.len_utf8();
+                    span.hi += c.len_utf8();
+                } else {
+                    break;
+                }
+            }
 
             let Some(c) = span.next_char(self) else { break };
 
