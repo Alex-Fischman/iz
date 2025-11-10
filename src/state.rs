@@ -153,9 +153,6 @@ impl<T: 'static> IndexMut<TableId<T>> for State {
     }
 }
 
-/// One pass of the compiler. Passes should be postorder.
-pub type Pass = fn(&mut State) -> Result<()>;
-
 /// A custom `Iterator` trait that can modify `State` and returns a `Result`.
 pub trait Iterator<T> {
     /// Process the next element.
