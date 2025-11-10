@@ -75,31 +75,6 @@ pub struct Token {
     pub tag: TokenType,
 }
 
-/// A pass which adds all the `Token`s in a `Source` to the `State`.
-pub struct Tokenize {
-    src: SourceId,
-    idx: usize,
-    tokens: TableId<Token>,
-    parent: NodeId,
-}
-
-impl State {
-    /// Add all of the `Token`s in one `Source` to the `State`.
-    pub fn tokenize(
-        &mut self,
-        src: SourceId,
-        tokens: TableId<Token>,
-        parent: NodeId,
-    ) -> Result<()> {
-        self.run_pass(&mut Tokenize {
-            src,
-            idx: 0,
-            tokens,
-            parent,
-        })
-    }
-}
-
 impl Span {
     fn peek_char(&self, state: &State) -> Option<char> {
         state[self.src].text[self.hi..].chars().next()
@@ -137,133 +112,143 @@ impl Span {
     }
 }
 
-impl Pass<()> for Tokenize {
-    fn next(&mut self, state: &mut State) -> Result<Option<()>> {
+impl State {
+    /// Add all of the `Token`s in one `Source` to the `State`.
+    pub fn tokenize(
+        &mut self,
+        src: SourceId,
+        tokens: TableId<Token>,
+        parent: NodeId,
+    ) -> Result<()> {
         use CharType::*;
 
-        let mut span = Span {
-            src: self.src,
-            lo: self.idx,
-            hi: self.idx,
-        };
+        let mut idx = 0;
+        loop {
+            let mut span = Span {
+                src,
+                lo: idx,
+                hi: idx,
+            };
 
-        span.skip_whitespace(state);
+            span.skip_whitespace(self);
 
-        let Some(c) = span.next_char(state) else {
-            return Ok(None);
-        };
+            let Some(c) = span.next_char(self) else { break };
 
-        let tag = match char_type(c) {
-            CharType::Bracket(b, s) => TokenType::Bracket(b, s),
-            CharType::DoubleQuote => {
-                let mut string = String::new();
-                loop {
-                    match span.next_char(state) {
-                        Some('"') => break,
-                        Some('\\') => string.push(span.next_escape(state)?),
-                        Some(c) => string.push(c),
-                        None => return err!(state, span, "expected \", got end of file"),
-                    }
-                }
-                TokenType::String(string)
-            }
-            CharType::SingleQuote => {
-                let c = match span.next_char(state) {
-                    Some('\'') => return err!(state, span, "expected character, got closing \'"),
-                    Some('\\') => span.next_escape(state)?,
-                    Some(c) => c,
-                    None => return err!(state, span, "expected character, got end of file"),
-                };
-                match span.next_char(state) {
-                    Some('\'') => TokenType::Char(c),
-                    Some(_) => return err!(state, span, "expected \', got {c}"),
-                    None => return err!(state, span, "expected \', got end of file"),
-                }
-            }
-            CharType::Backslash => return err!(state, span, "found a \\ outside of quotes"),
-            CharType::Comment => {
-                while let Some(c) = span.next_char(state) {
-                    if c == '\n' {
-                        break;
-                    }
-                }
-                TokenType::Comment
-            }
-            CharType::Whitespace => unreachable!("whitespace should have been skipped"),
-            CharType::Digit => {
-                let radix = match (c, span.peek_char(state)) {
-                    ('0', Some('b')) => 2,
-                    ('0', Some('x')) => 16,
-                    _ => 10,
-                };
-                if radix == 10 {
-                    // start the loop at the first digit
-                    span.hi -= c.len_utf8();
-                } else {
-                    // consume the `b` or the `x`
-                    span.hi += c.len_utf8();
-                }
-
-                let mut value = 0;
-                while let Some(c) = span.peek_char(state) {
-                    match char_type(c) {
-                        Bracket(..) | Whitespace | Sigil => break,
-                        _ => span.hi += c.len_utf8(),
-                    }
-                    if c == '_' {
-                        continue;
-                    }
-
-                    let digit = match char_type(c) {
-                        Digit => u64::from(u32::from(c) - u32::from('0')),
-                        Letter => u64::from(u32::from(c) - u32::from('A') + 10),
-                        Bracket(..) | Whitespace | Sigil => unreachable!(),
-                        DoubleQuote | SingleQuote | Backslash | Comment => {
-                            return err!(state, span, "expected digit, got {c}");
+            let tag = match char_type(c) {
+                CharType::Bracket(b, s) => TokenType::Bracket(b, s),
+                CharType::DoubleQuote => {
+                    let mut string = String::new();
+                    loop {
+                        match span.next_char(self) {
+                            Some('"') => break,
+                            Some('\\') => string.push(span.next_escape(self)?),
+                            Some(c) => string.push(c),
+                            None => return err!(self, span, "expected \", got end of file"),
                         }
+                    }
+                    TokenType::String(string)
+                }
+                CharType::SingleQuote => {
+                    let c = match span.next_char(self) {
+                        Some('\'') => {
+                            return err!(self, span, "expected character, got closing \'");
+                        }
+                        Some('\\') => span.next_escape(self)?,
+                        Some(c) => c,
+                        None => return err!(self, span, "expected character, got end of file"),
                     };
-                    if digit >= radix {
-                        return err!(state, span, "base {radix} does not contain {digit}");
+                    match span.next_char(self) {
+                        Some('\'') => TokenType::Char(c),
+                        Some(_) => return err!(self, span, "expected \', got {c}"),
+                        None => return err!(self, span, "expected \', got end of file"),
                     }
-
-                    value = (value * radix) + digit;
                 }
-
-                TokenType::Number(value)
-            }
-            CharType::Letter => {
-                while let Some(c) = span.peek_char(state) {
-                    match char_type(c) {
-                        Digit | Letter => span.hi += c.len_utf8(),
-                        Bracket(..) | Whitespace | Sigil => break,
-                        DoubleQuote | SingleQuote | Backslash | Comment => {
-                            span.hi += c.len_utf8();
-                            return err!(state, span, "expected letter, got {c}");
+                CharType::Backslash => return err!(self, span, "found a \\ outside of quotes"),
+                CharType::Comment => {
+                    while let Some(c) = span.next_char(self) {
+                        if c == '\n' {
+                            break;
                         }
                     }
+                    TokenType::Comment
                 }
-                TokenType::Identifier
-            }
-            CharType::Sigil => {
-                while let Some(c) = span.peek_char(state) {
-                    match char_type(c) {
-                        Sigil => span.hi += c.len_utf8(),
-                        Bracket(..) | Whitespace | Digit | Letter => break,
-                        DoubleQuote | SingleQuote | Backslash | Comment => {
-                            span.hi += c.len_utf8();
-                            return err!(state, span, "expected sigil, got {c}");
+                CharType::Whitespace => unreachable!("whitespace should have been skipped"),
+                CharType::Digit => {
+                    let radix = match (c, span.peek_char(self)) {
+                        ('0', Some('b')) => 2,
+                        ('0', Some('x')) => 16,
+                        _ => 10,
+                    };
+                    if radix == 10 {
+                        // start the loop at the first digit
+                        span.hi -= c.len_utf8();
+                    } else {
+                        // consume the `b` or the `x`
+                        span.hi += c.len_utf8();
+                    }
+
+                    let mut value = 0;
+                    while let Some(c) = span.peek_char(self) {
+                        match char_type(c) {
+                            Bracket(..) | Whitespace | Sigil => break,
+                            _ => span.hi += c.len_utf8(),
+                        }
+                        if c == '_' {
+                            continue;
+                        }
+
+                        let digit = match char_type(c) {
+                            Digit => u64::from(u32::from(c) - u32::from('0')),
+                            Letter => u64::from(u32::from(c) - u32::from('A') + 10),
+                            Bracket(..) | Whitespace | Sigil => unreachable!(),
+                            DoubleQuote | SingleQuote | Backslash | Comment => {
+                                return err!(self, span, "expected digit, got {c}");
+                            }
+                        };
+                        if digit >= radix {
+                            return err!(self, span, "base {radix} does not contain {digit}");
+                        }
+
+                        value = (value * radix) + digit;
+                    }
+
+                    TokenType::Number(value)
+                }
+                CharType::Letter => {
+                    while let Some(c) = span.peek_char(self) {
+                        match char_type(c) {
+                            Digit | Letter => span.hi += c.len_utf8(),
+                            Bracket(..) | Whitespace | Sigil => break,
+                            DoubleQuote | SingleQuote | Backslash | Comment => {
+                                span.hi += c.len_utf8();
+                                return err!(self, span, "expected letter, got {c}");
+                            }
                         }
                     }
+                    TokenType::Identifier
                 }
-                TokenType::Operator
-            }
-        };
+                CharType::Sigil => {
+                    while let Some(c) = span.peek_char(self) {
+                        match char_type(c) {
+                            Sigil => span.hi += c.len_utf8(),
+                            Bracket(..) | Whitespace | Digit | Letter => break,
+                            DoubleQuote | SingleQuote | Backslash | Comment => {
+                                span.hi += c.len_utf8();
+                                return err!(self, span, "expected sigil, got {c}");
+                            }
+                        }
+                    }
+                    TokenType::Operator
+                }
+            };
 
-        self.idx = span.hi;
+            let node = self.add_node(parent);
+            self[tokens].insert(node, Token { span, tag });
 
-        let node = state.add_node(self.parent);
-        state[self.tokens].insert(node, Token { span, tag });
-        Ok(Some(()))
+            idx = span.hi;
+        }
+
+        Ok(())
     }
 }
 

@@ -153,19 +153,17 @@ impl<T: 'static> IndexMut<TableId<T>> for State {
     }
 }
 
+/// One pass of the compiler. Passes should be postorder.
+pub type Pass = fn(&mut State) -> Result<()>;
+
 /// A custom `Iterator` trait that can modify `State` and returns a `Result`.
-pub trait Pass<T> {
+pub trait Iterator<T> {
     /// Process the next element.
     fn next(&mut self, state: &mut State) -> Result<Option<T>>;
 }
 
-impl State {
-    /// Run `Pass::next` until it returns `None`, ignoring the returned values.
-    pub fn run_pass(&mut self, pass: &mut impl Pass<()>) -> Result<()> {
-        while pass.next(self)?.is_some() {}
-        Ok(())
-    }
-}
+/// An iterator over all `Node`s in a tree.
+pub struct Postorder(Vec<(NodeId, usize)>);
 
 impl State {
     /// Get an iterator over `NodeId`s in the tree starting at `root`.
@@ -177,9 +175,6 @@ impl State {
         out
     }
 }
-
-/// An iterator over all `Node`s in a tree.
-pub struct Postorder(Vec<(NodeId, usize)>);
 
 impl Postorder {
     fn dive(&mut self, state: &State) {
@@ -195,7 +190,7 @@ impl Postorder {
     }
 }
 
-impl Pass<NodeId> for Postorder {
+impl Iterator<NodeId> for Postorder {
     fn next(&mut self, state: &mut State) -> Result<Option<NodeId>> {
         let Some(&(node, _idx)) = self.0.last() else {
             return Ok(None);
