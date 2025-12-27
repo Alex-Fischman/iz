@@ -84,7 +84,7 @@ pub fn compile(source: Source) -> Result<Vec<String>> {
 fn main() -> std::process::ExitCode {
     match (|| {
         let args: Vec<_> = std::env::args().collect();
-        let name = args.get(1).ok_or("usage: pass a .iz file")?.to_string();
+        let name = args.get(1).ok_or("usage: pass a .iz file")?.clone();
         let source = Source::from_file(name)?;
         let _instructions = compile(source)?;
         Ok::<(), String>(())
