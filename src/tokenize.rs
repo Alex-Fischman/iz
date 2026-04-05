@@ -155,7 +155,7 @@ impl State {
                     };
                     match span.next_char(self) {
                         Some('\'') => TokenType::Char(c),
-                        Some(_) => return err!(self, span, "expected \', got {c}"),
+                        Some(c) => return err!(self, span, "expected \', got {c}"),
                         None => return err!(self, span, "expected \', got end of file"),
                     }
                 }
