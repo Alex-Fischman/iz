@@ -10,18 +10,15 @@ impl State {
         while let Some(node) = next {
             next = self[node].next.into();
 
-            match &self[tokens][node].tag {
-                TokenType::String(_)
-                | TokenType::Char(_)
-                | TokenType::Comment
-                | TokenType::Number(_)
-                | TokenType::Identifier
-                | TokenType::Operator => {}
-                TokenType::Bracket(left_bracket, Side::Left) => stack.push((node, *left_bracket)),
-                TokenType::Bracket(right_bracket, Side::Right) => {
-                    let (right, right_bracket) = (node, *right_bracket);
+            let TokenType::Bracket(bracket, side) = &self[tokens][node].tag else {
+                continue;
+            };
 
-                    // get matching left bracket
+            match side {
+                Side::Left => stack.push((node, *bracket)),
+                Side::Right => {
+                    let (right, right_bracket) = (node, *bracket);
+
                     let Some((left, left_bracket)) = stack.pop() else {
                         return err!(self, self[tokens][node].span, "unmatched close bracket");
                     };
@@ -48,18 +45,18 @@ impl State {
                         self[last].next = OptionNodeId::NONE;
                     }
 
-                    // break pointers into contents
+                    // fix up `left` pointer into contents
                     self[left].next = self[right].next;
-                    self[right].prev = self[left].prev;
 
-                    // fix up root if we're at the end
-                    if self[root].last.unwrap() == right {
-                        self[root].last = OptionNodeId::some(left);
-                    }
-
-                    // fix up `next` if we're not at the end
+                    // remove `right` from children/sibling lists
                     if let Some(next) = next {
+                        // fix up `next` if we're not at the end
+                        debug_assert!(self[next].prev.unwrap() == right);
                         self[next].prev = OptionNodeId::some(left);
+                    } else {
+                        // fix up `root` if we are at the end
+                        debug_assert!(self[root].last.unwrap() == right);
+                        self[root].last = OptionNodeId::some(left);
                     }
                 }
             }
