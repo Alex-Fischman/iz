@@ -196,13 +196,10 @@ impl State {
                         let digit = match char_type(c) {
                             Digit => u64::from(u32::from(c) - u32::from('0')),
                             Letter => u64::from(u32::from(c) - u32::from('A') + 10),
-                            Bracket(..) | Whitespace | Sigil => unreachable!(),
-                            DoubleQuote | SingleQuote | Backslash | Comment => {
-                                return err!(self, span, "expected digit, got {c}");
-                            }
+                            _ => return err!(self, span, "expected digit, got {c}"),
                         };
                         if digit >= radix {
-                            return err!(self, span, "base {radix} does not contain {digit}");
+                            return err!(self, span, "base {radix} does not contain digit {c}");
                         }
 
                         value = (value * radix) + digit;
@@ -398,7 +395,8 @@ mod tests {
     test! {thirty, "30", ("30", Number 30)}
     test! {thirty_hex, "0x1E", ("0x1E", Number 30)}
     test! {thirty_binary, "0b0001_1110", ("0b0001_1110", Number 30)}
-    test! {binary_two, "0b2", "error at text!:1:1: base 2 does not contain 2\n0b2"}
+    test! {binary_two, "0b2", "error at text!:1:1: base 2 does not contain digit 2\n0b2"}
+    test! {binary_a, "0bA", "error at text!:1:1: base 2 does not contain digit A\n0bA"}
 
     test! {ident, "asdf", ("asdf", Identifier)}
     test! {idents, "asdf fdsa", ("asdf", Identifier), ("fdsa", Identifier)}
