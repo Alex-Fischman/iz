@@ -4,9 +4,11 @@
 #![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
 mod bracket;
+mod instruction;
 mod state;
 mod tokenize;
 
+pub use instruction::*;
 pub use state::*;
 pub use tokenize::*;
 
@@ -65,9 +67,6 @@ macro_rules! err {
         ))
     };
 }
-
-/// One instruction in the intermediate representation.
-pub enum Instruction {}
 
 /// Compile a `Source` down to `Instruction`s.
 pub fn compile(source: Source) -> Result<Vec<String>> {
