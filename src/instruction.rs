@@ -56,6 +56,7 @@ impl IndexMut<Register> for Machine {
 }
 
 /// The `Word`-addressable memory available to the program.
+#[derive(Default)]
 pub struct Memory(Vec<Vec<Word>>);
 
 fn word_to_address(Word(word): Word) -> (usize, usize) {
@@ -120,7 +121,7 @@ pub enum Instruction {
     /// Read a value from memory.
     Load {
         /// The location to read from.
-        src: Register,
+        loc: Register,
         /// The register to write the value into.
         dst: Register,
     },
@@ -133,18 +134,84 @@ pub enum Instruction {
     },
 }
 
-impl Machine {
-    /// Run one `Instruction` on this `Machine`.
-    pub fn execute(&mut self, instruction: Instruction) {
-        match instruction {
-            Instruction::Imm { imm, dst } => self[dst] = imm,
-            Instruction::Mov { src, dst } => self[dst] = self[src],
-            Instruction::Add { src: (x, y), dst } => self[dst] = self[x] + self[y],
-            Instruction::Load { src, dst } => self[dst] = self.memory[self[src]],
-            Instruction::Store { src, loc } => {
-                let loc = self[loc];
-                self.memory[loc] = self[src];
+/// A list of `Instruction`s, along with some metadata.
+pub struct Program {
+    instructions: Vec<Instruction>,
+}
+
+impl Program {
+    fn gp_registers(&self) -> impl std::iter::Iterator<Item = usize> {
+        self.instructions
+            .iter()
+            .flat_map(|instruction| match instruction {
+                Instruction::Imm { imm: _, dst } => vec![dst],
+                Instruction::Mov { src, dst } => vec![src, dst],
+                Instruction::Add { src: (x, y), dst } => vec![x, y, dst],
+                Instruction::Load { loc, dst } => vec![loc, dst],
+                Instruction::Store { src, loc } => vec![src, loc],
+            })
+            .filter_map(|register| match register {
+                Register::Pc | Register::Sp => None,
+                Register::Gp(i) => Some(i),
+            })
+            .copied()
+    }
+
+    fn gp_registers_mut(&mut self) -> impl std::iter::Iterator<Item = &mut usize> {
+        self.instructions
+            .iter_mut()
+            .flat_map(|instruction| match instruction {
+                Instruction::Imm { imm: _, dst } => vec![dst],
+                Instruction::Mov { src, dst } => vec![src, dst],
+                Instruction::Add { src: (x, y), dst } => vec![x, y, dst],
+                Instruction::Load { loc, dst } => vec![loc, dst],
+                Instruction::Store { src, loc } => vec![src, loc],
+            })
+            .filter_map(|register| match register {
+                Register::Pc | Register::Sp => None,
+                Register::Gp(i) => Some(i),
+            })
+    }
+
+    /// Get the index of the highest `Register::Gp` in this `Program`.
+    #[must_use]
+    pub fn gp_register_count(&self) -> usize {
+        self.gp_registers().max().unwrap_or(0)
+    }
+
+    /// Increment all `Register::Gp`s in this `Program` by the given amount.
+    pub fn gp_register_incr(&mut self, incr: usize) {
+        self.gp_registers_mut().for_each(|i| *i += incr);
+    }
+
+    /// Run a program on a new `Machine`, and return the final state.
+    #[must_use]
+    pub fn execute(&self) -> Machine {
+        let mut machine = Machine {
+            pc: Word(0),
+            sp: Word(0),
+            gp: vec![Word(0); self.gp_register_count()],
+            memory: Memory::default(),
+        };
+
+        #[allow(clippy::cast_possible_truncation)]
+        while let Some(instruction) = self.instructions.get(machine[Register::Pc].0 as usize) {
+            machine[Register::Pc].0 += 1;
+            match *instruction {
+                Instruction::Imm { imm, dst } => machine[dst] = imm,
+                Instruction::Mov { src, dst } => machine[dst] = machine[src],
+                Instruction::Add { src: (x, y), dst } => machine[dst] = machine[x] + machine[y],
+                Instruction::Load { loc, dst } => {
+                    let loc = machine[loc];
+                    machine[dst] = machine.memory[loc];
+                }
+                Instruction::Store { src, loc } => {
+                    let loc = machine[loc];
+                    machine.memory[loc] = machine[src];
+                }
             }
         }
+
+        machine
     }
 }
