@@ -4,6 +4,13 @@ use crate::*;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Word(u64);
 
+impl std::ops::Add for Word {
+    type Output = Word;
+    fn add(self, other: Word) -> Word {
+        Word(self.0 + other.0)
+    }
+}
+
 /// The state of the virtual machine that `Instruction`s run on.
 pub struct Machine {
     /// The program counter.
@@ -89,11 +96,25 @@ impl Memory {
 /// One instruction in the intermediate representation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Instruction {
+    /// Set the value of a register.
+    Imm {
+        /// The immediate value to write.
+        imm: Word,
+        /// The register to set.
+        dst: Register,
+    },
     /// Copy a value from one register to another.
     Mov {
         /// The register to copy out of.
         src: Register,
         /// The register to copy into.
+        dst: Register,
+    },
+    /// Add two registers together.
+    Add {
+        /// The two source registers.
+        src: (Register, Register),
+        /// The register to store the sum in.
         dst: Register,
     },
     /// Read a value from memory.
@@ -103,14 +124,27 @@ pub enum Instruction {
         /// The register to write the value into.
         dst: Register,
     },
+    /// Write a value into memory.
+    Store {
+        /// The value to write.
+        src: Register,
+        /// The location to write into.
+        loc: Register,
+    },
 }
 
 impl Machine {
     /// Run one `Instruction` on this `Machine`.
     pub fn execute(&mut self, instruction: Instruction) {
         match instruction {
+            Instruction::Imm { imm, dst } => self[dst] = imm,
             Instruction::Mov { src, dst } => self[dst] = self[src],
+            Instruction::Add { src: (x, y), dst } => self[dst] = self[x] + self[y],
             Instruction::Load { src, dst } => self[dst] = self.memory[self[src]],
+            Instruction::Store { src, loc } => {
+                let loc = self[loc];
+                self.memory[loc] = self[src];
+            }
         }
     }
 }
