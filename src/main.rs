@@ -5,6 +5,7 @@
 
 mod bracket;
 mod instruction;
+mod sexp;
 mod state;
 mod tokenize;
 
@@ -74,6 +75,7 @@ pub fn compile(source: Source) -> Result<Vec<String>> {
     let tokens = state.add_table::<Token>();
     state.tokenize(src, tokens, State::ROOT)?;
     state.bracket(tokens, State::ROOT)?;
+    state.sexp(tokens, State::ROOT)?;
 
     eprintln!("{}\n{}", state[src].name, state[src].text);
 

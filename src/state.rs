@@ -194,6 +194,8 @@ impl Debug for OptionNodeId {
     }
 }
 
+// TODO: validation of pointer structure invariants for `state.nodes`
+
 /// A `Table` is used to store one type of information for `Node`s.
 pub struct Table<T>(HashMap<NodeId, T>);
 
