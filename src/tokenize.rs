@@ -67,7 +67,7 @@ pub enum TokenType {
 }
 
 /// One token of an `iz` program. See `State::tokenize`.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     /// The location of this token.
     pub span: Span,
@@ -235,7 +235,7 @@ impl State {
                 }
             };
 
-            let node = self.add_node(parent);
+            let node = self.add_node(parent, span);
             self[tokens].insert(node, Token { span, tag });
 
             idx = span.hi;

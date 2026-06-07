@@ -23,6 +23,7 @@ impl State {
         };
         let src = state.add_source(source);
         state.nodes.push(Node {
+            span: None,
             prev: OptionNodeId::NONE,
             next: OptionNodeId::NONE,
             head: OptionNodeId::NONE,
@@ -39,9 +40,10 @@ impl State {
     }
 
     /// Add a new leaf `Node` to the `State`.
-    pub fn add_node(&mut self, parent: NodeId) -> NodeId {
+    pub fn add_node(&mut self, parent: NodeId, span: Span) -> NodeId {
         let node = NodeId(self.nodes.len());
         self.nodes.push(Node {
+            span: Some(span),
             prev: self[parent].last,
             next: OptionNodeId::NONE,
             head: OptionNodeId::NONE,
@@ -110,6 +112,8 @@ impl Index<SourceId> for State {
 /// A `Node` represents one element of the program that is being compiled.
 #[derive(Debug)]
 pub struct Node {
+    /// Debugging information.
+    pub span: Option<Span>,
     /// The previous sibling.
     pub prev: OptionNodeId,
     /// The next sibling.
