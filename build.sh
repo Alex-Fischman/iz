@@ -1,3 +1,4 @@
+set -e
 clear -x
 git status
 cargo fmt
