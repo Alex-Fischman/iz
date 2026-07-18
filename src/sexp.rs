@@ -56,8 +56,6 @@ mod tests {
         Ok(result)
     }
 
-    // TODO: zero, one, and two children unit tests
-
     #[test]
     fn postorder() -> Result<()> {
         let source = text!("(add (add 1 2) 3)");
@@ -82,6 +80,48 @@ mod tests {
             collect_tokens_postorder(&mut state, tokens)?,
             ["1", "2", "add", "3", "add"]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn unit() -> Result<()> {
+        let source = text!("()");
+        let (mut state, src) = State::new(source);
+        let tokens = state.add_table::<Token>();
+        state.tokenize(src, tokens, State::ROOT)?;
+        state.bracket(tokens, State::ROOT)?;
+        assert_eq!(collect_tokens_postorder(&mut state, tokens)?, ["()"]);
+        state.sexp(tokens, State::ROOT)?;
+        assert_eq!(collect_tokens_postorder(&mut state, tokens)?, ["()"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parenthesized() -> Result<()> {
+        let source = text!("(x)");
+        let (mut state, src) = State::new(source);
+        let tokens = state.add_table::<Token>();
+        state.tokenize(src, tokens, State::ROOT)?;
+        state.bracket(tokens, State::ROOT)?;
+        assert_eq!(collect_tokens_postorder(&mut state, tokens)?, ["x", "(x)"]);
+        state.sexp(tokens, State::ROOT)?;
+        assert_eq!(collect_tokens_postorder(&mut state, tokens)?, ["x"]);
+        Ok(())
+    }
+
+    #[test]
+    fn pair() -> Result<()> {
+        let source = text!("(f x)");
+        let (mut state, src) = State::new(source);
+        let tokens = state.add_table::<Token>();
+        state.tokenize(src, tokens, State::ROOT)?;
+        state.bracket(tokens, State::ROOT)?;
+        assert_eq!(
+            collect_tokens_postorder(&mut state, tokens)?,
+            ["f", "x", "(f x)"]
+        );
+        state.sexp(tokens, State::ROOT)?;
+        assert_eq!(collect_tokens_postorder(&mut state, tokens)?, ["x", "f"]);
         Ok(())
     }
 }
