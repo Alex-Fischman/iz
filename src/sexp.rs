@@ -27,11 +27,11 @@ impl State {
             // fix up the right pointer into `head`
             if let Some(next) = self[head].next.into() {
                 // fix up `next` if we're not at the end
-                debug_assert!(self[next].prev.unwrap() == head);
+                debug_assert_eq!(self[next].prev.unwrap(), head);
                 self[next].prev = OptionNodeId::NONE;
             } else {
                 // fix up `node` if we are at the end
-                debug_assert!(self[node].last.unwrap() == head);
+                debug_assert_eq!(self[node].last.unwrap(), head);
                 self[node].last = OptionNodeId::NONE;
             }
         }
@@ -49,7 +49,7 @@ mod tests {
         let mut result = Vec::new();
         while let Some(node) = postorder.next(state)? {
             match state[tokens].get(node) {
-                None => assert!(node == State::ROOT),
+                None => assert_eq!(node, State::ROOT),
                 Some(Token { span, tag: _ }) => result.push(span.string(state).to_owned()),
             }
         }

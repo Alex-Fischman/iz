@@ -51,11 +51,11 @@ impl State {
                     // remove `right` from children/sibling lists
                     if let Some(next) = next {
                         // fix up `next` if we're not at the end
-                        debug_assert!(self[next].prev.unwrap() == right);
+                        debug_assert_eq!(self[next].prev.unwrap(), right);
                         self[next].prev = OptionNodeId::some(left);
                     } else {
                         // fix up `root` if we are at the end
-                        debug_assert!(self[root].last.unwrap() == right);
+                        debug_assert_eq!(self[root].last.unwrap(), right);
                         self[root].last = OptionNodeId::some(left);
                     }
                 }

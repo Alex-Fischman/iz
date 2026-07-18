@@ -278,10 +278,7 @@ impl State {
 
 impl Postorder {
     fn dive(&mut self, state: &State) {
-        loop {
-            let Some(&parent) = self.0.last() else {
-                break;
-            };
+        while let Some(&parent) = self.0.last() {
             let Some(child) = state[parent].head.into() else {
                 break;
             };

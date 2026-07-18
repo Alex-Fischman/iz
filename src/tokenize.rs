@@ -257,7 +257,7 @@ mod tests {
         let mut out = Vec::new();
         while let Some(node) = postorder.next(state)? {
             match state[tokens].get(node) {
-                None => assert!(node == State::ROOT),
+                None => assert_eq!(node, State::ROOT),
                 Some(Token { span, tag }) => out.push((span.string(state).to_owned(), tag.clone())),
             }
         }
