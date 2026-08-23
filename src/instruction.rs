@@ -2,7 +2,7 @@ use crate::*;
 
 /// A unit of memory on the `Machine`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Word(u64);
+pub struct Word(pub u64);
 
 impl std::ops::Add for Word {
     type Output = Word;

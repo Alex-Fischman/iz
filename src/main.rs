@@ -4,6 +4,7 @@
 #![allow(clippy::missing_errors_doc, clippy::too_many_lines)]
 
 mod bracket;
+mod codegen;
 mod instruction;
 mod sexp;
 mod state;
