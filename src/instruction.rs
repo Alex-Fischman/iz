@@ -135,8 +135,10 @@ pub enum Instruction {
 }
 
 /// A list of `Instruction`s, along with some metadata.
+#[derive(Debug)]
 pub struct Program {
-    instructions: Vec<Instruction>,
+    /// A list of `Instruction`s.
+    pub instructions: Vec<Instruction>,
 }
 
 impl Program {
