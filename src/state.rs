@@ -256,10 +256,33 @@ impl<T: 'static> IndexMut<TableId<T>> for State {
     }
 }
 
-/// A custom `Iterator` trait that can modify `State` and returns a `Result`.
+/// A custom `Iterator` trait that has access to `State` and returns a `Result`.
 pub trait Iterator<T> {
     /// Process the next element.
-    fn next(&mut self, state: &mut State) -> Result<Option<T>>;
+    fn next(&mut self, state: &State) -> Result<Option<T>>;
+}
+
+/// An iterator over the immediate children of a `Node`.
+pub struct Children(OptionNodeId);
+
+impl State {
+    /// Get an iterator over the `NodeId`s of the children of `root`.
+    #[must_use]
+    pub fn children(&self, root: NodeId) -> Children {
+        Children(self[root].head)
+    }
+}
+
+impl Iterator<NodeId> for Children {
+    fn next(&mut self, state: &State) -> Result<Option<NodeId>> {
+        match self.0.into() {
+            None => Ok(None),
+            Some(child) => {
+                self.0 = state[child].next;
+                Ok(Some(child))
+            }
+        }
+    }
 }
 
 /// An iterator over all `Node`s in a tree.
@@ -288,7 +311,7 @@ impl Postorder {
 }
 
 impl Iterator<NodeId> for Postorder {
-    fn next(&mut self, state: &mut State) -> Result<Option<NodeId>> {
+    fn next(&mut self, state: &State) -> Result<Option<NodeId>> {
         let Some(node) = self.0.pop() else {
             return Ok(None);
         };
