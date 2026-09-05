@@ -17,7 +17,7 @@ impl State {
         Ok(token)
     }
 
-    /// Parses tuples into instructions
+    /// Parses tuples into instructions.
     pub fn codegen(
         &mut self,
         tokens: TableId<Token>,
@@ -97,5 +97,78 @@ impl State {
         }
 
         Ok(instructions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static PC: Register = Register::Pc;
+    static SP: Register = Register::Sp;
+    static GP0: Register = Register::Gp(0);
+    static GP1: Register = Register::Gp(1);
+    static GP2: Register = Register::Gp(2);
+
+    macro_rules! instr {
+        ($imm:literal -> $dst:ident) => {
+            Instruction::Imm {
+                imm: Word($imm),
+                dst: $dst,
+            }
+        };
+        ($src:ident -> $dst:ident) => {
+            Instruction::Mov {
+                src: $src,
+                dst: $dst,
+            }
+        };
+        ($x:ident + $y:ident -> $z:ident) => {
+            Instruction::Add {
+                src: ($x, $y),
+                dst: $z,
+            }
+        };
+        (mem[$loc:ident] -> $dst:ident) => {
+            Instruction::Load {
+                loc: $loc,
+                dst: $dst,
+            }
+        };
+        ($src:ident -> mem[$loc:ident]) => {
+            Instruction::Store {
+                src: $src,
+                loc: $loc,
+            }
+        };
+    }
+
+    fn run_test(source: Source, expected: &[Instruction]) -> Result<()> {
+        let (mut state, src) = State::new(source);
+        let tokens = state.add_table::<Token>();
+        state.tokenize(src, tokens, State::ROOT)?;
+        state.bracket(tokens, State::ROOT)?;
+        state.sexp(tokens, State::ROOT)?;
+        let instructions = state.codegen(tokens, State::ROOT)?;
+        let mut program = Vec::new();
+        let mut children = state.children(State::ROOT);
+        while let Some(child) = children.next(&state)? {
+            program.push(state[instructions][child]);
+        }
+        assert_eq!(program, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn basic() -> Result<()> {
+        run_test(text!("(imm 17 gp0)"), &[instr!(17 -> GP0)])?;
+        run_test(text!("(mov gp0 gp1)"), &[instr!(GP0 -> GP1)])?;
+        run_test(text!("(add gp0 gp1 gp2)"), &[instr!(GP0 + GP1 -> GP2)])?;
+        run_test(text!("(load sp gp2)"), &[instr!(mem[SP] -> GP2)])?;
+        run_test(text!("(store pc gp1)"), &[instr!(PC -> mem[GP1])])?;
+        run_test(
+            text!("(imm 17 gp0) (mov gp0 gp1)"),
+            &[instr!(17 -> GP0), instr!(GP0 -> GP1)],
+        )
     }
 }
