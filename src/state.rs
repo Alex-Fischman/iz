@@ -393,3 +393,49 @@ impl Iterator for Postorder {
         Ok(Some(node))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iterators() -> Result<()> {
+        let (mut state, src) = State::new(text!("abcb1b2"));
+
+        let a = state.add_node(State::ROOT, Span { src, lo: 0, hi: 1 });
+        let b = state.add_node(State::ROOT, Span { src, lo: 1, hi: 2 });
+        let c = state.add_node(State::ROOT, Span { src, lo: 2, hi: 3 });
+        let b1 = state.add_node(b, Span { src, lo: 3, hi: 5 });
+        let b2 = state.add_node(b, Span { src, lo: 5, hi: 7 });
+
+        assert_eq!(state.children(State::ROOT).collect(&state)?, [a, b, c]);
+        assert_eq!(state.children(a).collect(&state)?, []);
+        assert_eq!(state.children(b).collect(&state)?, [b1, b2]);
+        assert_eq!(state.children(c).collect(&state)?, []);
+        assert_eq!(state.children(b1).collect(&state)?, []);
+        assert_eq!(state.children(b2).collect(&state)?, []);
+
+        assert_eq!(
+            state
+                .children(State::ROOT)
+                .map(|child| state[child].span.unwrap().string(&state))
+                .collect(&state)?,
+            ["a", "b", "c"]
+        );
+
+        assert_eq!(
+            state.postorder(State::ROOT).collect(&state)?,
+            [a, b1, b2, b, c, State::ROOT]
+        );
+
+        assert_eq!(
+            state
+                .postorder(State::ROOT)
+                .filter_map(|node| state[node].span.map(|span| span.string(&state)))
+                .collect(&state)?,
+            ["a", "b1", "b2", "b", "c"]
+        );
+
+        Ok(())
+    }
+}
