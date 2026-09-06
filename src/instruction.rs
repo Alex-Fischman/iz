@@ -12,6 +12,7 @@ impl std::ops::Add for Word {
 }
 
 /// The state of the virtual machine that `Instruction`s run on.
+#[derive(Debug, PartialEq)]
 pub struct Machine {
     /// The program counter.
     pc: Word,
@@ -56,41 +57,78 @@ impl IndexMut<Register> for Machine {
 }
 
 /// The `Word`-addressable memory available to the program.
-#[derive(Default)]
-pub struct Memory(Vec<Vec<Word>>);
-
-fn word_to_address(Word(word): Word) -> (usize, usize) {
-    #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
-    ((((word >> 32) as u32) as usize), ((word as u32) as usize))
+#[derive(Debug, Default, PartialEq)]
+pub struct Memory {
+    stack: Vec<Word>,
+    heap: Vec<Vec<Word>>,
 }
 
-fn address_to_word(hi: usize, lo: usize) -> Word {
-    #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
-    Word(((hi as u32 as u64) << 32) | (lo as u32 as u64))
+enum Address {
+    Stack { index: usize },
+    Heap { allocation: usize, index: usize },
+}
+
+impl From<Word> for Address {
+    fn from(Word(word): Word) -> Address {
+        #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
+        let (region, index) = ((((word >> 32) as u32) as usize), ((word as u32) as usize));
+        if region == 0 {
+            Address::Stack { index }
+        } else {
+            Address::Heap {
+                allocation: region - 1,
+                index,
+            }
+        }
+    }
+}
+
+impl From<Address> for Word {
+    fn from(address: Address) -> Word {
+        let (region, index) = match address {
+            Address::Stack { index } => (0, index),
+            Address::Heap { allocation, index } => (allocation + 1, index),
+        };
+        #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
+        Word(((region as u32 as u64) << 32) | (index as u32 as u64))
+    }
 }
 
 impl Index<Word> for Memory {
     type Output = Word;
+
     fn index(&self, word: Word) -> &Word {
-        let (hi, lo) = word_to_address(word);
-        &self.0[hi][lo]
+        match word.into() {
+            Address::Stack { index } => &self.stack[index],
+            Address::Heap { allocation, index } => &self.heap[allocation][index],
+        }
     }
 }
 
 impl IndexMut<Word> for Memory {
     fn index_mut(&mut self, word: Word) -> &mut Word {
-        let (hi, lo) = word_to_address(word);
-        &mut self.0[hi][lo]
+        match word.into() {
+            Address::Stack { index } => {
+                if self.stack.len() <= index {
+                    self.stack.resize(index + 1, Word(0));
+                }
+                &mut self.stack[index]
+            }
+            Address::Heap { allocation, index } => &mut self.heap[allocation][index],
+        }
     }
 }
 
 impl Memory {
     /// Allocate a new region of memory with the given size.
     pub fn allocate(&mut self, size: Word) -> Word {
-        let out = address_to_word(self.0.len(), 0);
+        let address = Address::Heap {
+            allocation: self.heap.len(),
+            index: 0,
+        };
         #[allow(clippy::cast_possible_truncation)]
-        self.0.push(vec![Word(0); size.0 as usize]);
-        out
+        self.heap.push(vec![Word(0); size.0 as usize]);
+        address.into()
     }
 }
 
@@ -191,7 +229,7 @@ impl Program {
     pub fn execute(&self) -> Machine {
         let mut machine = Machine {
             pc: Word(0),
-            sp: Word(0),
+            sp: Address::Stack { index: 0 }.into(),
             gp: vec![Word(0); self.gp_register_count()],
             memory: Memory::default(),
         };
