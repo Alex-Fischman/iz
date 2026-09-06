@@ -217,3 +217,5 @@ impl Program {
         machine
     }
 }
+
+// TODO: test `Program::execute`
