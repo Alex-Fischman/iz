@@ -263,6 +263,40 @@ pub trait Iterator {
 
     /// Process the next element.
     fn next(&mut self, state: &State) -> Result<Option<Self::Item>>;
+
+    /// Map a function over this iterator.
+    fn map<T, F: FnMut(Self::Item) -> T>(self, func: F) -> Map<Self, F>
+    where
+        Self: Sized,
+    {
+        Map { iter: self, func }
+    }
+
+    /// Collect the results into a `Vec`.
+    fn collect(&mut self, state: &State) -> Result<Vec<Self::Item>> {
+        let mut vec = Vec::new();
+        while let Some(item) = self.next(state)? {
+            vec.push(item);
+        }
+        Ok(vec)
+    }
+}
+
+/// The result of `Iterator::map`.
+pub struct Map<I, F> {
+    iter: I,
+    func: F,
+}
+
+impl<T, I: Iterator, F: FnMut(I::Item) -> T> Iterator for Map<I, F> {
+    type Item = T;
+
+    fn next(&mut self, state: &State) -> Result<Option<T>> {
+        match self.iter.next(state)? {
+            None => Ok(None),
+            Some(item) => Ok(Some((self.func)(item))),
+        }
+    }
 }
 
 /// An iterator over the immediate children of a `Node`.
