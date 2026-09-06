@@ -216,7 +216,10 @@ impl Program {
     /// Get the index of the highest `Register::Gp` in this `Program`.
     #[must_use]
     pub fn gp_register_count(&self) -> usize {
-        self.gp_registers().max().unwrap_or(0)
+        match self.gp_registers().max() {
+            None => 0,
+            Some(max) => max + 1,
+        }
     }
 
     /// Increment all `Register::Gp`s in this `Program` by the given amount.
@@ -301,5 +304,31 @@ pub mod tests {
         };
     }
 
-    // TODO: test `Program::execute`
+    #[test]
+    fn execute() {
+        let program = Program {
+            instructions: vec![
+                instr!(1 -> GP0),
+                instr!(SP + GP0 -> SP),
+                instr!(GP0 + GP0 -> GP1),
+                instr!(GP1 -> mem[SP]),
+                instr!(GP0 -> GP2),
+                instr!(mem[SP] -> GP2),
+                instr!(GP0 + GP1 -> GP1),
+            ],
+        };
+        let machine = program.execute();
+        assert_eq!(
+            machine,
+            Machine {
+                pc: Word(7),
+                sp: Word(1),
+                gp: vec![Word(1), Word(3), Word(2)],
+                memory: Memory {
+                    stack: vec![Word(0), Word(2)],
+                    heap: vec![],
+                },
+            }
+        );
+    }
 }
