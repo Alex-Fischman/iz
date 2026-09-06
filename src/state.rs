@@ -272,6 +272,14 @@ pub trait Iterator {
         Map { iter: self, func }
     }
 
+    /// Map a function over this iterator, discarding `None`s.
+    fn filter_map<T, F: FnMut(Self::Item) -> Option<T>>(self, func: F) -> FilterMap<Self, F>
+    where
+        Self: Sized,
+    {
+        FilterMap { iter: self, func }
+    }
+
     /// Collect the results into a `Vec`.
     fn collect(&mut self, state: &State) -> Result<Vec<Self::Item>> {
         let mut vec = Vec::new();
@@ -294,7 +302,27 @@ impl<T, I: Iterator, F: FnMut(I::Item) -> T> Iterator for Map<I, F> {
     fn next(&mut self, state: &State) -> Result<Option<T>> {
         match self.iter.next(state)? {
             None => Ok(None),
-            Some(item) => Ok(Some((self.func)(item))),
+            Some(x) => Ok(Some((self.func)(x))),
+        }
+    }
+}
+
+/// The result of `Iterator::filter_map`.
+pub struct FilterMap<I, F> {
+    iter: I,
+    func: F,
+}
+
+impl<T, I: Iterator, F: FnMut(I::Item) -> Option<T>> Iterator for FilterMap<I, F> {
+    type Item = T;
+
+    fn next(&mut self, state: &State) -> Result<Option<T>> {
+        match self.iter.next(state)? {
+            None => Ok(None),
+            Some(x) => match (self.func)(x) {
+                Some(y) => Ok(Some(y)),
+                None => self.next(state),
+            },
         }
     }
 }
