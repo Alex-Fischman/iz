@@ -82,6 +82,11 @@ impl State {
                     let dst = reg(self, &mut next_child)?;
                     instruct(self, Instruction::Add { src, dst })?;
                 }
+                "sub" => {
+                    let src = (reg(self, &mut next_child)?, reg(self, &mut next_child)?);
+                    let dst = reg(self, &mut next_child)?;
+                    instruct(self, Instruction::Sub { src, dst })?;
+                }
                 "load" => {
                     let loc = reg(self, &mut next_child)?;
                     let dst = reg(self, &mut next_child)?;
@@ -125,6 +130,7 @@ mod tests {
         run_test(text!("(imm 17 gp0)"), &[instr!(17 -> GP0)])?;
         run_test(text!("(mov gp0 gp1)"), &[instr!(GP0 -> GP1)])?;
         run_test(text!("(add gp0 gp1 gp2)"), &[instr!(GP0 + GP1 -> GP2)])?;
+        run_test(text!("(sub gp0 gp1 gp2)"), &[instr!(GP0 - GP1 -> GP2)])?;
         run_test(text!("(load sp gp2)"), &[instr!(mem[SP] -> GP2)])?;
         run_test(text!("(store pc gp1)"), &[instr!(PC -> mem[GP1])])?;
         run_test(

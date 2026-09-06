@@ -1,13 +1,22 @@
 use crate::*;
 
 /// A unit of memory on the `Machine`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Word(pub u64);
 
 impl std::ops::Add for Word {
     type Output = Word;
+
     fn add(self, other: Word) -> Word {
         Word(self.0 + other.0)
+    }
+}
+
+impl std::ops::Sub for Word {
+    type Output = Word;
+
+    fn sub(self, other: Word) -> Word {
+        Word(self.0 - other.0)
     }
 }
 
@@ -58,77 +67,19 @@ impl IndexMut<Register> for Machine {
 
 /// The `Word`-addressable memory available to the program.
 #[derive(Debug, Default, PartialEq)]
-pub struct Memory {
-    stack: Vec<Word>,
-    heap: Vec<Vec<Word>>,
-}
-
-enum Address {
-    Stack { index: usize },
-    Heap { allocation: usize, index: usize },
-}
-
-impl From<Word> for Address {
-    fn from(Word(word): Word) -> Address {
-        #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
-        let (region, index) = ((((word >> 32) as u32) as usize), ((word as u32) as usize));
-        if region == 0 {
-            Address::Stack { index }
-        } else {
-            Address::Heap {
-                allocation: region - 1,
-                index,
-            }
-        }
-    }
-}
-
-impl From<Address> for Word {
-    fn from(address: Address) -> Word {
-        let (region, index) = match address {
-            Address::Stack { index } => (0, index),
-            Address::Heap { allocation, index } => (allocation + 1, index),
-        };
-        #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
-        Word(((region as u32 as u64) << 32) | (index as u32 as u64))
-    }
-}
+pub struct Memory(HashMap<Word, Word>);
 
 impl Index<Word> for Memory {
     type Output = Word;
 
     fn index(&self, word: Word) -> &Word {
-        match word.into() {
-            Address::Stack { index } => &self.stack[index],
-            Address::Heap { allocation, index } => &self.heap[allocation][index],
-        }
+        &self.0[&word]
     }
 }
 
 impl IndexMut<Word> for Memory {
     fn index_mut(&mut self, word: Word) -> &mut Word {
-        match word.into() {
-            Address::Stack { index } => {
-                if self.stack.len() <= index {
-                    self.stack.resize(index + 1, Word(0));
-                }
-                &mut self.stack[index]
-            }
-            Address::Heap { allocation, index } => &mut self.heap[allocation][index],
-        }
-    }
-}
-
-impl Memory {
-    /// Allocate a new region of memory with the given size.
-    pub fn allocate(&mut self, size: Word) -> Word {
-        let address = Address::Heap {
-            allocation: self.heap.len(),
-            index: 0,
-        };
-        #[allow(clippy::cast_possible_truncation)]
-        self.heap.push(vec![Word(0); size.0 as usize]);
-        address.into()
+        self.0.entry(word).or_default()
     }
 }
 
@@ -149,8 +100,15 @@ pub enum Instruction {
         /// The register to copy into.
         dst: Register,
     },
-    /// Add two registers together.
+    /// Add two registers.
     Add {
+        /// The two source registers.
+        src: (Register, Register),
+        /// The register to store the sum in.
+        dst: Register,
+    },
+    /// Subtract two registers.
+    Sub {
         /// The two source registers.
         src: (Register, Register),
         /// The register to store the sum in.
@@ -186,7 +144,9 @@ impl Program {
             .flat_map(|instruction| match instruction {
                 Instruction::Imm { imm: _, dst } => vec![dst],
                 Instruction::Mov { src, dst } => vec![src, dst],
-                Instruction::Add { src: (x, y), dst } => vec![x, y, dst],
+                Instruction::Add { src: (x, y), dst } | Instruction::Sub { src: (x, y), dst } => {
+                    vec![x, y, dst]
+                }
                 Instruction::Load { loc, dst } => vec![loc, dst],
                 Instruction::Store { src, loc } => vec![src, loc],
             })
@@ -203,7 +163,9 @@ impl Program {
             .flat_map(|instruction| match instruction {
                 Instruction::Imm { imm: _, dst } => vec![dst],
                 Instruction::Mov { src, dst } => vec![src, dst],
-                Instruction::Add { src: (x, y), dst } => vec![x, y, dst],
+                Instruction::Add { src: (x, y), dst } | Instruction::Sub { src: (x, y), dst } => {
+                    vec![x, y, dst]
+                }
                 Instruction::Load { loc, dst } => vec![loc, dst],
                 Instruction::Store { src, loc } => vec![src, loc],
             })
@@ -232,7 +194,7 @@ impl Program {
     pub fn execute(&self) -> Machine {
         let mut machine = Machine {
             pc: Word(0),
-            sp: Address::Stack { index: 0 }.into(),
+            sp: Word(u64::MAX),
             gp: vec![Word(0); self.gp_register_count()],
             memory: Memory::default(),
         };
@@ -244,6 +206,7 @@ impl Program {
                 Instruction::Imm { imm, dst } => machine[dst] = imm,
                 Instruction::Mov { src, dst } => machine[dst] = machine[src],
                 Instruction::Add { src: (x, y), dst } => machine[dst] = machine[x] + machine[y],
+                Instruction::Sub { src: (x, y), dst } => machine[dst] = machine[x] - machine[y],
                 Instruction::Load { loc, dst } => {
                     let loc = machine[loc];
                     machine[dst] = machine.memory[loc];
@@ -290,6 +253,12 @@ pub mod tests {
                 dst: $z,
             }
         };
+        ($x:ident - $y:ident -> $z:ident) => {
+            Instruction::Sub {
+                src: ($x, $y),
+                dst: $z,
+            }
+        };
         (mem[$loc:ident] -> $dst:ident) => {
             Instruction::Load {
                 loc: $loc,
@@ -309,7 +278,7 @@ pub mod tests {
         let program = Program {
             instructions: vec![
                 instr!(1 -> GP0),
-                instr!(SP + GP0 -> SP),
+                instr!(SP - GP0 -> SP),
                 instr!(GP0 + GP0 -> GP1),
                 instr!(GP1 -> mem[SP]),
                 instr!(GP0 -> GP2),
@@ -322,12 +291,9 @@ pub mod tests {
             machine,
             Machine {
                 pc: Word(7),
-                sp: Word(1),
+                sp: Word(u64::MAX - 1),
                 gp: vec![Word(1), Word(3), Word(2)],
-                memory: Memory {
-                    stack: vec![Word(0), Word(2)],
-                    heap: vec![],
-                },
+                memory: Memory(HashMap::from([(Word(u64::MAX - 1), Word(2))])),
             }
         );
     }
