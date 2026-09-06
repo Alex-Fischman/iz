@@ -103,45 +103,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static PC: Register = Register::Pc;
-    static SP: Register = Register::Sp;
-    static GP0: Register = Register::Gp(0);
-    static GP1: Register = Register::Gp(1);
-    static GP2: Register = Register::Gp(2);
-
-    macro_rules! instr {
-        ($imm:literal -> $dst:ident) => {
-            Instruction::Imm {
-                imm: Word($imm),
-                dst: $dst,
-            }
-        };
-        ($src:ident -> $dst:ident) => {
-            Instruction::Mov {
-                src: $src,
-                dst: $dst,
-            }
-        };
-        ($x:ident + $y:ident -> $z:ident) => {
-            Instruction::Add {
-                src: ($x, $y),
-                dst: $z,
-            }
-        };
-        (mem[$loc:ident] -> $dst:ident) => {
-            Instruction::Load {
-                loc: $loc,
-                dst: $dst,
-            }
-        };
-        ($src:ident -> mem[$loc:ident]) => {
-            Instruction::Store {
-                src: $src,
-                loc: $loc,
-            }
-        };
-    }
+    use instruction::tests::*;
 
     fn run_test(source: Source, expected: &[Instruction]) -> Result<()> {
         let (mut state, src) = State::new(source);

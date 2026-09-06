@@ -10,7 +10,7 @@ mod sexp;
 mod state;
 mod tokenize;
 
-pub use instruction::*;
+pub use instruction::{Instruction, Memory, Program, Register, Word};
 pub use state::*;
 pub use tokenize::*;
 

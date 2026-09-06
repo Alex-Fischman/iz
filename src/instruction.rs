@@ -218,4 +218,50 @@ impl Program {
     }
 }
 
-// TODO: test `Program::execute`
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub static PC: Register = Register::Pc;
+    pub static SP: Register = Register::Sp;
+    pub static GP0: Register = Register::Gp(0);
+    pub static GP1: Register = Register::Gp(1);
+    pub static GP2: Register = Register::Gp(2);
+
+    /// Sublanguage for intuitively writing `Instruction`s.
+    #[macro_export]
+    macro_rules! instr {
+        ($imm:literal -> $dst:ident) => {
+            Instruction::Imm {
+                imm: Word($imm),
+                dst: $dst,
+            }
+        };
+        ($src:ident -> $dst:ident) => {
+            Instruction::Mov {
+                src: $src,
+                dst: $dst,
+            }
+        };
+        ($x:ident + $y:ident -> $z:ident) => {
+            Instruction::Add {
+                src: ($x, $y),
+                dst: $z,
+            }
+        };
+        (mem[$loc:ident] -> $dst:ident) => {
+            Instruction::Load {
+                loc: $loc,
+                dst: $dst,
+            }
+        };
+        ($src:ident -> mem[$loc:ident]) => {
+            Instruction::Store {
+                src: $src,
+                loc: $loc,
+            }
+        };
+    }
+
+    // TODO: test `Program::execute`
+}
