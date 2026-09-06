@@ -150,11 +150,10 @@ mod tests {
         state.bracket(tokens, State::ROOT)?;
         state.sexp(tokens, State::ROOT)?;
         let instructions = state.codegen(tokens, State::ROOT)?;
-        let mut program = Vec::new();
-        let mut children = state.children(State::ROOT);
-        while let Some(child) = children.next(&state)? {
-            program.push(state[instructions][child]);
-        }
+        let program = state
+            .children(State::ROOT)
+            .map(|child| state[instructions][child])
+            .collect(&state)?;
         assert_eq!(program, expected);
         Ok(())
     }

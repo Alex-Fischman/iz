@@ -45,15 +45,17 @@ mod tests {
     use super::*;
 
     fn collect_tokens_postorder(state: &mut State, tokens: TableId<Token>) -> Result<Vec<String>> {
-        let mut postorder = state.postorder(State::ROOT);
-        let mut result = Vec::new();
-        while let Some(node) = postorder.next(state)? {
-            match state[tokens].get(node) {
-                None => assert_eq!(node, State::ROOT),
-                Some(Token { span, tag: _ }) => result.push(span.string(state).to_owned()),
-            }
-        }
-        Ok(result)
+        state
+            .postorder(State::ROOT)
+            .filter_map(|node| {
+                if let Some(Token { span, tag: _ }) = state[tokens].get(node) {
+                    Some(span.string(state).to_owned())
+                } else {
+                    assert_eq!(node, State::ROOT);
+                    None
+                }
+            })
+            .collect(state)
     }
 
     #[test]

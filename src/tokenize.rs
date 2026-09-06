@@ -251,17 +251,18 @@ mod tests {
 
     fn collect_tokens(state: &mut State, src: SourceId) -> Result<Vec<(String, TokenType)>> {
         let tokens = state.add_table::<Token>();
-        let () = state.tokenize(src, tokens, State::ROOT)?;
-
-        let mut postorder = state.postorder(State::ROOT);
-        let mut out = Vec::new();
-        while let Some(node) = postorder.next(state)? {
-            match state[tokens].get(node) {
-                None => assert_eq!(node, State::ROOT),
-                Some(Token { span, tag }) => out.push((span.string(state).to_owned(), tag.clone())),
-            }
-        }
-        Ok(out)
+        state.tokenize(src, tokens, State::ROOT)?;
+        state
+            .postorder(State::ROOT)
+            .filter_map(|node| {
+                if let Some(Token { span, tag }) = state[tokens].get(node) {
+                    Some((span.string(state).to_owned(), tag.clone()))
+                } else {
+                    assert_eq!(node, State::ROOT);
+                    None
+                }
+            })
+            .collect(state)
     }
 
     macro_rules! token {
