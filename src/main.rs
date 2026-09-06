@@ -71,16 +71,18 @@ macro_rules! err {
 }
 
 /// Compile a `Source` down to `Instruction`s.
-pub fn compile(source: Source) -> Result<Vec<String>> {
+pub fn compile(source: Source) -> Result<Program> {
     let (mut state, src) = State::new(source);
     let tokens = state.add_table::<Token>();
     state.tokenize(src, tokens, State::ROOT)?;
     state.bracket(tokens, State::ROOT)?;
     state.sexp(tokens, State::ROOT)?;
-
-    eprintln!("{}\n{}", state[src].name, state[src].text);
-
-    Ok(Vec::new())
+    let instructions = state.codegen(tokens, State::ROOT)?;
+    let instructions = state
+        .children(State::ROOT)
+        .map(|child| state[instructions][child])
+        .collect(&state)?;
+    Ok(Program { instructions })
 }
 
 fn main() -> std::process::ExitCode {
@@ -88,7 +90,8 @@ fn main() -> std::process::ExitCode {
         let args: Vec<_> = std::env::args().collect();
         let name = args.get(1).ok_or("usage: pass a .iz file")?.clone();
         let source = Source::from_file(name)?;
-        let _instructions = compile(source)?;
+        let program = compile(source)?;
+        let _machine = program.execute();
         Ok::<(), String>(())
     })() {
         Ok(()) => std::process::ExitCode::SUCCESS,
@@ -105,8 +108,8 @@ mod tests {
 
     #[test]
     fn empty_program_ok() -> Result<()> {
-        let instructions = compile(text!(""))?;
-        assert!(instructions.is_empty());
+        let program = compile(text!(""))?;
+        assert!(program.instructions.is_empty());
         Ok(())
     }
 }
